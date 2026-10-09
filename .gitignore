@@ -1,0 +1,22 @@
+node_modules/
+dist/
+out/
+.env
+.env.*
+!.env.example
+*.enc.json
+*.pem
+*.key
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.pdf
+*.zip
+.DS_Store
+coverage/
+playwright-report/
+test-results/
+
+# Local live-test reports and screenshots
+out/iteration-*-checks/

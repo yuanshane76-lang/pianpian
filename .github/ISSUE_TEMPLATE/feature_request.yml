@@ -1,0 +1,30 @@
+name: 功能需求
+description: 说明用户场景、范围和可验证的完成条件
+title: "[功能] "
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 用户场景
+      description: 谁在什么情况下遇到了什么问题？
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 期望交互
+      description: 描述用户从操作到结果的过程。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收条件
+      description: 列出可以实际验证的结果，以及本次不包含的范围。
+    validations:
+      required: true
+  - type: textarea
+    id: ownership
+    attributes:
+      label: 文件归属与依赖
+      description: 认领者、主要文件、共享协议和需要协调的任务。

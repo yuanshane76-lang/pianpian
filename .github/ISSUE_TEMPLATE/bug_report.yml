@@ -1,0 +1,28 @@
+name: 问题报告
+description: 描述可复现的问题及预期行为
+title: "[问题] "
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 实际行为与预期行为
+      description: 说明哪里不好用，以及你希望发生什么。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      description: 从启动或导入开始；PDF 问题注明页码、缩放、侧栏和解析状态。
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境与证据
+      description: Windows 版本、应用版本、截图或已脱敏的错误。不要附密钥、私有论文或文献库。
+  - type: textarea
+    id: ownership
+    attributes:
+      label: 任务范围与文件归属
+      description: 开发者认领时填写计划涉及的文件，以及需要协调的并行任务。

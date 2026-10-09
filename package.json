@@ -1,0 +1,42 @@
+{
+  "name": "zhiyan-workbench",
+  "productName": "纸研工作台",
+  "version": "0.3.0",
+  "private": true,
+  "description": "纸研工作台：中文本地论文阅读与研究工作空间。",
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "desktop:dev": "concurrently -k -s first \"npm:dev\" \"npm:desktop:electron\"",
+    "desktop:electron": "wait-on http://127.0.0.1:4173 && electron .",
+    "build": "tsc --noEmit && vite build",
+    "make:win": "npm run check && electron-forge make --platform=win32 --arch=x64",
+    "test": "vitest",
+    "test:watch": "vitest",
+    "check:credentials": "node scripts/check-credentials.cjs",
+    "check": "npm run check:credentials && npm test -- --run && npm run build"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "pdfjs-dist": "^4.10.38",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^8.0.1",
+    "@electron-forge/maker-zip": "^8.0.1",
+    "@types/node": "^26.6.3",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "electron": "^44.5.1",
+    "jsdom": "^25.0.1",
+    "playwright": "1.63.0",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.1",
+    "vitest": "^2.1.8",
+    "wait-on": "^8.0.1"
+  }
+}

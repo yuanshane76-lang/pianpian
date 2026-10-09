@@ -1,0 +1,896 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, X } from "lucide-react";
+import {
+  getDocumentBlockSignature,
+  getDocumentContentSignature,
+  getDocumentSourceSignature,
+  type DocumentBlock,
+} from "../domain/documentBlocks";
+import {
+  buildAnalysisCacheKey,
+  getCachedAnalysis,
+  setCachedAnalysis,
+  type AnalysisCacheEntry,
+} from "../domain/analysis";
+import {
+  filterPapers,
+  removePaper,
+  sortPapers,
+  updatePaperMetadata,
+  type PaperMetadataPatch,
+  type PaperRecord,
+} from "../domain/library";
+import type { AiRequest } from "../services/ai";
+import { loadAnalysisCache, saveAnalysisCache } from "../services/analysisCache";
+import { preparePdfFile, loadPapers, savePapers } from "../services/library";
+import { extractPdfBlocks } from "../services/document";
+import { deleteOriginalPdf, readOriginalPdf } from "../services/originalPdf";
+import { getAnalysisAvailability, getTranslationTarget } from "../domain/readingFlow";
+import { hasPageBounds } from "../domain/pdfLayout";
+import { pipelineStageLabel, selectInitialTranslationBlocks, type PaperPipelineState } from "../domain/pipeline";
+import { parseParagraphInsight, parseReadingGuide } from "../domain/learning";
+import { extractAcademicVocabulary } from "../domain/vocabulary";
+import { TranslationQueue, type TranslationQueueSnapshot } from "../services/translationQueue";
+import { LibraryView } from "../features/library/LibraryView";
+import { ReaderView } from "../features/reader/ReaderView";
+import { ServiceSettingsDialog } from "../features/settings/ServiceSettingsDialog";
+import { DEFAULT_SERVICE_SETTINGS, toPublicServiceSettings, type PublicServiceSettings } from "../domain/serviceSettings";
+import { getDesktopBridge } from "../platform/electron";
+
+type AppView = "library" | "reader";
+
+export default function App() {
+  const [papers, setPapers] = useState<PaperRecord[]>(() => loadPapers());
+  const [view, setView] = useState<AppView>("library");
+  const [selectedPaperId, setSelectedPaperId] = useState<string | null>(papers[0]?.id ?? null);
+  const [selectedBlock, setSelectedBlock] = useState<DocumentBlock | null>(null);
+  const selectedBlockRef = useRef<DocumentBlock | null>(null);
+  const [selectionText, setSelectionText] = useState("");
+  const [processing, setProcessing] = useState<Record<string, string>>({});
+  const activeParsing = useRef(new Set<string>());
+  const activeBasicParsing = useRef(new Set<string>());
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [analysisCache, setAnalysisCache] = useState<Map<string, AnalysisCacheEntry>>(() =>
+    loadAnalysisCache(),
+  );
+  const selectedPaperIdRef = useRef(selectedPaperId);
+  const analysisRequestIdRef = useRef(0);
+  const [translations, setTranslations] = useState<Record<string, string>>({});
+  const [streamingTranslations, setStreamingTranslations] = useState<Record<string, string>>({});
+  const [explanations, setExplanations] = useState<Record<string, string>>({});
+  const [answer, setAnswer] = useState<string | null>(null);
+  const [streamingOutput, setStreamingOutput] = useState<{ operation: AiRequest["operation"]; paperId: string; text: string } | null>(null);
+  const [isBusy, setIsBusy] = useState(false);
+  const [pendingAction, setPendingAction] = useState<"translate" | "qa" | "insight" | "guide" | "overview" | "explain" | null>(null);
+  const [importing, setImporting] = useState(false);
+  const importingRef = useRef(false);
+  const [cloudApprovalOpen, setCloudApprovalOpen] = useState(false);
+  const [rememberCloudApproval, setRememberCloudApproval] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [storageError, setStorageError] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [serviceSettings, setServiceSettings] = useState<PublicServiceSettings>(() =>
+    toPublicServiceSettings(DEFAULT_SERVICE_SETTINGS),
+  );
+  const [settingsReady, setSettingsReady] = useState(!getDesktopBridge());
+  const [actionError, setActionError] = useState<string | null>(null);
+  const activeAnalysisAbortRef = useRef<AbortController | null>(null);
+  const translationQueueRef = useRef(new TranslationQueue());
+  const [pipelineStates, setPipelineStates] = useState<Record<string, PaperPipelineState>>({});
+
+  function cancelActiveAnalysis() {
+    activeAnalysisAbortRef.current?.abort();
+    activeAnalysisAbortRef.current = null;
+  }
+
+  function invalidateAnalysisRequests() {
+    cancelActiveAnalysis();
+    analysisRequestIdRef.current += 1;
+    setStreamingOutput(null);
+  }
+
+  useEffect(() => () => cancelActiveAnalysis(), []);
+
+  useEffect(() => {
+    const bridge = getDesktopBridge();
+    if (!bridge) return;
+    bridge.invoke<PublicServiceSettings>("zhiyan:settings:get")
+      .then((settings) => {
+        setServiceSettings(settings);
+        setPapers((current) => current.map((paper) => ({ ...paper, overview: null })));
+        return bridge.invoke<Array<{
+          paperId: string;
+          task: { batchId?: string; state?: string; progress?: number; error?: string } | null;
+          result: { blocks: DocumentBlock[]; title?: string; pageCount?: number } | null;
+          layoutRecoveryNeeded?: boolean;
+        }>>("zhiyan:documents:states", papers
+          .filter((paper) => paper.originalId)
+          .map((paper) => ({ paperId: paper.id, documentId: paper.originalId })));
+      })
+      .then((states) => {
+        if (!Array.isArray(states)) return;
+        setPapers((current) => current.map((paper) => {
+          const state = states.find((item) => item.paperId === paper.id);
+          if (!state) return paper;
+          if (state.result?.blocks?.length) {
+            return {
+              ...paper,
+              blockData: state.result.blocks,
+              blocks: state.result.blocks.length,
+              title: state.result.title || paper.title,
+              pageCount: paper.pageCount || state.result.pageCount,
+              parseStatus: "ready",
+              parseError: undefined,
+              mineruBatchId: state.layoutRecoveryNeeded ? state.task?.batchId : undefined,
+            };
+          }
+          if (state.task?.batchId && (state.layoutRecoveryNeeded || ["waiting-file", "pending", "running", "converting", "downloading"].includes(state.task.state || ""))) {
+            return { ...paper, mineruBatchId: state.task.batchId, parseError: undefined };
+          }
+          if (state.task?.state === "failed") {
+            return { ...paper, mineruBatchId: state.task.batchId, parseError: state.task.error || "MinerU 解析失败，可重试" };
+          }
+          return paper;
+        }));
+        for (const item of states) {
+          const paper = papersRef.current.find((candidate) => candidate.id === item.paperId);
+          if (!paper) continue;
+          if (item.layoutRecoveryNeeded) {
+            updatePipeline(paper.id, { stage: "mineru-downloading", source: "mineru", mineruMessage: "正在恢复已有 MinerU 任务的段落坐标…" });
+          } else if (item.result?.blocks?.length) {
+            const positioned = item.result.blocks.some(hasPageBounds);
+            updatePipeline(paper.id, { stage: positioned ? "ready" : "partial", source: "mineru", mineruMessage: positioned ? "PDF 已就绪，MinerU 交互层已叠加" : "MinerU 结果不含可用坐标，原文仍可阅读；可重新解析" });
+            enqueuePreviewTranslations({ ...paper, blockData: item.result.blocks, blocks: item.result.blocks.length }, item.result.blocks);
+          } else if (item.task?.batchId && ["waiting-file", "pending", "running", "converting", "downloading"].includes(item.task.state || "")) {
+            updatePipeline(paper.id, {
+              stage: item.task.state === "downloading" ? "mineru-downloading" : "mineru-processing",
+              source: "mineru",
+              mineruMessage: "正在恢复 MinerU 解析任务…",
+            });
+          } else if (item.task?.state === "failed") {
+            updatePipeline(paper.id, { stage: "failed", source: "mineru", error: item.task.error || "MinerU 解析失败，可重试" });
+          }
+        }
+      })
+      .catch(() => setActionError("无法读取服务配置，请打开设置检查本机密钥存储。"))
+      .finally(() => setSettingsReady(true));
+  }, []);
+
+  useEffect(() => {
+    setStorageError(!savePapers(papers));
+  }, [papers]);
+
+  useEffect(() => {
+    saveAnalysisCache(analysisCache);
+  }, [analysisCache]);
+
+  useEffect(() => {
+    selectedPaperIdRef.current = selectedPaperId;
+  }, [selectedPaperId]);
+
+  useEffect(() => {
+    selectedBlockRef.current = selectedBlock;
+  }, [selectedBlock]);
+
+  useEffect(() => {
+    const unsubscribe = translationQueueRef.current.subscribe((paperId, snapshot: TranslationQueueSnapshot) => {
+      setPipelineStates((current) => {
+        const previous = current[paperId];
+        if (!previous) return current;
+        return {
+          ...current,
+          [paperId]: {
+            ...previous,
+            translatedCount: snapshot.translatedCount,
+            queuedCount: snapshot.queuedCount,
+            failedCount: snapshot.failedCount,
+            paused: snapshot.paused,
+            currentLabel: snapshot.currentLabel,
+            stage: snapshot.activeCount || snapshot.queuedCount ? "translating-preview" : previous.stage,
+          },
+        };
+      });
+    });
+    return unsubscribe;
+  }, []);
+
+  const selectedPaper = papers.find((paper) => paper.id === selectedPaperId) ?? null;
+  const papersRef = useRef(papers);
+  papersRef.current = papers;
+  const translationTarget = getTranslationTarget(selectedBlock, selectionText);
+  const targetSignature = translationTarget ? getDocumentBlockSignature(translationTarget) : "";
+  const availability = getAnalysisAvailability(serviceSettings);
+  const documentSignature = useMemo(() => getDocumentSourceSignature(selectedPaper?.blockData ?? []), [selectedPaper?.blockData]);
+  const visiblePapers = useMemo(() => {
+    let filtered = filterPapers(papers, query);
+    if (filter === "favorite") filtered = filtered.filter((paper) => paper.favorite);
+    if (filter === "recent") filtered = sortPapers(filtered).slice(0, 5);
+    if (filter.startsWith("tag:")) {
+      const tag = filter.slice(4);
+      filtered = filtered.filter((paper) => paper.tags.includes(tag));
+    }
+    return sortPapers(filtered);
+  }, [filter, papers, query]);
+  const availableTags = useMemo(
+    () => [...new Set(papers.flatMap((paper) => paper.tags))].sort((left, right) => left.localeCompare(right)),
+    [papers],
+  );
+  const serviceIdentity = `${serviceSettings.revision}:${serviceSettings.aiProvider}:${serviceSettings.aiProvider === "local" ? "demo" : serviceSettings[serviceSettings.aiProvider].model}`;
+  const serviceIdentityRef = useRef(serviceIdentity);
+  serviceIdentityRef.current = serviceIdentity;
+  const errorContextRef = useRef("");
+  errorContextRef.current = `${selectedPaperId}:${targetSignature}:${serviceIdentity}`;
+  const guideKey = buildAnalysisCacheKey(selectedPaperId ?? "", "paper", "guide", `${serviceIdentity}:${documentSignature}`);
+  const insightKey = buildAnalysisCacheKey(selectedPaperId ?? "", translationTarget?.id ?? "", "insight", `${serviceIdentity}:${documentSignature}:${targetSignature}`);
+  const readingGuide = useMemo(() => {
+    const entry = analysisCache.get(guideKey);
+    try { return entry ? parseReadingGuide(entry.value) : null; } catch { return null; }
+  }, [analysisCache, guideKey]);
+  const paragraphInsight = useMemo(() => {
+    const entry = analysisCache.get(insightKey);
+    try { return entry ? parseParagraphInsight(entry.value) : null; } catch { return null; }
+  }, [analysisCache, insightKey]);
+  const vocabulary = useMemo(() => extractAcademicVocabulary(selectedPaper?.blockData ?? [], readingGuide?.terms), [selectedPaper?.blockData, readingGuide]);
+
+  async function requestAnalysis(request: AiRequest, onDelta: (delta: string) => void): Promise<string> {
+    if (!settingsReady) throw new Error("服务配置尚未就绪");
+    if (serviceSettings.aiProvider === "local") throw new Error("请配置百炼或 DeepSeek 后使用 AI 服务");
+    if (!serviceSettings[serviceSettings.aiProvider].configured) {
+      throw new Error("当前模型服务未配置密钥，请先打开服务配置。");
+    }
+    const bridge = getDesktopBridge();
+    if (!bridge) throw new Error("真实模型调用仅在桌面程序中可用");
+    if (!bridge.stream) throw new Error("桌面版流式 AI 接口不可用，请重启或更新应用。");
+    cancelActiveAnalysis();
+    const controller = new AbortController();
+    activeAnalysisAbortRef.current = controller;
+    const sourceBlocks = request.paper.blockData ?? [];
+    const selectedIndex = sourceBlocks.findIndex((block) => block.id === request.block?.id);
+    const isSelection = ["translate", "explain", "insight"].includes(request.operation);
+    const contextBlocks = isSelection
+      ? sourceBlocks.slice(Math.max(0, selectedIndex - 1), selectedIndex + 2)
+      : sourceBlocks;
+    const contextLimit = request.operation === "guide" ? 80000 : 180000;
+    let remaining = contextLimit;
+    const blockData = contextBlocks.map((block) => {
+      const text = block.text.slice(0, isSelection ? 2500 : remaining);
+      remaining -= text.length;
+      return { ...block, text };
+    }).filter((block) => block.text);
+    const compactRequest: AiRequest = {
+      ...request,
+      paper: { ...request.paper, blockData },
+    };
+    try {
+      return await bridge.stream<string>("zhiyan:ai:run", compactRequest, (delta) => {
+        if (!controller.signal.aborted) onDelta(delta);
+      }, (cancel) => {
+        const handleAbort = () => cancel();
+        if (controller.signal.aborted) {
+          cancel();
+          return () => undefined;
+        }
+        controller.signal.addEventListener("abort", handleAbort, { once: true });
+        return () => controller.signal.removeEventListener("abort", handleAbort);
+      });
+    } finally {
+      if (activeAnalysisAbortRef.current === controller) activeAnalysisAbortRef.current = null;
+    }
+  }
+
+  function updatePipeline(paperId: string, patch: Partial<PaperPipelineState>) {
+    setPipelineStates((current) => {
+      const previous = current[paperId] ?? {
+        paperId,
+        source: "local",
+        stage: "local-extracting",
+        translatedCount: 0,
+        queuedCount: 0,
+        failedCount: 0,
+        paused: false,
+      };
+      return {
+        ...current,
+        [paperId]: { ...previous, ...patch },
+      };
+    });
+  }
+
+  function enqueuePreviewTranslations(paper: PaperRecord, blocks: DocumentBlock[]) {
+    if (!availability.available) return;
+    const candidates = selectInitialTranslationBlocks(blocks);
+    updatePipeline(paper.id, {
+      source: "local",
+      stage: candidates.length ? "translating-preview" : "partial",
+      queuedCount: candidates.length,
+      error: undefined,
+    });
+    for (const [index, block] of candidates.entries()) {
+      const signature = getDocumentContentSignature(block);
+      const key = buildAnalysisCacheKey(paper.id, signature, "translate", `${serviceIdentity}:${signature}`);
+      const cached = getCachedAnalysis(analysisCache, key);
+      if (cached) {
+        setTranslations((current) => ({ ...current, [`${paper.id}:${signature}`]: cached.value }));
+        continue;
+      }
+      translationQueueRef.current.enqueue({
+        key,
+        paperId: paper.id,
+        label: block.text.slice(0, 36),
+        priority: index + 10,
+        run: (signal, onDelta) => requestAnalysis({
+          operation: "translate",
+          paper: { ...paper, blockData: blocks },
+          block,
+        }, onDelta),
+        onDelta: (delta) => setStreamingTranslations((current) => ({ ...current, [`${paper.id}:${signature}`]: `${current[`${paper.id}:${signature}`] ?? ""}${delta}` })),
+        onComplete: (value) => {
+          setStreamingTranslations((current) => {
+            const next = { ...current };
+            delete next[`${paper.id}:${signature}`];
+            return next;
+          });
+          setTranslations((current) => ({ ...current, [`${paper.id}:${signature}`]: value }));
+          setAnalysisCache((current) => {
+            const next = new Map(current);
+            setCachedAnalysis(next, {
+              key,
+              paperId: paper.id,
+              scopeId: signature,
+              operation: "translate",
+              sourceSignature: `${serviceIdentity}:${signature}`,
+              value,
+              createdAt: new Date().toISOString(),
+            });
+            return next;
+          });
+        },
+        onError: (error) => updatePipeline(paper.id, {
+          stage: "partial",
+          error: error instanceof Error ? error.message : "部分段落翻译失败",
+        }),
+      });
+    }
+  }
+
+  function retryPipeline(paperId: string) {
+    const paper = papersRef.current.find((item) => item.id === paperId);
+    if (!paper) return;
+    translationQueueRef.current.cancelPaper(paperId);
+    enqueuePreviewTranslations(paper, paper.blockData ?? []);
+    if (paper.mineruBatchId) void pollMineru(paper);
+    else if (serviceSettings.mineru.configured) void handleEnhance(true, paper);
+  }
+
+  async function withAnalysisError(action: () => Promise<void>) {
+    const context = errorContextRef.current;
+    setActionError(null);
+    try {
+      await action();
+    } catch (error) {
+      if (errorContextRef.current === context && !(error instanceof DOMException && error.name === "AbortError")) {
+        setActionError(error instanceof Error ? error.message : "请求失败，请检查服务配置和网络");
+      }
+    }
+  }
+
+  async function handleImport(file: File): Promise<void> {
+    if (importingRef.current) return;
+    importingRef.current = true;
+    setImporting(true);
+    setIsBusy(true);
+    setErrorMessage(null);
+    try {
+      const { paper, data } = await preparePdfFile(file);
+      const existing = papers.find((item) => item.id === paper.id);
+      invalidateAnalysisRequests();
+      setPapers((current) => existing ? current : [paper, ...current]);
+      setSelectedPaperId(paper.id);
+      setSelectedBlock(null);
+      setSelectionText("");
+      setAnswer(null);
+      setView("reader");
+      if (!existing?.blockData?.length) void prepareReading(paper, data);
+      if (!existing && serviceSettings.mineru.configured) {
+        updatePipeline(paper.id, { stage: "mineru-consent", source: "local" });
+        setCloudApprovalOpen(true);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "未知错误";
+      setErrorMessage(`导入失败：${message}`);
+    } finally {
+      setIsBusy(false);
+      importingRef.current = false;
+      setImporting(false);
+    }
+  }
+
+  async function prepareReading(paper: PaperRecord, data?: ArrayBuffer) {
+    if (activeBasicParsing.current.has(paper.id)) return;
+    activeBasicParsing.current.add(paper.id);
+    updatePipeline(paper.id, { stage: "local-extracting", source: "local", error: undefined });
+    setProcessing((current) => ({ ...current, [paper.id]: "原文已可阅读，正在整理正文…" }));
+    try {
+      const blockData = await extractPdfBlocks(data ?? await readOriginalPdf(paper.originalId!));
+      setPapers((current) => current.map((item) => item.id === paper.id ? {
+        ...item, blockData, blocks: blockData.length, parseStatus: "ready", parseVersion: 2,
+        parseError: blockData.length ? undefined : "没有提取到正文，扫描件请使用 MinerU 增强解析。",
+      } : item));
+      const nextPaper = { ...paper, blockData, blocks: blockData.length, parseStatus: "ready" as const, parseVersion: 2 };
+      updatePipeline(paper.id, { stage: "partial", source: "local" });
+      enqueuePreviewTranslations(nextPaper, blockData);
+    } catch (cause) {
+      setPapers((current) => current.map((item) => item.id === paper.id ? {
+        ...item, parseStatus: "fallback", parseError: cause instanceof Error ? cause.message : "正文整理失败",
+      } : item));
+      updatePipeline(paper.id, { stage: "partial", source: "local", error: "本地正文整理失败，仍可查看原始 PDF" });
+    } finally {
+      activeBasicParsing.current.delete(paper.id);
+      setProcessing((current) => ({ ...current, [paper.id]: "" }));
+    }
+  }
+
+  async function pollMineru(paper: PaperRecord) {
+    const bridge = getDesktopBridge();
+    if (!bridge || !paper.originalId || activeParsing.current.has(paper.id)) return;
+    activeParsing.current.add(paper.id);
+    try {
+      for (;;) {
+        const task = await bridge.invoke<{ state: string; progress?: string; batchId?: string; error?: string; result?: { blocks: DocumentBlock[]; title?: string; pageCount?: number } }>("zhiyan:mineru:status", paper.originalId);
+        if (task.state === "done" && task.result) {
+          const result = task.result;
+          const previous = papersRef.current.find((item) => item.id === paper.id);
+          setPapers((current) => current.map((item) => item.id === paper.id ? {
+            ...item, blockData: result.blocks, blocks: result.blocks.length, parseVersion: 2,
+            parseStatus: "ready", parseError: undefined, title: result.title || item.title,
+            pageCount: item.pageCount || result.pageCount, mineruBatchId: undefined, overview: null,
+          } : item));
+          const positioned = result.blocks.some(hasPageBounds);
+          updatePipeline(paper.id, { stage: positioned ? "ready" : "partial", source: "mineru", mineruMessage: positioned ? "PDF 已就绪，MinerU 交互层已叠加" : "MinerU 结果不含可用坐标，原文仍可阅读；可重新解析" });
+          enqueuePreviewTranslations({ ...paper, ...previous, blockData: result.blocks, blocks: result.blocks.length }, result.blocks);
+          if (selectedPaperIdRef.current === paper.id) { setSelectedBlock(null); setSelectionText(""); }
+          return;
+        }
+        if (task.state === "failed" || task.state === "error") throw new Error(task.error || "MinerU 解析失败");
+        if (task.state === "idle") return;
+        const message = (task as { message?: string }).message || "MinerU 正在整理正文、图表和公式…";
+        updatePipeline(paper.id, {
+          stage: task.state === "downloading" ? "mineru-downloading" : "mineru-processing",
+          source: "mineru",
+          mineruProgress: typeof task.progress === "number" ? task.progress : undefined,
+          mineruMessage: message,
+        });
+        setProcessing((current) => ({ ...current, [paper.id]: message }));
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+      }
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "MinerU 解析失败";
+      setActionError(message);
+      setPapers((current) => current.map((item) => item.id === paper.id ? { ...item, parseError: message } : item));
+      updatePipeline(paper.id, { stage: "failed", source: "mineru", error: message });
+    } finally {
+      activeParsing.current.delete(paper.id);
+      setProcessing((current) => ({ ...current, [paper.id]: "" }));
+    }
+  }
+
+  async function handleEnhance(approved = false, requestedPaper?: PaperRecord) {
+    const targetPaper = requestedPaper ?? selectedPaper;
+    if (!targetPaper?.originalId) { setActionError("请先重新导入原始 PDF"); return; }
+    const bridge = getDesktopBridge();
+    if (!bridge) { setActionError("MinerU 增强解析需要桌面版"); return; }
+    const paper = targetPaper;
+    const remembered = window.localStorage.getItem("zhiyan.mineru-upload-approved") === "yes";
+    if (!remembered && !approved) { setCloudApprovalOpen(true); return; }
+    setActionError(null);
+    updatePipeline(paper.id, { stage: "mineru-uploading", source: "mineru", error: undefined });
+    setProcessing((current) => ({ ...current, [paper.id]: "正在上传 PDF 到 MinerU…" }));
+    try {
+      const task = await bridge.invoke<{ batchId: string }>("zhiyan:mineru:start", paper.originalId);
+      setPapers((current) => current.map((item) => item.id === paper.id ? { ...item, mineruBatchId: task.batchId } : item));
+      updatePipeline(paper.id, { stage: "mineru-processing", source: "mineru", mineruMessage: "PDF 已上传，等待 MinerU 开始解析…" });
+      void pollMineru(paper);
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : "MinerU 上传失败");
+      updatePipeline(paper.id, { stage: "failed", source: "mineru", error: cause instanceof Error ? cause.message : "MinerU 上传失败" });
+      setProcessing((current) => ({ ...current, [paper.id]: "" }));
+    }
+  }
+
+  useEffect(() => {
+    if (settingsReady && selectedPaper?.mineruBatchId) void pollMineru(selectedPaper);
+  }, [settingsReady, selectedPaper?.id, selectedPaper?.mineruBatchId]);
+
+  useEffect(() => {
+    if (!selectedPaper?.originalId || selectedPaper.parseStatus !== "pending") return;
+    if (processing[selectedPaper.id]) return;
+    void prepareReading(selectedPaper);
+  }, [selectedPaper?.id, selectedPaper?.originalId, selectedPaper?.parseStatus]);
+
+  function handleSelectPaper(paperId: string) {
+    invalidateAnalysisRequests();
+    setSelectedPaperId(paperId);
+    setSelectedBlock(null);
+    setSelectionText("");
+    setAnswer(null);
+  }
+
+  function handleToggleFavorite(paperId: string) {
+    setPapers((current) =>
+      current.map((paper) =>
+        paper.id === paperId ? { ...paper, favorite: !paper.favorite } : paper,
+      ),
+    );
+  }
+
+  function handleUpdateMetadata(paperId: string, patch: PaperMetadataPatch) {
+    setPapers((current) => updatePaperMetadata(current, paperId, patch));
+    setActionError(null);
+  }
+
+  async function handleDeletePaper(paperId: string): Promise<void> {
+    const paper = papersRef.current.find((item) => item.id === paperId);
+    if (!paper) return;
+    invalidateAnalysisRequests();
+    if (paper.originalId) await deleteOriginalPdf(paper.originalId);
+    setPapers((current) => removePaper(current, paperId));
+    setAnalysisCache((current) => {
+      const next = new Map(current);
+      for (const [key, entry] of next) if (entry.paperId === paperId) next.delete(key);
+      return next;
+    });
+    setTranslations({});
+    setExplanations({});
+    setAnswer(null);
+    if (selectedPaperIdRef.current === paperId) {
+      setSelectedPaperId(null);
+      setSelectedBlock(null);
+      setSelectionText("");
+      setView("library");
+    }
+  }
+
+  async function handleOverview() {
+    if (!selectedPaper) return;
+    const requestIdentity = serviceIdentity;
+    const sourceSignature = getDocumentSourceSignature(selectedPaper.blockData ?? []);
+    const requestId = analysisRequestIdRef.current;
+    const key = buildAnalysisCacheKey(selectedPaper.id, "paper", "overview", `${serviceIdentity}:${sourceSignature}`);
+    const cached = getCachedAnalysis(analysisCache, key);
+    if (cached) {
+      setPapers((current) =>
+        current.map((paper) => (paper.id === selectedPaper.id ? { ...paper, overview: cached.value } : paper)),
+      );
+      return;
+    }
+    setIsBusy(true);
+    setPendingAction("overview");
+    setStreamingOutput({ operation: "overview", paperId: selectedPaper.id, text: "" });
+    try {
+      const overview = await requestAnalysis({ operation: "overview", paper: selectedPaper }, (delta) => {
+        setStreamingOutput((current) => current?.operation === "overview" && current.paperId === selectedPaper.id
+          ? { ...current, text: current.text + delta } : current);
+      });
+      const currentPaper = papersRef.current.find((paper) => paper.id === selectedPaper.id);
+      if (serviceIdentityRef.current !== requestIdentity || analysisRequestIdRef.current !== requestId ||
+          getDocumentSourceSignature(currentPaper?.blockData ?? []) !== sourceSignature) return;
+      setStreamingOutput(null);
+      const entry: AnalysisCacheEntry = {
+        key,
+        paperId: selectedPaper.id,
+        scopeId: "paper",
+        operation: "overview",
+        sourceSignature: `${serviceIdentity}:${sourceSignature}`,
+        value: overview,
+        createdAt: new Date().toISOString(),
+      };
+      setAnalysisCache((current) => {
+        const next = new Map(current);
+        setCachedAnalysis(next, entry);
+        return next;
+      });
+      setPapers((current) =>
+        current.map((paper) => (paper.id === selectedPaper.id ? { ...paper, overview } : paper)),
+      );
+    } finally {
+      setIsBusy(false);
+      setPendingAction(null);
+      if (analysisRequestIdRef.current === requestId) setStreamingOutput(null);
+    }
+  }
+
+  async function handleTranslate() {
+    if (!selectedPaper || !translationTarget) return;
+    const target = translationTarget;
+    const requestIdentity = serviceIdentity;
+    const sourceSignature = getDocumentBlockSignature(target);
+    const requestId = analysisRequestIdRef.current;
+    const key = buildAnalysisCacheKey(selectedPaper.id, `${target.id}:${sourceSignature}`, "translate", `${serviceIdentity}:${sourceSignature}`);
+    const cached = getCachedAnalysis(analysisCache, key);
+    if (cached) {
+      setStreamingOutput(null);
+      setTranslations((current) => ({
+        ...current,
+        [`${selectedPaper.id}:${sourceSignature}`]: cached.value,
+      }));
+      return;
+    }
+    setIsBusy(true);
+    setPendingAction("translate");
+    setStreamingOutput({ operation: "translate", paperId: selectedPaper.id, text: "" });
+    try {
+      const value = await requestAnalysis({
+        operation: "translate",
+        paper: selectedPaper,
+        block: target,
+      }, (delta) => {
+        setStreamingOutput((current) => current?.operation === "translate" && current.paperId === selectedPaper.id
+          ? { ...current, text: current.text + delta } : current);
+      });
+      const currentPaper = papersRef.current.find((paper) => paper.id === selectedPaper.id);
+      if (serviceIdentityRef.current !== requestIdentity || analysisRequestIdRef.current !== requestId ||
+          getDocumentSourceSignature(currentPaper?.blockData ?? []) !== getDocumentSourceSignature(selectedPaper.blockData ?? [])) return;
+      setStreamingOutput(null);
+      const entry: AnalysisCacheEntry = {
+        key,
+        paperId: selectedPaper.id,
+        scopeId: `${target.id}:${sourceSignature}`,
+        operation: "translate",
+        sourceSignature: `${serviceIdentity}:${sourceSignature}`,
+        value,
+        createdAt: new Date().toISOString(),
+      };
+      setAnalysisCache((current) => {
+        const next = new Map(current);
+        setCachedAnalysis(next, entry);
+        return next;
+      });
+      setTranslations((current) => ({
+        ...current,
+        [`${selectedPaper.id}:${sourceSignature}`]: value,
+      }));
+    } finally {
+      setIsBusy(false);
+      setPendingAction(null);
+      if (analysisRequestIdRef.current === requestId) setStreamingOutput(null);
+    }
+  }
+
+  async function handleAsk(question: string) {
+    if (!selectedPaper) return;
+    const requestIdentity = serviceIdentity;
+    const sourceSignature = `${getDocumentSourceSignature(selectedPaper.blockData ?? [])}:${question.trim()}`;
+    const documentSignature = getDocumentSourceSignature(selectedPaper.blockData ?? []);
+    const requestDocumentId = analysisRequestIdRef.current;
+    const key = buildAnalysisCacheKey(selectedPaper.id, "paper", "qa", `${serviceIdentity}:${sourceSignature}`);
+    const cached = getCachedAnalysis(analysisCache, key);
+    if (cached) {
+      setAnswer(cached.value);
+      return;
+    }
+    setIsBusy(true);
+    setPendingAction("qa");
+    const requestId = ++analysisRequestIdRef.current;
+    const requestPaperId = selectedPaper.id;
+    setStreamingOutput({ operation: "qa", paperId: requestPaperId, text: "" });
+    try {
+      const value = await requestAnalysis({ operation: "qa", paper: selectedPaper, question }, (delta) => {
+        setStreamingOutput((current) => current?.operation === "qa" && current.paperId === requestPaperId
+          ? { ...current, text: current.text + delta } : current);
+      });
+      const currentPaper = papersRef.current.find((paper) => paper.id === selectedPaper.id);
+      if (serviceIdentityRef.current !== requestIdentity || analysisRequestIdRef.current !== requestId ||
+          getDocumentSourceSignature(currentPaper?.blockData ?? []) !== documentSignature) return;
+      setStreamingOutput(null);
+      const entry: AnalysisCacheEntry = {
+        key,
+        paperId: selectedPaper.id,
+        scopeId: "paper",
+        operation: "qa",
+        sourceSignature: `${serviceIdentity}:${sourceSignature}`,
+        value,
+        createdAt: new Date().toISOString(),
+      };
+      setAnalysisCache((current) => {
+        const next = new Map(current);
+        setCachedAnalysis(next, entry);
+        return next;
+      });
+      if (
+        analysisRequestIdRef.current === requestId &&
+        selectedPaperIdRef.current === requestPaperId
+      ) {
+        setAnswer(value);
+      }
+    } finally {
+      setIsBusy(false);
+      setPendingAction(null);
+      if (analysisRequestIdRef.current === requestId) setStreamingOutput(null);
+    }
+  }
+
+  async function handleExplain() {
+    if (!selectedPaper || !translationTarget) return;
+    const requestIdentity = serviceIdentity;
+    const signature = getDocumentBlockSignature(translationTarget);
+    const requestId = analysisRequestIdRef.current;
+    const documentSignature = getDocumentSourceSignature(selectedPaper.blockData ?? []);
+    const paperId = selectedPaper.id;
+    setIsBusy(true);
+    setPendingAction("explain");
+    setStreamingOutput({ operation: "explain", paperId, text: "" });
+    try {
+      const value = await requestAnalysis({ operation: "explain", paper: selectedPaper, block: translationTarget }, (delta) => {
+        setStreamingOutput((current) => current?.operation === "explain" && current.paperId === paperId
+          ? { ...current, text: current.text + delta } : current);
+      });
+      const currentPaper = papersRef.current.find((paper) => paper.id === paperId);
+      if (serviceIdentityRef.current === requestIdentity && analysisRequestIdRef.current === requestId &&
+          getDocumentSourceSignature(currentPaper?.blockData ?? []) === documentSignature) {
+        setStreamingOutput(null);
+        setExplanations((current) => ({ ...current, [`${paperId}:${signature}`]: value }));
+      }
+    } finally {
+      setIsBusy(false);
+      setPendingAction(null);
+      if (analysisRequestIdRef.current === requestId) setStreamingOutput(null);
+    }
+  }
+
+  async function handleLearning(operation: "guide" | "insight") {
+    if (!selectedPaper || (operation === "insight" && !translationTarget)) return;
+    const key = operation === "guide" ? guideKey : insightKey;
+    if (analysisCache.has(key)) return;
+    const identity = serviceIdentity;
+    const requestPaper = selectedPaper;
+    const requestId = analysisRequestIdRef.current;
+    const requestDocumentSignature = documentSignature;
+    setIsBusy(true); setPendingAction(operation);
+    setStreamingOutput({ operation, paperId: requestPaper.id, text: "" });
+    try {
+      const value = await requestAnalysis({ operation, paper: requestPaper, block: translationTarget ?? undefined }, (delta) => {
+        setStreamingOutput((current) => current?.operation === operation && current.paperId === requestPaper.id
+          ? { ...current, text: current.text + delta } : current);
+      });
+      if (operation === "guide") parseReadingGuide(value); else parseParagraphInsight(value);
+      const currentPaper = papersRef.current.find((paper) => paper.id === requestPaper.id);
+      if (serviceIdentityRef.current !== identity || analysisRequestIdRef.current !== requestId ||
+          getDocumentSourceSignature(currentPaper?.blockData ?? []) !== requestDocumentSignature) return;
+      setStreamingOutput(null);
+      setAnalysisCache((current) => {
+        const next = new Map(current);
+        next.set(key, { key, paperId: requestPaper.id, scopeId: operation === "guide" ? "paper" : translationTarget!.id,
+          operation, sourceSignature: `${identity}:${documentSignature}:${operation === "insight" ? targetSignature : ""}`, value, createdAt: new Date().toISOString() });
+        return next;
+      });
+    } finally {
+      setIsBusy(false);
+      setPendingAction(null);
+      if (analysisRequestIdRef.current === requestId) setStreamingOutput(null);
+    }
+  }
+
+  const storageWarning = storageError ? (
+    <div className="storage-warning" role="alert">
+      <AlertTriangle size={18} aria-hidden="true" />
+      <span>无法保存文献库。请检查磁盘空间或存储权限，当前更改可能在关闭后丢失。</span>
+      <button aria-label="关闭提示" onClick={() => setStorageError(false)} title="关闭提示" type="button">
+        <X size={16} />
+      </button>
+    </div>
+  ) : null;
+  const settingsDialog = settingsOpen ? (
+    <ServiceSettingsDialog
+      onClose={() => setSettingsOpen(false)}
+      onSaved={(settings) => {
+        serviceIdentityRef.current = `${settings.revision}:${settings.aiProvider}:${settings.aiProvider === "local" ? "demo" : settings[settings.aiProvider].model}`;
+        invalidateAnalysisRequests();
+        setServiceSettings(settings);
+        setPapers((current) => current.map((paper) => ({ ...paper, overview: null })));
+        setTranslations({});
+        setExplanations({});
+        setAnswer(null);
+        setActionError(null);
+      }}
+    />
+  ) : null;
+  const cloudDialog = cloudApprovalOpen ? <div className="settings-overlay">
+    <section className="settings-dialog cloud-approval" role="dialog" aria-modal="true" aria-label="确认云端解析">
+      <h2>导入后自动整理论文</h2>
+      <p>将《{selectedPaper?.title}》的完整 PDF 发送到 MinerU，整理自然段、图表、表格和公式，可能消耗账号解析额度。原文件会继续保存在本机。你可以在等待结构解析时先阅读和翻译临时正文。</p>
+      <label><input type="checkbox" checked={rememberCloudApproval} onChange={(event) => setRememberCloudApproval(event.target.checked)} />以后导入论文时自动开始 MinerU 解析</label>
+      <div className="detail-actions"><button className="secondary-button" onClick={() => setCloudApprovalOpen(false)}>暂不解析</button><button autoFocus className="primary-button" onClick={() => {
+        if (rememberCloudApproval) window.localStorage.setItem("zhiyan.mineru-upload-approved", "yes");
+        setCloudApprovalOpen(false); void handleEnhance(true);
+      }}>开始自动解析</button></div>
+    </section>
+  </div> : null;
+
+  if (view === "reader" && selectedPaper) {
+    const pipeline = pipelineStates[selectedPaper.id] ?? {
+      paperId: selectedPaper.id,
+      source: "local" as const,
+      stage: selectedPaper.blockData?.length ? "ready" as const : "local-extracting" as const,
+      translatedCount: 0,
+      queuedCount: 0,
+      failedCount: 0,
+      paused: false,
+    };
+    return (
+      <>
+        {storageWarning}
+        {settingsDialog}
+        {cloudDialog}
+        <ReaderView
+          paper={selectedPaper}
+          selectedBlock={translationTarget}
+          selectionText={selectionText}
+          translation={translations[`${selectedPaper.id}:${targetSignature}`] ?? null}
+          translations={{ ...translations, ...streamingTranslations }}
+          answer={answer}
+          isBusy={isBusy}
+          onBack={() => setView("library")}
+          onSelectBlock={(block) => { invalidateAnalysisRequests(); setSelectedBlock(block); setSelectionText(""); setActionError(null); }}
+          onSelectText={(block, text) => { invalidateAnalysisRequests(); setSelectedBlock(block); setSelectionText(text); setActionError(null); }}
+          onOverview={() => void withAnalysisError(handleOverview)}
+          onTranslate={() => void withAnalysisError(handleTranslate)}
+          onExplain={() => void withAnalysisError(handleExplain)}
+          explanation={explanations[`${selectedPaper.id}:${targetSignature}`] ?? null}
+          onAsk={(question) => void withAnalysisError(() => handleAsk(question))}
+          onOpenSettings={() => setSettingsOpen(true)}
+          actionError={actionError}
+          processingStatus={processing[selectedPaper.id] ?? ""}
+          onEnhance={() => void handleEnhance()}
+          onRetryBasic={() => void prepareReading(selectedPaper)}
+          onReimport={(file) => void handleImport(file)}
+          onPosition={(readingPosition) => setPapers((current) => current.map((paper) => paper.id === selectedPaper.id ? { ...paper, readingPosition } : paper))}
+          aiAvailable={availability.available}
+          serviceLabel={availability.label}
+          serviceModel={availability.model}
+          mineruConfigured={serviceSettings.mineru.configured}
+          pendingAction={pendingAction}
+          streamingOutput={streamingOutput?.paperId === selectedPaper.id
+            ? { operation: streamingOutput.operation, text: streamingOutput.text }
+            : null}
+          pipeline={pipeline}
+          onPausePipeline={() => translationQueueRef.current.pause()}
+          onResumePipeline={() => translationQueueRef.current.resume()}
+          onRetryPipeline={() => retryPipeline(selectedPaper.id)}
+          insight={paragraphInsight}
+          onInsight={() => void withAnalysisError(() => handleLearning("insight"))}
+          guide={readingGuide}
+          onGuide={() => void withAnalysisError(() => handleLearning("guide"))}
+          vocabulary={vocabulary}
+        />
+      </>
+    );
+  }
+
+  return (
+    <>
+      {storageWarning}
+      {settingsDialog}
+      {cloudDialog}
+      <LibraryView
+        papers={visiblePapers}
+        selectedPaper={selectedPaper}
+        selectedId={selectedPaperId}
+        query={query}
+        filter={filter}
+        tags={availableTags}
+        errorMessage={errorMessage}
+        onFilterChange={setFilter}
+        onQueryChange={setQuery}
+        onSelect={handleSelectPaper}
+        onImport={handleImport}
+        onOpenReader={() => setView("reader")}
+        onToggleFavorite={handleToggleFavorite}
+        onUpdateMetadata={handleUpdateMetadata}
+        onDelete={handleDeletePaper}
+        onOpenSettings={() => setSettingsOpen(true)}
+        importing={importing}
+      />
+    </>
+  );
+}
