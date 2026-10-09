@@ -4,7 +4,8 @@ param(
   [string]$Owner = 'yuanshane76-lang',
   [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$')]
   [string]$Repository = 'zhiyan-workbench',
-  [switch]$CheckOnly
+  [switch]$CheckOnly,
+  [switch]$BypassGitProxy
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,6 +17,9 @@ $env:GH_HOST = 'github.com'
 
 function Invoke-Checked {
   param([string]$Command, [string[]]$Arguments)
+  if ($Command -eq 'git' -and $BypassGitProxy) {
+    $Arguments = @('-c', 'http.proxy=', '-c', 'https.proxy=', '-c', 'http.https://github.com/.proxy=') + $Arguments
+  }
   $output = @(& $Command @Arguments 2>&1)
   if ($LASTEXITCODE -ne 0) {
     throw ($output -join "`n")
