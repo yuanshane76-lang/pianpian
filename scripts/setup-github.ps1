@@ -18,7 +18,10 @@ $env:GH_HOST = 'github.com'
 function Invoke-Checked {
   param([string]$Command, [string[]]$Arguments)
   if ($Command -eq 'git' -and $BypassGitProxy) {
-    $Arguments = @('-c', 'http.proxy=', '-c', 'https.proxy=', '-c', 'http.https://github.com/.proxy=') + $Arguments
+    $Arguments = @(
+      '-c', 'http.proxy=', '-c', 'https.proxy=',
+      '-c', 'http.https://github.com/.proxy=', '-c', 'remote.origin.proxy='
+    ) + $Arguments
   }
   $output = @(& $Command @Arguments 2>&1)
   if ($LASTEXITCODE -ne 0) {
