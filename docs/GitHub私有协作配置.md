@@ -25,6 +25,14 @@ gh auth status --hostname github.com
 pwsh -File scripts/setup-github.ps1
 ```
 
+如果 Git 报错显示它正在连接 `127.0.0.1` 的未启动代理，可只为本次 Git 子命令绕过代理：
+
+```powershell
+pwsh -File scripts/setup-github.ps1 -BypassGitProxy
+```
+
+该参数不修改全局或仓库的代理设置。网页和 GitHub CLI 的授权成功，不代表 Git 的独立代理配置一定可用。
+
 脚本会检查工作区、账号、仓库可见性和现有远程地址，创建或连接私有仓库，并上传已提交的代码。第一次向空仓库发布稳定基线属于初始化；已有 `main` 的仓库使用协作分支和 PR，不覆盖远程主分支。
 
 脚本不会上传未提交的产品改动。共享仓库中的 `origin` 配置对所有 Git worktree 生效，原开发工作区的未提交内容仍留在原处。

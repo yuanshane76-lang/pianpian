@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -18,7 +18,11 @@ function Record($name, $arguments) {
 function global:git {
   Record 'git' $args
   $global:LASTEXITCODE = 0
-  $joined = $args -join ' '
+  $gitArguments = @($args)
+  while ($gitArguments.Count -ge 2 -and $gitArguments[0] -eq '-c') {
+    $gitArguments = @($gitArguments | Select-Object -Skip 2)
+  }
+  $joined = $gitArguments -join ' '
   switch ($joined) {
     'status --porcelain' { if ($scenario.dirty) { ' M src/app/App.tsx' }; return }
     'remote get-url origin' {
@@ -46,7 +50,7 @@ function global:git {
     }
     'rev-parse origin/main' { if ($global:publishedMain) { 'new' } else { 'old' }; return }
   }
-  if ($args[0] -eq 'push' -and $args[-1] -eq 'new:refs/heads/main') {
+  if ($gitArguments[0] -eq 'push' -and $gitArguments[-1] -eq 'new:refs/heads/main') {
     $global:publishedMain = $true
   }
 }
@@ -88,7 +92,11 @@ function global:gh {
     'https://github.com/yuanshane76-lang/zhiyan-workbench/pull/1'
   }
 }
-& (Join-Path $PSScriptRoot 'scripts/setup-github.ps1')
+if ($scenario.bypassGitProxy) {
+  & (Join-Path $PSScriptRoot 'scripts/setup-github.ps1') -BypassGitProxy
+} else {
+  & (Join-Path $PSScriptRoot 'scripts/setup-github.ps1')
+}
 `;
 
 type Call = { command: string; arguments: string[] };
@@ -110,35 +118,47 @@ function run(scenario: Record<string, unknown>) {
       },
     });
     if (result.error) throw result.error;
-    const calls = readFileSync(path.join(temporary, "calls.jsonl"), "utf8")
-      .trim().split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line) as Call);
+    const callPath = path.join(temporary, "calls.jsonl");
+    const calls = existsSync(callPath) ? readFileSync(callPath, "utf8")
+      .trim().split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line) as Call) : [];
     return { status: result.status, output: result.stdout + result.stderr, calls };
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
 }
 
-const isMutation = (call: Call) =>
-  (call.command === "git" && ["push", "fetch", "config", "remote"].includes(call.arguments[0]) &&
-    !(call.arguments[0] === "remote" && call.arguments[1] === "get-url")) ||
-  (call.command === "gh" && (
-    (call.arguments[0] === "repo" && ["create", "edit"].includes(call.arguments[1])) ||
-    (call.arguments[0] === "pr" && call.arguments[1] === "create") ||
-    call.arguments.includes("PATCH") || call.arguments.includes("PUT")
-  ));
+function gitArguments(call: Call) {
+  let args = call.arguments;
+  while (args[0] === "-c" && args.length >= 2) args = args.slice(2);
+  return args;
+}
+
+function isMutation(call: Call) {
+  const args = call.command === "git" ? gitArguments(call) : call.arguments;
+  return (call.command === "git" && ["push", "fetch", "config", "remote"].includes(args[0]) &&
+    !(args[0] === "remote" && args[1] === "get-url")) ||
+    (call.command === "gh" && (
+      (args[0] === "repo" && ["create", "edit"].includes(args[1])) ||
+      (args[0] === "pr" && args[1] === "create") ||
+      args.includes("PATCH") || args.includes("PUT")
+    ));
+}
 
 describe("GitHub setup boundaries", () => {
   it.each([
-    { dirty: true },
-    { wrongAccount: true },
-    { publicRepository: true },
-    { origin: "https://github.com/someone/another-project.git" },
-    { origin: "https://github.com/yuanshane76-lang/zhiyan-workbench.git", badPushUrl: true },
-    { wrongHost: true },
-    { changeCommitAfterCheck: true },
-  ])("stops without remote mutations for unsafe inputs: %j", (scenario) => {
+    { scenario: { dirty: true }, reason: "当前工作区还有未提交改动" },
+    { scenario: { wrongAccount: true }, reason: "预期账号" },
+    { scenario: { publicRepository: true }, reason: "不是私有仓库" },
+    { scenario: { origin: "https://github.com/someone/another-project.git" }, reason: "origin 指向其他仓库" },
+    { scenario: { origin: "https://github.com/yuanshane76-lang/zhiyan-workbench.git", badPushUrl: true }, reason: "实际推送地址" },
+    { scenario: { wrongHost: true }, reason: "仓库主机或地址" },
+    { scenario: { changeCommitAfterCheck: true }, reason: "提交或分支发生变化" },
+  ].flatMap(({ scenario, reason }) =>
+    [false, true].map((bypassGitProxy) => ({ scenario: { ...scenario, bypassGitProxy }, reason }))
+  ))("stops for unsafe inputs with either proxy mode: %j", ({ scenario, reason }) => {
     const result = run(scenario);
     expect(result.status, result.output).toBe(1);
+    expect(result.output).toContain(reason);
     expect(result.calls.filter(isMutation)).toEqual([]);
   });
 
@@ -167,5 +187,19 @@ describe("GitHub setup boundaries", () => {
     });
     expect(result.calls.some((call) => call.command === "git" && call.arguments.some((argument) => argument.endsWith(":refs/heads/main")))).toBe(false);
     expect(result.calls.some((call) => call.command === "gh" && call.arguments[0] === "pr" && call.arguments[1] === "create")).toBe(true);
+  });
+
+  it("bypasses a configured Git proxy for child commands without changing proxy settings", () => {
+    const result = run({ bypassGitProxy: true });
+    expect(result.status, result.output).toBe(0);
+    const push = result.calls.find((call) => call.command === "git" && call.arguments.includes("push"));
+    expect(push?.arguments).toEqual([
+      "-c", "http.proxy=", "-c", "https.proxy=", "-c", "http.https://github.com/.proxy=",
+      "-c", "remote.origin.proxy=",
+      "push", "--force-with-lease=refs/heads/main:", "origin", "new:refs/heads/main",
+    ]);
+    const configCalls = result.calls.filter((call) => call.command === "git" && gitArguments(call)[0] === "config");
+    expect(configCalls.some((call) =>
+      gitArguments(call).slice(1).some((argument) => /proxy/.test(argument)))).toBe(false);
   });
 });
