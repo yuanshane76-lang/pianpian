@@ -12,10 +12,7 @@ const isBrowserRuntime =
   !window.navigator.userAgent.toLowerCase().includes("jsdom");
 
 if (isBrowserRuntime) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    "pdfjs-dist/legacy/build/pdf.worker.min.mjs",
-    import.meta.url,
-  ).toString();
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 }
 
 export function createBlocksFromPlainText(text: string): DocumentBlock[] {

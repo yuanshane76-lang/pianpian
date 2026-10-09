@@ -4,6 +4,7 @@ import {
   getDocumentBlockSignature,
   getDocumentContentSignature,
   getDocumentSourceSignature,
+  getDocumentVisualSignature,
   type DocumentBlock,
 } from "../domain/documentBlocks";
 import {
@@ -25,10 +26,11 @@ import { loadAnalysisCache, saveAnalysisCache } from "../services/analysisCache"
 import { preparePdfFile, loadPapers, savePapers } from "../services/library";
 import { extractPdfBlocks } from "../services/document";
 import { deleteOriginalPdf, readOriginalPdf } from "../services/originalPdf";
-import { getAnalysisAvailability, getTranslationTarget } from "../domain/readingFlow";
+import { getAnalysisAvailability, getTranslationTarget, isVisualBlock } from "../domain/readingFlow";
 import { hasPageBounds } from "../domain/pdfLayout";
 import { pipelineStageLabel, selectInitialTranslationBlocks, type PaperPipelineState } from "../domain/pipeline";
-import { parseParagraphInsight, parseReadingGuide } from "../domain/learning";
+import { parseChartReading, parseParagraphInsight, parseReadingGuide } from "../domain/learning";
+import { loadChartImage } from "../services/chartImage";
 import { extractAcademicVocabulary } from "../domain/vocabulary";
 import { TranslationQueue, type TranslationQueueSnapshot } from "../services/translationQueue";
 import { LibraryView } from "../features/library/LibraryView";
@@ -38,6 +40,19 @@ import { DEFAULT_SERVICE_SETTINGS, toPublicServiceSettings, type PublicServiceSe
 import { getDesktopBridge } from "../platform/electron";
 
 type AppView = "library" | "reader";
+type ParagraphOperation = "translate" | "explain";
+interface AnalysisRequestOptions {
+  concurrent?: boolean;
+  background?: boolean;
+  signal?: AbortSignal;
+}
+interface ParagraphAnalysis {
+  requestId: number;
+  paperId: string;
+  signature: string;
+  pending: ParagraphOperation[];
+  outputs: Record<ParagraphOperation, string>;
+}
 
 export default function App() {
   const [papers, setPapers] = useState<PaperRecord[]>(() => loadPapers());
@@ -62,7 +77,9 @@ export default function App() {
   const [answer, setAnswer] = useState<string | null>(null);
   const [streamingOutput, setStreamingOutput] = useState<{ operation: AiRequest["operation"]; paperId: string; text: string } | null>(null);
   const [isBusy, setIsBusy] = useState(false);
-  const [pendingAction, setPendingAction] = useState<"translate" | "qa" | "insight" | "guide" | "overview" | "explain" | null>(null);
+  const [pendingAction, setPendingAction] = useState<AiRequest["operation"] | null>(null);
+  const [paragraphAnalysis, setParagraphAnalysis] = useState<ParagraphAnalysis | null>(null);
+  const activeParagraphAnalysisRef = useRef<string | null>(null);
   const [importing, setImporting] = useState(false);
   const importingRef = useRef(false);
   const [cloudApprovalOpen, setCloudApprovalOpen] = useState(false);
@@ -75,19 +92,26 @@ export default function App() {
   );
   const [settingsReady, setSettingsReady] = useState(!getDesktopBridge());
   const [actionError, setActionError] = useState<string | null>(null);
-  const activeAnalysisAbortRef = useRef<AbortController | null>(null);
+  const activeAnalysisAbortRef = useRef(new Set<AbortController>());
+  const activeBackgroundAnalysisAbortRef = useRef(new Set<AbortController>());
   const translationQueueRef = useRef(new TranslationQueue());
   const [pipelineStates, setPipelineStates] = useState<Record<string, PaperPipelineState>>({});
 
   function cancelActiveAnalysis() {
-    activeAnalysisAbortRef.current?.abort();
-    activeAnalysisAbortRef.current = null;
+    for (const controllers of [activeAnalysisAbortRef.current, activeBackgroundAnalysisAbortRef.current]) {
+      for (const controller of controllers) controller.abort();
+      controllers.clear();
+    }
   }
 
   function invalidateAnalysisRequests() {
     cancelActiveAnalysis();
     analysisRequestIdRef.current += 1;
     setStreamingOutput(null);
+    setPendingAction(null);
+    setParagraphAnalysis(null);
+    activeParagraphAnalysisRef.current = null;
+    if (!importingRef.current) setIsBusy(false);
   }
 
   useEffect(() => () => cancelActiveAnalysis(), []);
@@ -200,6 +224,7 @@ export default function App() {
   papersRef.current = papers;
   const translationTarget = getTranslationTarget(selectedBlock, selectionText);
   const targetSignature = translationTarget ? getDocumentBlockSignature(translationTarget) : "";
+  const visualSignature = selectedBlock && isVisualBlock(selectedBlock) ? getDocumentVisualSignature(selectedBlock) : "";
   const availability = getAnalysisAvailability(serviceSettings);
   const documentSignature = useMemo(() => getDocumentSourceSignature(selectedPaper?.blockData ?? []), [selectedPaper?.blockData]);
   const visiblePapers = useMemo(() => {
@@ -220,9 +245,14 @@ export default function App() {
   const serviceIdentityRef = useRef(serviceIdentity);
   serviceIdentityRef.current = serviceIdentity;
   const errorContextRef = useRef("");
-  errorContextRef.current = `${selectedPaperId}:${targetSignature}:${serviceIdentity}`;
+  errorContextRef.current = `${selectedPaperId}:${targetSignature || visualSignature}:${serviceIdentity}`;
   const guideKey = buildAnalysisCacheKey(selectedPaperId ?? "", "paper", "guide", `${serviceIdentity}:${documentSignature}`);
   const insightKey = buildAnalysisCacheKey(selectedPaperId ?? "", translationTarget?.id ?? "", "insight", `${serviceIdentity}:${documentSignature}:${targetSignature}`);
+  const chartKey = buildAnalysisCacheKey(selectedPaperId ?? "", selectedBlock?.id ?? "", "chart", `${serviceIdentity}:${selectedPaper?.originalId}:${documentSignature}:${visualSignature}`);
+  const chartReading = useMemo(() => {
+    const entry = analysisCache.get(chartKey);
+    try { return entry ? parseChartReading(entry.value) : null; } catch { return null; }
+  }, [analysisCache, chartKey]);
   const readingGuide = useMemo(() => {
     const entry = analysisCache.get(guideKey);
     try { return entry ? parseReadingGuide(entry.value) : null; } catch { return null; }
@@ -233,7 +263,11 @@ export default function App() {
   }, [analysisCache, insightKey]);
   const vocabulary = useMemo(() => extractAcademicVocabulary(selectedPaper?.blockData ?? [], readingGuide?.terms), [selectedPaper?.blockData, readingGuide]);
 
-  async function requestAnalysis(request: AiRequest, onDelta: (delta: string) => void): Promise<string> {
+  async function requestAnalysis(
+    request: AiRequest,
+    onDelta: (delta: string) => void,
+    options: AnalysisRequestOptions = {},
+  ): Promise<string> {
     if (!settingsReady) throw new Error("服务配置尚未就绪");
     if (serviceSettings.aiProvider === "local") throw new Error("请配置百炼或 DeepSeek 后使用 AI 服务");
     if (!serviceSettings[serviceSettings.aiProvider].configured) {
@@ -242,12 +276,19 @@ export default function App() {
     const bridge = getDesktopBridge();
     if (!bridge) throw new Error("真实模型调用仅在桌面程序中可用");
     if (!bridge.stream) throw new Error("桌面版流式 AI 接口不可用，请重启或更新应用。");
-    cancelActiveAnalysis();
+    const activeControllers = options.background ? activeBackgroundAnalysisAbortRef.current : activeAnalysisAbortRef.current;
+    if (!options.concurrent) {
+      for (const controller of activeControllers) controller.abort();
+      activeControllers.clear();
+    }
     const controller = new AbortController();
-    activeAnalysisAbortRef.current = controller;
+    activeControllers.add(controller);
+    const abortFromOwner = () => controller.abort();
+    if (options.signal?.aborted) controller.abort();
+    else options.signal?.addEventListener("abort", abortFromOwner, { once: true });
     const sourceBlocks = request.paper.blockData ?? [];
     const selectedIndex = sourceBlocks.findIndex((block) => block.id === request.block?.id);
-    const isSelection = ["translate", "explain", "insight"].includes(request.operation);
+    const isSelection = ["translate", "explain", "insight", "chart"].includes(request.operation);
     const contextBlocks = isSelection
       ? sourceBlocks.slice(Math.max(0, selectedIndex - 1), selectedIndex + 2)
       : sourceBlocks;
@@ -257,7 +298,7 @@ export default function App() {
       const text = block.text.slice(0, isSelection ? 2500 : remaining);
       remaining -= text.length;
       return { ...block, text };
-    }).filter((block) => block.text);
+    }).filter((block) => block.text || block.id === request.block?.id);
     const compactRequest: AiRequest = {
       ...request,
       paper: { ...request.paper, blockData },
@@ -275,7 +316,8 @@ export default function App() {
         return () => controller.signal.removeEventListener("abort", handleAbort);
       });
     } finally {
-      if (activeAnalysisAbortRef.current === controller) activeAnalysisAbortRef.current = null;
+      options.signal?.removeEventListener("abort", abortFromOwner);
+      activeControllers.delete(controller);
     }
   }
 
@@ -323,7 +365,7 @@ export default function App() {
           operation: "translate",
           paper: { ...paper, blockData: blocks },
           block,
-        }, onDelta),
+        }, onDelta, { background: true, signal }),
         onDelta: (delta) => setStreamingTranslations((current) => ({ ...current, [`${paper.id}:${signature}`]: `${current[`${paper.id}:${signature}`] ?? ""}${delta}` })),
         onComplete: (value) => {
           setStreamingTranslations((current) => {
@@ -365,12 +407,15 @@ export default function App() {
 
   async function withAnalysisError(action: () => Promise<void>) {
     const context = errorContextRef.current;
+    const requestId = analysisRequestIdRef.current;
+    setParagraphAnalysis(null);
     setActionError(null);
     try {
       await action();
     } catch (error) {
-      if (errorContextRef.current === context && !(error instanceof DOMException && error.name === "AbortError")) {
-        setActionError(error instanceof Error ? error.message : "请求失败，请检查服务配置和网络");
+      const failure = error as { name?: unknown; message?: unknown } | null;
+      if (analysisRequestIdRef.current === requestId && errorContextRef.current === context && failure?.name !== "AbortError") {
+        setActionError(typeof failure?.message === "string" ? failure.message : "请求失败，请检查服务配置和网络");
       }
     }
   }
@@ -594,9 +639,11 @@ export default function App() {
         current.map((paper) => (paper.id === selectedPaper.id ? { ...paper, overview } : paper)),
       );
     } finally {
-      setIsBusy(false);
-      setPendingAction(null);
-      if (analysisRequestIdRef.current === requestId) setStreamingOutput(null);
+      if (analysisRequestIdRef.current === requestId) {
+        setIsBusy(false);
+        setPendingAction(null);
+        setStreamingOutput(null);
+      }
     }
   }
 
@@ -651,9 +698,11 @@ export default function App() {
         [`${selectedPaper.id}:${sourceSignature}`]: value,
       }));
     } finally {
-      setIsBusy(false);
-      setPendingAction(null);
-      if (analysisRequestIdRef.current === requestId) setStreamingOutput(null);
+      if (analysisRequestIdRef.current === requestId) {
+        setIsBusy(false);
+        setPendingAction(null);
+        setStreamingOutput(null);
+      }
     }
   }
 
@@ -662,7 +711,6 @@ export default function App() {
     const requestIdentity = serviceIdentity;
     const sourceSignature = `${getDocumentSourceSignature(selectedPaper.blockData ?? [])}:${question.trim()}`;
     const documentSignature = getDocumentSourceSignature(selectedPaper.blockData ?? []);
-    const requestDocumentId = analysisRequestIdRef.current;
     const key = buildAnalysisCacheKey(selectedPaper.id, "paper", "qa", `${serviceIdentity}:${sourceSignature}`);
     const cached = getCachedAnalysis(analysisCache, key);
     if (cached) {
@@ -671,7 +719,7 @@ export default function App() {
     }
     setIsBusy(true);
     setPendingAction("qa");
-    const requestId = ++analysisRequestIdRef.current;
+    const requestId = analysisRequestIdRef.current;
     const requestPaperId = selectedPaper.id;
     setStreamingOutput({ operation: "qa", paperId: requestPaperId, text: "" });
     try {
@@ -704,9 +752,11 @@ export default function App() {
         setAnswer(value);
       }
     } finally {
-      setIsBusy(false);
-      setPendingAction(null);
-      if (analysisRequestIdRef.current === requestId) setStreamingOutput(null);
+      if (analysisRequestIdRef.current === requestId) {
+        setIsBusy(false);
+        setPendingAction(null);
+        setStreamingOutput(null);
+      }
     }
   }
 
@@ -732,9 +782,88 @@ export default function App() {
         setExplanations((current) => ({ ...current, [`${paperId}:${signature}`]: value }));
       }
     } finally {
+      if (analysisRequestIdRef.current === requestId) {
+        setIsBusy(false);
+        setPendingAction(null);
+        setStreamingOutput(null);
+      }
+    }
+  }
+
+  async function handleAnalyzeParagraph(block: DocumentBlock) {
+    if (!selectedPaper || block.kind !== "paragraph" || importingRef.current) return;
+    const paper = selectedPaper;
+    const signature = getDocumentBlockSignature(block);
+    const identity = serviceIdentity;
+    const activeKey = `${paper.id}:${identity}:${signature}`;
+    if (activeParagraphAnalysisRef.current === activeKey) return;
+    invalidateAnalysisRequests();
+    selectedBlockRef.current = block;
+    setSelectedBlock(block);
+    setSelectionText("");
+    setActionError(null);
+    if (!availability.available) { setSettingsOpen(true); return; }
+    const requestId = analysisRequestIdRef.current;
+    const documentSignature = getDocumentSourceSignature(paper.blockData ?? []);
+    const translationKey = buildAnalysisCacheKey(paper.id, `${block.id}:${signature}`, "translate", `${identity}:${signature}`);
+    const cachedTranslation = getCachedAnalysis(analysisCache, translationKey)?.value ?? translations[`${paper.id}:${signature}`];
+    const cachedExplanation = explanations[`${paper.id}:${signature}`];
+    const outputs = { translate: cachedTranslation ?? "", explain: cachedExplanation ?? "" };
+    const pending: ParagraphOperation[] = [];
+    if (!cachedTranslation) pending.push("translate");
+    if (!cachedExplanation) pending.push("explain");
+    activeParagraphAnalysisRef.current = activeKey;
+    setParagraphAnalysis({ requestId, paperId: paper.id, signature, pending, outputs });
+    setIsBusy(pending.length > 0);
+
+    function stillCurrent() {
+      const currentPaper = papersRef.current.find((item) => item.id === paper.id);
+      return analysisRequestIdRef.current === requestId && serviceIdentityRef.current === identity &&
+        selectedPaperIdRef.current === paper.id &&
+        getDocumentSourceSignature(currentPaper?.blockData ?? []) === documentSignature;
+    }
+
+    // Each operation settles independently so a failure cannot cancel the other result.
+    await Promise.all(pending.map(async (operation) => {
+      try {
+        const value = await requestAnalysis({ operation, paper, block }, (delta) => {
+          if (!stillCurrent()) return;
+          setParagraphAnalysis((current) => current?.requestId === requestId
+            ? { ...current, outputs: { ...current.outputs, [operation]: current.outputs[operation] + delta } } : current);
+        }, { concurrent: true });
+        if (!stillCurrent()) return;
+        if (operation === "translate") {
+          setAnalysisCache((current) => {
+            const next = new Map(current);
+            setCachedAnalysis(next, {
+              key: translationKey, paperId: paper.id, scopeId: `${block.id}:${signature}`, operation,
+              sourceSignature: `${identity}:${signature}`, value, createdAt: new Date().toISOString(),
+            });
+            return next;
+          });
+          setTranslations((current) => ({ ...current, [`${paper.id}:${signature}`]: value }));
+        } else {
+          setExplanations((current) => ({ ...current, [`${paper.id}:${signature}`]: value }));
+        }
+        setParagraphAnalysis((current) => current?.requestId === requestId
+          ? { ...current, outputs: { ...current.outputs, [operation]: value } } : current);
+      } catch (error) {
+        const failure = error as { name?: unknown; message?: unknown } | null;
+        if (!stillCurrent() || failure?.name === "AbortError") return;
+        const message = typeof failure?.message === "string" ? failure.message : "请求失败，请检查服务配置和网络";
+        setActionError((current) => [current, `${operation === "translate" ? "翻译" : "解释"}：${message}`].filter(Boolean).join("\n"));
+        setParagraphAnalysis((current) => current?.requestId === requestId
+          ? { ...current, outputs: { ...current.outputs, [operation]: "" } } : current);
+      } finally {
+        if (analysisRequestIdRef.current === requestId) {
+          setParagraphAnalysis((current) => current?.requestId === requestId
+            ? { ...current, pending: current.pending.filter((item) => item !== operation) } : current);
+        }
+      }
+    }));
+    if (analysisRequestIdRef.current === requestId) {
       setIsBusy(false);
-      setPendingAction(null);
-      if (analysisRequestIdRef.current === requestId) setStreamingOutput(null);
+      activeParagraphAnalysisRef.current = null;
     }
   }
 
@@ -765,9 +894,56 @@ export default function App() {
         return next;
       });
     } finally {
-      setIsBusy(false);
-      setPendingAction(null);
-      if (analysisRequestIdRef.current === requestId) setStreamingOutput(null);
+      if (analysisRequestIdRef.current === requestId) {
+        setIsBusy(false);
+        setPendingAction(null);
+        setStreamingOutput(null);
+      }
+    }
+  }
+
+  async function handleReadChart() {
+    if (!selectedPaper || !selectedBlock || !isVisualBlock(selectedBlock)) return;
+    if (chartReading) return;
+    const block = selectedBlock;
+    const paper = selectedPaper;
+    const identity = serviceIdentity;
+    const requestId = analysisRequestIdRef.current;
+    const sourceSignature = getDocumentSourceSignature(paper.blockData ?? []);
+    const visual = getDocumentVisualSignature(block);
+    const key = chartKey;
+    function stillCurrent() {
+      const currentPaper = papersRef.current.find((item) => item.id === paper.id);
+      const currentBlock = currentPaper?.blockData?.find((item) => item.id === block.id);
+      return analysisRequestIdRef.current === requestId && serviceIdentityRef.current === identity &&
+        selectedPaperIdRef.current === paper.id && currentBlock && getDocumentVisualSignature(currentBlock) === visual &&
+        getDocumentSourceSignature(currentPaper?.blockData ?? []) === sourceSignature;
+    }
+    setIsBusy(true);
+    setPendingAction("chart");
+    setStreamingOutput({ operation: "chart", paperId: paper.id, text: "" });
+    try {
+      const imageDataUrl = await loadChartImage(paper.originalId, block);
+      if (!stillCurrent()) return;
+      const value = await requestAnalysis({ operation: "chart", paper, block, imageDataUrl }, (delta) => {
+        if (!stillCurrent()) return;
+        setStreamingOutput((current) => current?.operation === "chart" && current.paperId === paper.id
+          ? { ...current, text: current.text + delta } : current);
+      });
+      parseChartReading(value);
+      if (!stillCurrent()) return;
+      setAnalysisCache((current) => {
+        const next = new Map(current);
+        setCachedAnalysis(next, { key, paperId: paper.id, scopeId: block.id, operation: "chart",
+          sourceSignature: `${identity}:${paper.originalId}:${sourceSignature}:${visual}`, value, createdAt: new Date().toISOString() });
+        return next;
+      });
+    } finally {
+      if (analysisRequestIdRef.current === requestId) {
+        setIsBusy(false);
+        setPendingAction(null);
+        setStreamingOutput(null);
+      }
     }
   }
 
@@ -808,6 +984,8 @@ export default function App() {
   </div> : null;
 
   if (view === "reader" && selectedPaper) {
+    const currentParagraphAnalysis = paragraphAnalysis?.paperId === selectedPaper.id &&
+      paragraphAnalysis.signature === targetSignature ? paragraphAnalysis : null;
     const pipeline = pipelineStates[selectedPaper.id] ?? {
       paperId: selectedPaper.id,
       source: "local" as const,
@@ -824,19 +1002,28 @@ export default function App() {
         {cloudDialog}
         <ReaderView
           paper={selectedPaper}
-          selectedBlock={translationTarget}
+          selectedBlock={translationTarget ?? selectedBlock}
           selectionText={selectionText}
-          translation={translations[`${selectedPaper.id}:${targetSignature}`] ?? null}
+          translation={currentParagraphAnalysis?.outputs.translate ?? translations[`${selectedPaper.id}:${targetSignature}`] ?? null}
           translations={{ ...translations, ...streamingTranslations }}
           answer={answer}
           isBusy={isBusy}
-          onBack={() => setView("library")}
-          onSelectBlock={(block) => { invalidateAnalysisRequests(); setSelectedBlock(block); setSelectionText(""); setActionError(null); }}
+          onBack={() => { invalidateAnalysisRequests(); setView("library"); }}
+          onSelectBlock={(block) => {
+            if (block && !selectionText && selectedBlockRef.current &&
+                getDocumentBlockSignature(selectedBlockRef.current) === getDocumentBlockSignature(block)) return;
+            invalidateAnalysisRequests();
+            selectedBlockRef.current = block;
+            setSelectedBlock(block); setSelectionText(""); setActionError(null);
+          }}
           onSelectText={(block, text) => { invalidateAnalysisRequests(); setSelectedBlock(block); setSelectionText(text); setActionError(null); }}
+          onAnalyzeParagraph={(block) => void handleAnalyzeParagraph(block)}
           onOverview={() => void withAnalysisError(handleOverview)}
           onTranslate={() => void withAnalysisError(handleTranslate)}
+          onReadChart={() => void withAnalysisError(handleReadChart)}
+          chartReading={chartReading}
           onExplain={() => void withAnalysisError(handleExplain)}
-          explanation={explanations[`${selectedPaper.id}:${targetSignature}`] ?? null}
+          explanation={currentParagraphAnalysis?.outputs.explain ?? explanations[`${selectedPaper.id}:${targetSignature}`] ?? null}
           onAsk={(question) => void withAnalysisError(() => handleAsk(question))}
           onOpenSettings={() => setSettingsOpen(true)}
           actionError={actionError}
@@ -850,6 +1037,8 @@ export default function App() {
           serviceModel={availability.model}
           mineruConfigured={serviceSettings.mineru.configured}
           pendingAction={pendingAction}
+          pendingParagraphActions={currentParagraphAnalysis?.pending}
+          paragraphAnalysisRequestId={currentParagraphAnalysis?.requestId}
           streamingOutput={streamingOutput?.paperId === selectedPaper.id
             ? { operation: streamingOutput.operation, text: streamingOutput.text }
             : null}

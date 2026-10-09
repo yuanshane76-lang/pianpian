@@ -31,6 +31,14 @@ describe("reading paragraphs and selected text", () => {
     expect(getTranslationTarget(block, "Second sentence.")?.text).toBe("Second sentence.");
   });
 
+  it("never routes a table or figure selection to paragraph translation", () => {
+    for (const kind of ["table", "image"] as const) {
+      const block = { id: "visual", kind, text: "Table 1", pageNumber: 1, order: 0 };
+      expect(getTranslationTarget(block, "")).toBeNull();
+      expect(getTranslationTarget(block, "Table")).toBeNull();
+    }
+  });
+
   it("honors a PDF selection even when MinerU normalizes spaces and citations differently", () => {
     const block = { id: "p001-b001", text: "Models [35, 2, 5] can improve translation. Another sentence.", pageNumber: 1, order: 0, kind: "paragraph" as const };
     const selection = "Models [ 35 , 2 , 5] can improve translation.";

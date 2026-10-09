@@ -77,6 +77,10 @@ export function getDocumentBlockSignature(block: Pick<DocumentBlock, "id" | "pag
   return hashText([block.id, block.pageNumber, block.kind, block.text].join("\u001f"));
 }
 
+export function getDocumentVisualSignature(block: DocumentBlock): string {
+  return hashText([getDocumentBlockSignature(block), block.caption ?? "", block.assetPath ?? "", block.bbox?.join(",") ?? ""].join("\u001f"));
+}
+
 function normalizeContent(value: string): string {
   return value
     .replace(/<[^>]+>/g, " ")

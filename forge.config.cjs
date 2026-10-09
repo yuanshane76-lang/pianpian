@@ -10,8 +10,9 @@ function ignorePackageFile(file) {
   }
   if (parts[0] === "dist") {
     if (parts.length === 1 || relative === "dist/index.html") return false;
+    if (relative === "dist/pdf.worker.min.mjs") return false;
     if (parts[1] === "assets") {
-      return parts.length > 3 || (parts.length === 3 && !/\.(?:js|mjs|css)$/.test(parts[2]));
+      return parts.length > 3 || (parts.length === 3 && !/\.(?:js|mjs|css|woff2?|ttf)$/.test(parts[2]));
     }
     if (parts[1] === "standard_fonts") {
       return parts.length > 3 ||

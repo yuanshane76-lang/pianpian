@@ -2,6 +2,8 @@
 
 这是纸研工作台的私有开发仓库。开始之前，请先阅读 [AGENTS.md](AGENTS.md)。
 
+仓库所有者本机的正式路径为 `D:\Desktop\grade4\workspace\zhiyan`。协作者可以克隆到自己的任意目录，源码和验证脚本不得依赖维护者电脑上的绝对路径。
+
 ## 首次运行
 
 准备 Git、Node.js 24.x 和随 Node.js 安装的 npm。项目目前以 Windows 桌面端为主要交付目标。
@@ -66,7 +68,19 @@ git worktree add -b fix/pdf-selection ../zhiyan-pdf-selection origin/main
 | `npm run check` | 凭据检查、测试、TypeScript 检查和前端构建 |
 | `npm run make:win` | 验证后生成 Windows x64 免安装压缩包 |
 
-现有 `scripts/desktop-e2e.cjs` 和 `scripts/pdf-layout-e2e.cjs` 属于人工真实环境验证，需要已经配置的桌面服务和测试文献库，不能当作无密钥、空文献库下的自动验收。复用这些脚本前应核对它们的界面选择器是否仍符合当前产品。
+启动 `npm run dev` 后，可另开终端执行桌面检查：
+
+| 命令 | 数据与服务边界 |
+| --- | --- |
+| `node scripts/desktop-e2e.cjs` | 临时空用户目录：验证中文壳、配置和 IPC；无需密钥和论文，禁止外部服务请求 |
+| `node scripts/translation-math-e2e.cjs` | 临时用户目录和固定公式数据，无付费请求 |
+| `node scripts/paragraph-quick-analysis-e2e.cjs` | 读取本机已解析论文和配置，隔离浏览器会话、模拟模型响应；不是空文献库检查 |
+| `node scripts/reader-chart-e2e.cjs` | 读取本机已解析论文和配置，隔离浏览器会话；默认跳过 AI 操作、禁止外部请求，检查连续翻页、图表和布局 |
+| `node scripts/pdf-layout-e2e.cjs` | 需要本机已解析的 Attention 论文；默认禁止外部服务，检查逐页坐标和划选 |
+
+后面三项是维护者的本机验收，不是协作者空文献库下的自动验收。`--live-ai` 明确允许真实付费调用，只有已获准使用的配置、论文和环境才能运行。历史真实服务结果不能替代新版本重新验证。
+
+`node scripts/explanation-e2e.cjs --live-ai` 专门验证真实解释服务并可能计费；缺少该参数时脚本拒绝执行。
 
 真实服务测试使用自己的密钥和获准上传的论文，单独记录结果。PR 自动检查只运行 `npm run check`，不调用真实服务。
 
