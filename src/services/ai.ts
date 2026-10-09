@@ -2,10 +2,11 @@ import type { DocumentBlock } from "../domain/documentBlocks";
 import type { PaperRecord } from "../domain/library";
 
 export interface AiRequest {
-  operation: "overview" | "translate" | "qa" | "explain" | "insight" | "guide";
+  operation: "overview" | "translate" | "qa" | "explain" | "insight" | "guide" | "chart";
   paper: PaperRecord;
   block?: DocumentBlock;
   question?: string;
+  imageDataUrl?: string;
 }
 
 function localOverview(paper: PaperRecord): string {

@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { createBlocksFromPlainText } from "../../src/services/document";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
 describe("文档文本转换", () => {
+  it("在浏览器构建中配置可访问的 PDF worker 资源", () => {
+    expect(typeof pdfjsLib.GlobalWorkerOptions.workerSrc).toBe("string");
+    expect(pdfjsLib.GlobalWorkerOptions.workerSrc).not.toContain("/node_modules/");
+  });
+
   it("按非空行生成稳定的阅读块", () => {
     const blocks = createBlocksFromPlainText("\n摘要\n\n第一段内容。\n\n第二段内容。\n");
 

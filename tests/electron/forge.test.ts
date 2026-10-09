@@ -23,8 +23,12 @@ describe("portable package contents", () => {
     expect(ignored("electron/document-tasks.cjs")).toBe(false);
     expect(ignored("electron/mineru.cjs")).toBe(false);
     expect(ignored("dist/index.html")).toBe(false);
+    expect(ignored("dist/pdf.worker.min.mjs")).toBe(false);
     expect(ignored("dist/assets/index-123.js")).toBe(false);
     expect(ignored("dist/assets/pdf.worker-123.mjs")).toBe(false);
+    expect(ignored("dist/assets/KaTeX_Main-Regular-123.woff2")).toBe(false);
+    expect(ignored("dist/assets/KaTeX_Math-Italic-123.woff")).toBe(false);
+    expect(ignored("dist/assets/KaTeX_Size1-Regular-123.ttf")).toBe(false);
     expect(ignored("dist/standard_fonts/FoxitSans.pfb")).toBe(false);
   });
 

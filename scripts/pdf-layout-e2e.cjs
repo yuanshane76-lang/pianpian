@@ -11,13 +11,34 @@ const liveAi = process.argv.includes("--live-ai");
 (async () => {
   fs.mkdirSync(output, { recursive: true });
   const electron = await _electron.launch({
-    executablePath: require("electron"), args: [root], cwd: root,
+    executablePath: require("electron"), args: [path.join(__dirname, "reader-chart-launch.cjs")], cwd: root,
+    env: { ...process.env, ZHIYAN_E2E_LIVE_AI: liveAi ? "1" : "0" },
   });
   const page = await electron.firstWindow();
   page.setDefaultTimeout(20000);
   page.on("pageerror", (error) => report.errors.push(error.message));
   try {
     await page.waitForSelector(".workspace-shell");
+    const userData = await electron.evaluate(({ app }) => app.getPath("userData"));
+    const documents = path.join(userData, "documents");
+    const fixtures = fs.readdirSync(documents).filter((id) => /^[a-f0-9]{64}$/.test(id)).map((id) => {
+      const parsed = JSON.parse(fs.readFileSync(path.join(documents, id, "parse.json"), "utf8"));
+      return { id, originalId: id, title: parsed.title, authors: [], year: null, tags: [], favorite: false,
+        sourcePath: `local://layout-e2e/${id}`, pageCount: parsed.pageCount, blocks: parsed.blocks.length,
+        blockData: parsed.blocks, importedAt: "2026-10-09", overview: null, parseVersion: 2, parseStatus: "ready" };
+    });
+    await page.evaluate((papers) => localStorage.setItem("zhiyan-workbench.papers.v1", JSON.stringify(papers)), fixtures);
+    await page.reload();
+    await page.waitForSelector(".workspace-shell");
+    if (!liveAi) await electron.evaluate(() => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async (url, options) => {
+        if (/^https?:/i.test(String(url)) && !String(url).startsWith("http://127.0.0.1:4173/")) {
+          throw new Error("Layout-only checks must not call external services; opt in with --live-ai");
+        }
+        return originalFetch(url, options);
+      };
+    });
     await page.locator(".paper-row").filter({ hasText: "Attention" }).first().click();
     await page.getByRole("button", { name: "打开阅读", exact: true }).click();
     await page.waitForSelector(".pdf-block-hit-area");
@@ -26,10 +47,9 @@ const liveAi = process.argv.includes("--live-ai");
 
     async function ready(targetPage) {
       await page.waitForFunction((number) => {
-        const input = document.querySelector('[aria-label="PDF 页码"]');
-        const canvas = document.querySelector(".pdf-page-stage canvas");
-        return input?.value === String(number) && canvas?.width > 0
-          && !document.querySelector(".pdf-feedback") && document.querySelector(".pdf-structure-overlay");
+        const stage = document.querySelector(`.pdf-page-stage[data-page-number="${number}"]`);
+        return stage?.getAttribute("data-rendered") === "true" && stage.querySelector("canvas")?.width > 0
+          && !stage.querySelector(".pdf-feedback") && stage.querySelector(".pdf-structure-overlay");
       }, targetPage);
     }
 
@@ -40,9 +60,10 @@ const liveAi = process.argv.includes("--live-ai");
       await target.scrollIntoViewIfNeeded();
       const geometry = await target.evaluate((element, bbox) => {
         const rectangle = (value) => ({ x: value.x, y: value.y, width: value.width, height: value.height });
-        const canvas = document.querySelector(".pdf-page-stage canvas").getBoundingClientRect();
-        const stage = document.querySelector(".pdf-page-stage").getBoundingClientRect();
-        const overlay = document.querySelector(".pdf-structure-overlay").getBoundingClientRect();
+        const pageStage = element.closest(".pdf-page-stage");
+        const canvas = pageStage.querySelector("canvas").getBoundingClientRect();
+        const stage = pageStage.getBoundingClientRect();
+        const overlay = pageStage.querySelector(".pdf-structure-overlay").getBoundingClientRect();
         const hit = element.getBoundingClientRect();
         return {
           canvas: rectangle(canvas), stage: rectangle(stage), overlay: rectangle(overlay), hit: rectangle(hit),
@@ -59,7 +80,7 @@ const liveAi = process.argv.includes("--live-ai");
       const y = geometry.hit.y + Math.min(geometry.hit.height / 2, 9);
       await page.mouse.move(x, y);
       await page.mouse.click(x, y);
-      await page.waitForFunction((text) => document.querySelector(".selected-block-text")?.textContent === text, block.text);
+      await page.waitForFunction((id) => document.getElementById(`pdf-block-${id}`)?.getAttribute("aria-pressed") === "true", block.id);
       await page.screenshot({ path: path.join(output, `${name}.png`) });
       report.checks.push({ name, page: block.pageNumber, blockId: block.id, geometry });
       console.log(`PASS ${name}`);
@@ -82,10 +103,11 @@ const liveAi = process.argv.includes("--live-ai");
 
     await page.getByRole("spinbutton", { name: "PDF 页码" }).fill("5");
     await ready(5);
-    await page.waitForFunction(() => document.querySelectorAll(".pdf-text-layer span").length > 20);
+    await page.waitForFunction(() => document.querySelectorAll('.pdf-page-stage[data-page-number="5"] .pdf-text-layer span').length > 20);
     const sentence = await page.evaluate((block) => {
-      const stage = document.querySelector(".pdf-page-stage").getBoundingClientRect();
-      const spans = [...document.querySelectorAll(".pdf-text-layer span")].filter((element) => {
+      const pageStage = document.querySelector(`.pdf-page-stage[data-page-number="${block.pageNumber}"]`);
+      const stage = pageStage.getBoundingClientRect();
+      const spans = [...pageStage.querySelectorAll(".pdf-text-layer span")].filter((element) => {
         const rect = element.getBoundingClientRect();
         const x = (rect.x + rect.width / 2 - stage.x) / stage.width;
         const y = (rect.y + rect.height / 2 - stage.y) / stage.height;
@@ -109,12 +131,12 @@ const liveAi = process.argv.includes("--live-ai");
       range.setStart(node, 0); range.setEnd(endNode, end);
       const selection = window.getSelection();
       selection.removeAllRanges(); selection.addRange(range);
-      document.querySelector(".pdf-page-stage").dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      pageStage.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
       return selection.toString().trim();
     }, paragraph);
     assert(sentence.length > 35 && /[a-z]{4}/i.test(sentence), "Selection must contain meaningful English, not a bullet or whitespace");
     await page.getByRole("button", { name: "翻译选中句子", exact: true }).waitFor();
-    assert.equal(await page.locator(".selected-block-text").textContent(), sentence);
+    assert.equal(await page.locator(".selected-block-text").count(), 0);
     report.checks.push({ name: "07-original-pdf-text-selection", selected: sentence });
     await page.screenshot({ path: path.join(output, "07-sentence.png") });
     if (liveAi) {

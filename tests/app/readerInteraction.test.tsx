@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../../src/app/App";
 import { DEFAULT_SERVICE_SETTINGS, toPublicServiceSettings } from "../../src/domain/serviceSettings";
+import { loadChartImage } from "../../src/services/chartImage";
 vi.mock("../../src/services/originalPdf", () => ({
   readOriginalPdf: vi.fn(async () => new ArrayBuffer(8)),
 }));
@@ -18,6 +19,9 @@ vi.mock("../../src/services/document", () => ({
 }));
 vi.mock("../../src/services/pdfTextLayer", () => ({
   renderPdfTextLayer: () => ({ promise: Promise.resolve(), cancel: vi.fn() }),
+}));
+vi.mock("../../src/services/chartImage", () => ({
+  loadChartImage: vi.fn(async () => "data:image/png;base64,aGVsbG8="),
 }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -38,8 +42,8 @@ const settings = toPublicServiceSettings({ ...DEFAULT_SERVICE_SETTINGS, aiProvid
 let settingsRevision = 0;
 afterEach(() => { vi.restoreAllMocks(); window.localStorage.clear(); delete window.zhiyan; });
 
-async function mount(response: () => Promise<string>, streamResponse?: (onDelta: (text: string) => void) => Promise<string>) {
-  window.localStorage.setItem("zhiyan-workbench.papers.v1", JSON.stringify([paper]));
+async function mount(response: () => Promise<string>, streamResponse?: (onDelta: (text: string) => void) => Promise<string>, source = paper) {
+  window.localStorage.setItem("zhiyan-workbench.papers.v1", JSON.stringify([source]));
   const currentSettings = { ...settings, revision: `test-${++settingsRevision}` };
   const invoke = vi.fn(async (channel: string) => {
     if (channel === "zhiyan:settings:get") return currentSettings;
@@ -65,6 +69,112 @@ async function mount(response: () => Promise<string>, streamResponse?: (onDelta:
 }
 
 describe("paragraph translation interaction", () => {
+  it("routes each result tab to its own operation and restores generated results without new calls", async () => {
+    let value = "模型使用注意力机制。";
+    const { container, root, stream } = await mount(async () => value);
+    await act(async () => container.querySelector<HTMLElement>(".pdf-block-hit-area")!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('.paragraph-tabs [data-operation="translate"]')!.click());
+    expect(stream.mock.calls[0][1]).toMatchObject({ operation: "translate" });
+    expect(container.querySelector(".assistant-translation")?.textContent).toContain("注意力机制");
+    value = '{"summary":"段落摘要","role":"段落作用"}';
+    await act(async () => container.querySelector<HTMLButtonElement>('.paragraph-tabs [data-operation="insight"]')!.click());
+    expect(stream.mock.calls[1][1]).toMatchObject({ operation: "insight" });
+    expect(container.querySelector(".assistant-insight")?.textContent).toContain("段落作用");
+    expect(container.querySelector(".assistant-translation")).toBeNull();
+    value = "这里的 attention 指注意力机制。";
+    await act(async () => container.querySelector<HTMLButtonElement>('.paragraph-tabs [data-operation="explain"]')!.click());
+    expect(stream.mock.calls[2][1]).toMatchObject({ operation: "explain" });
+    expect(container.querySelector(".assistant-explanation")?.textContent).toContain("attention");
+    expect(container.querySelector(".assistant-insight")).toBeNull();
+    for (const operation of ["translate", "insight", "explain"]) {
+      await act(async () => container.querySelector<HTMLButtonElement>(`.paragraph-tabs [data-operation="${operation}"]`)!.click());
+    }
+    expect(stream).toHaveBeenCalledTimes(3);
+    expect(container.querySelector(".assistant-original")).toBeNull();
+    await act(async () => root.unmount()); container.remove();
+  });
+
+  it("excludes a covered PDF from keyboard focus while the narrow assistant is open", async () => {
+    Object.defineProperty(window, "matchMedia", { configurable: true, value: vi.fn() });
+    vi.spyOn(window, "matchMedia").mockReturnValue({
+      matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList);
+    const { container, root } = await mount(async () => "");
+    const document = container.querySelector<HTMLElement>(".reader-document")!;
+    expect(document.inert).toBe(true);
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')).toBe(globalThis.document.activeElement);
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="收起助手"]')!.click());
+    expect(document.inert).toBe(false);
+    expect(container.querySelector('[aria-label="展开助手"]')).toBe(globalThis.document.activeElement);
+    await act(async () => root.unmount()); container.remove();
+  });
+
+  it("prevents vocabulary enrichment from overlapping chart preprocessing", async () => {
+    let finish!: (value: string) => void;
+    const source = { ...paper, blockData: [{ ...paper.blockData[0], kind: "table" }, paper.blockData[1]] };
+    const { container, root, stream } = await mount(async () => "", undefined, source);
+    await act(async () => (container.querySelector(".pdf-block-hit-area") as HTMLElement).click());
+    vi.mocked(loadChartImage).mockImplementationOnce(async () => new Promise((resolve) => { finish = resolve; }));
+    await act(async () => container.querySelector<HTMLButtonElement>(".chart-context .secondary-button")!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((item) => item.textContent?.includes("学术词汇"))!.click());
+    expect(container.querySelector<HTMLButtonElement>(".vocabulary-intro button")?.disabled).toBe(true);
+    await act(async () => (container.querySelectorAll(".pdf-block-hit-area")[1] as HTMLElement).click());
+    await act(async () => finish("data:image/png;base64,aGVsbG8="));
+    expect(stream).not.toHaveBeenCalled();
+    await act(async () => root.unmount()); container.remove();
+  });
+  it("immediately releases a cancelled chart action and suppresses an old error after A to B to A", async () => {
+    let reject!: (error: unknown) => void;
+    const source = { ...paper, blockData: paper.blockData.map((block) => ({ ...block, kind: "table" })) };
+    const { container, root, stream } = await mount(async () => "", undefined, source);
+    const blocks = container.querySelectorAll<HTMLElement>(".pdf-block-hit-area");
+    await act(async () => blocks[0].click());
+    vi.mocked(loadChartImage).mockImplementationOnce(async () => new Promise((_resolve, fail) => { reject = fail; }));
+    await act(async () => container.querySelector<HTMLButtonElement>(".chart-context .secondary-button")!.click());
+    await act(async () => blocks[1].click());
+    expect(container.querySelector<HTMLButtonElement>(".chart-context .secondary-button")?.disabled).toBe(false);
+    expect(container.querySelector(".chart-reading-progress")).toBeNull();
+    await act(async () => blocks[0].click());
+    await act(async () => reject(new Error("旧图表处理失败")));
+    expect(container.querySelector(".assistant-action-error")).toBeNull();
+    expect(stream).not.toHaveBeenCalled();
+    await act(async () => root.unmount()); container.remove();
+  });
+
+  it("does not cache a failed or malformed chart response", async () => {
+    const source = { ...paper, blockData: [{ ...paper.blockData[0], kind: "image" }, paper.blockData[1]] };
+    const { container, root, stream } = await mount(async () => '{"summary":"partial"}', undefined, source);
+    await act(async () => (container.querySelector(".pdf-block-hit-area") as HTMLElement).click());
+    await act(async () => container.querySelector<HTMLButtonElement>(".chart-context .secondary-button")!.click());
+    expect(container.querySelector(".assistant-action-error")?.textContent).toContain("结构不完整");
+    expect(container.querySelector(".assistant-chart-reading")).toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>(".chart-context .secondary-button")!.click());
+    expect(stream).toHaveBeenCalledTimes(2);
+    await act(async () => root.unmount()); container.remove();
+  });
+  it("preserves the error message delivered by Electron's isolated preload realm", async () => {
+    const { container, root } = await mount(async () => { throw { name: "Error", message: "模型请求超时，请重试" }; });
+    await act(async () => (container.querySelector(".pdf-block-hit-area") as HTMLElement).click());
+    await act(async () => [...container.querySelectorAll("button")].find((item) => item.textContent === "翻译整段")!.click());
+    expect(container.querySelector(".assistant-action-error")?.textContent).toContain("模型请求超时");
+    await act(async () => root.unmount()); container.remove();
+  });
+
+  it("routes a table to image-based chart reading, renders structured findings, and reuses its cache", async () => {
+    const value = JSON.stringify({ summary: "比较模型成绩", encoding: "NQ 是准确率，越高越好", findings: ["RAG 为 44.5"], role: "支持方法有效性", caveats: ["不能比较不同数据集的分数"] });
+    const source = { ...paper, blockData: [{ ...paper.blockData[0], kind: "table", text: "<table><tr><td>RAG</td><td>44.5</td></tr></table>", caption: "Table 1. Results" }, paper.blockData[1]] };
+    const { container, root, stream } = await mount(async () => value, undefined, source);
+    await act(async () => (container.querySelector(".pdf-block-hit-area") as HTMLElement).click());
+    expect([...container.querySelectorAll("button")].some((item) => item.textContent === "翻译整段")).toBe(false);
+    expect(container.querySelector(".selected-context")?.textContent).not.toContain("<table>");
+    const read = container.querySelector<HTMLButtonElement>(".chart-context .secondary-button")!;
+    await act(async () => read.click());
+    expect(stream.mock.calls[0][1]).toMatchObject({ operation: "chart", imageDataUrl: "data:image/png;base64,aGVsbG8=", block: { kind: "table" } });
+    expect(container.querySelector(".assistant-chart-reading")?.textContent).toContain("RAG 为 44.5");
+    await act(async () => read.click());
+    expect(stream).toHaveBeenCalledOnce();
+    await act(async () => root.unmount()); container.remove();
+  });
   it("uses the complete paragraph by default and displays its Chinese result beside the selection", async () => {
     const { container, root, stream } = await mount(async () => "模型使用注意力机制。它效果很好。");
     await act(async () => (container.querySelector(".pdf-block-hit-area") as HTMLElement).click());
@@ -86,7 +196,8 @@ describe("paragraph translation interaction", () => {
     await act(async () => translate.click());
     await act(async () => blocks[1].click());
     await act(async () => finish("第一段的中文译文"));
-    expect(container.querySelector(".selected-block-text")?.textContent).toBe("A different paragraph.");
+    expect(blocks[1].getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector(".selected-block-text")).toBeNull();
     expect(container.querySelector(".assistant-translation")).toBeNull();
     await act(async () => root.unmount()); container.remove();
   });

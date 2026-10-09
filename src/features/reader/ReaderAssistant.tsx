@@ -1,15 +1,21 @@
-import { Bot, CornerDownLeft, Languages, LoaderCircle, MessageSquareText, Sparkles, Settings2 } from "lucide-react";
-import { useState } from "react";
+import { BookOpen, Bot, Check, ChevronDown, Copy, FileText, Languages, LoaderCircle, MessageSquareText, Pause, Play, RotateCcw, Send, Sparkles, Settings2 } from "lucide-react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import type { DocumentBlock } from "../../domain/documentBlocks";
 import type { PaperPipelineState } from "../../domain/pipeline";
 import type { AcademicTerm } from "../../domain/vocabulary";
 import { VocabularyPanel } from "./VocabularyPanel";
+import { isVisualBlock } from "../../domain/readingFlow";
+import { ChartContext } from "./ChartContext";
+import { TranslationContent } from "./TranslationContent";
 
 interface ReaderAssistantProps {
+  originalId?: string; chartReading: import("../../domain/learning").ChartReading | null; onReadChart: () => void;
   selectedBlock: DocumentBlock | null; overview: string | null; answer: string | null; isBusy: boolean;
   onOverview: () => void; onTranslate: () => void; onExplain: () => void; explanation: string | null; onAsk: (question: string) => void;
   translation: string | null; selectionText: string; serviceLabel: string; serviceModel: string; aiAvailable: boolean; onOpenSettings: () => void;
   actionError: string | null; pendingAction: string | null; insight: { summary: string; role: string } | null;
+  pendingParagraphActions?: Array<"translate" | "explain">;
+  paragraphAnalysisRequestId?: number;
   streamingOutput: { operation: import("../../services/ai").AiRequest["operation"]; text: string } | null;
   onInsight: () => void; guide: { overview: string; terms: Array<{ term: string; translation: string; definition: string }> } | null;
   onGuide: () => void; vocabulary: AcademicTerm[];
@@ -20,31 +26,181 @@ interface ReaderAssistantProps {
   onJump: (blockId: string) => void;
 }
 
+const PARAGRAPH_TABS = [
+  { operation: "translate", label: "翻译", icon: Languages },
+  { operation: "insight", label: "摘要与作用", icon: Sparkles },
+  { operation: "explain", label: "解释", icon: MessageSquareText },
+] as const;
+type ParagraphTab = typeof PARAGRAPH_TABS[number]["operation"];
+
 export function ReaderAssistant({
   selectedBlock, overview, answer, isBusy, onOverview, onTranslate, onExplain, explanation, onAsk,
   translation, selectionText, serviceLabel, serviceModel, aiAvailable, onOpenSettings, actionError, pendingAction,
   streamingOutput, insight, onInsight, guide, onGuide, vocabulary,
   pipeline, onPausePipeline, onResumePipeline, onRetryPipeline, onJump,
+  originalId, chartReading, onReadChart,
+  pendingParagraphActions = [], paragraphAnalysisRequestId,
 }: ReaderAssistantProps) {
   const [question, setQuestion] = useState("");
   const [tab, setTab] = useState<"assist" | "vocabulary">("assist");
+  const [paragraphTab, setParagraphTab] = useState<ParagraphTab>("translate");
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const [questionSequence, setQuestionSequence] = useState(0);
+  const id = useId();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const answerRef = useRef<HTMLElement>(null);
+  const revealedQuestion = useRef(-1);
+  const tabsRef = useRef<Array<HTMLButtonElement | null>>([]);
+  const paragraphTabsRef = useRef<Array<HTMLButtonElement | null>>([]);
+  const copyTimer = useRef<ReturnType<typeof setTimeout>>();
+  const copyRequest = useRef(0);
+  const visual = isVisualBlock(selectedBlock);
+  const translating = pendingAction === "translate" || pendingParagraphActions.includes("translate");
+  const explaining = pendingAction === "explain" || pendingParagraphActions.includes("explain");
+  const translationText = translation || (streamingOutput?.operation === "translate" ? streamingOutput.text : "");
+  useEffect(() => {
+    if (paragraphAnalysisRequestId === undefined) return;
+    setTab("assist");
+    setParagraphTab("translate");
+  }, [paragraphAnalysisRequestId]);
+  useEffect(() => {
+    scrollRef.current?.scrollTo?.({ top: 0 });
+  }, [selectedBlock?.id, selectionText, tab, paragraphTab]);
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    const result = answerRef.current;
+    if ((!questionSequence && pendingAction !== "qa") || revealedQuestion.current === questionSequence || !scroller || !result) return;
+    const top = scroller.scrollTop + result.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    scroller.scrollTo?.({ top, behavior: "auto" });
+    revealedQuestion.current = questionSequence;
+  }, [questionSequence, pendingAction, tab, Boolean(answer)]);
+  useEffect(() => {
+    copyRequest.current++;
+    setCopyState("idle");
+    return () => {
+      copyRequest.current++;
+      clearTimeout(copyTimer.current);
+    };
+  }, [selectedBlock?.id, translationText]);
+
+  async function copyTranslation() {
+    const request = ++copyRequest.current;
+    clearTimeout(copyTimer.current);
+    try {
+      await navigator.clipboard.writeText(translationText);
+      if (request !== copyRequest.current) return;
+      setCopyState("copied");
+      copyTimer.current = setTimeout(() => setCopyState("idle"), 2000);
+    } catch {
+      if (request === copyRequest.current) setCopyState("failed");
+    }
+  }
+
+  function changeTab(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    let next: number;
+    if (event.key === "ArrowRight" || event.key === "ArrowLeft") next = 1 - index;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = 1;
+    else return;
+    event.preventDefault();
+    setTab(next === 0 ? "assist" : "vocabulary");
+    tabsRef.current[next]?.focus();
+  }
+
+  function runParagraphAction(operation: ParagraphTab) {
+    if (isBusy) return;
+    if (!aiAvailable) { onOpenSettings(); return; }
+    const source = scrollRef.current?.querySelector(".paragraph-result");
+    if (source?.contains(document.activeElement)) {
+      const index = PARAGRAPH_TABS.findIndex((item) => item.operation === operation);
+      paragraphTabsRef.current[index]?.focus();
+    }
+    if (operation === "translate") onTranslate();
+    else if (operation === "insight") onInsight();
+    else onExplain();
+  }
+
+  function selectParagraphTab(operation: ParagraphTab, generate = true) {
+    setParagraphTab(operation);
+    const existing = operation === "translate" ? translationText : operation === "insight" ? insight : explanation;
+    if (generate && !existing) runParagraphAction(operation);
+  }
+
+  function changeParagraphTab(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    let next: number;
+    if (event.key === "ArrowRight") next = (index + 1) % PARAGRAPH_TABS.length;
+    else if (event.key === "ArrowLeft") next = (index + PARAGRAPH_TABS.length - 1) % PARAGRAPH_TABS.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = PARAGRAPH_TABS.length - 1;
+    else return;
+    event.preventDefault();
+    selectParagraphTab(PARAGRAPH_TABS[next].operation, false);
+    paragraphTabsRef.current[next]?.focus();
+  }
+
   function submitQuestion() {
     const value = question.trim();
-    if (!value || isBusy) return;
-    onAsk(value); setQuestion("");
+    if (!value || isBusy || !aiAvailable) return;
+    setTab("assist");
+    setQuestionSequence((current) => current + 1);
+    onAsk(value);
+    setQuestion("");
   }
-  return <aside className="reader-assistant">
+  return <aside className="reader-assistant" aria-label="研究助手">
     <div className="assistant-heading">
-      <div className="assistant-title"><div className="assistant-icon"><Bot size={17} /></div><div><strong>研究助手</strong><span>按需调用 · 本地缓存</span></div></div>
-      <span className="local-badge"><span className="status-dot" />{serviceLabel}</span>
+      <div className="assistant-title"><div className="assistant-icon"><Bot size={18} /></div><strong>研究助手</strong></div>
+      <button className={`assistant-service ${!aiAvailable ? "is-unavailable" : ""}`} type="button" onClick={onOpenSettings} title={aiAvailable ? `${serviceLabel} · ${serviceModel} · 服务配置` : "配置 AI 服务"} aria-label="助手服务配置"><span className="status-dot" /><span>{serviceLabel}</span><Settings2 size={13} /></button>
     </div>
-    <div className="assistant-tabs" role="tablist">
-      <button className={tab === "assist" ? "is-active" : ""} role="tab" aria-selected={tab === "assist"} onClick={() => setTab("assist")}>读懂这段</button>
-      <button className={tab === "vocabulary" ? "is-active" : ""} role="tab" aria-selected={tab === "vocabulary"} onClick={() => setTab("vocabulary")}>学术词汇 <span>{vocabulary.length}</span></button>
+    <div className="assistant-tabs" role="tablist" aria-label="研究助手视图">
+      <button ref={(element) => { tabsRef.current[0] = element; }} id={`${id}-assist-tab`} aria-controls={`${id}-assist-panel`} tabIndex={tab === "assist" ? 0 : -1} className={tab === "assist" ? "is-active" : ""} role="tab" aria-selected={tab === "assist"} onKeyDown={(event) => changeTab(event, 0)} onClick={() => setTab("assist")} type="button"><BookOpen size={15} />{visual ? "读图表" : "读懂这段"}</button>
+      <button ref={(element) => { tabsRef.current[1] = element; }} id={`${id}-vocabulary-tab`} aria-controls={`${id}-vocabulary-panel`} tabIndex={tab === "vocabulary" ? 0 : -1} className={tab === "vocabulary" ? "is-active" : ""} role="tab" aria-selected={tab === "vocabulary"} onKeyDown={(event) => changeTab(event, 1)} onClick={() => setTab("vocabulary")} type="button"><Languages size={15} />学术词汇 <span>{vocabulary.length}</span></button>
     </div>
-    <div className="assistant-scroll">
-      <section className="assistant-section pipeline-assistant-section">
-        <div className="section-heading"><span>本次导入</span><span className="context-count">{pipeline.translatedCount} 段已翻译</span></div>
+    <div ref={scrollRef} className="assistant-scroll" id={`${id}-${tab}-panel`} role="tabpanel" aria-labelledby={`${id}-${tab}-tab`} tabIndex={0}>
+      {tab === "vocabulary" ? <VocabularyPanel terms={vocabulary} onJump={onJump} onGuide={onGuide} aiAvailable={aiAvailable} busy={isBusy} enriched={Boolean(guide)} guideOverview={guide?.overview} streamingGuide={streamingOutput?.operation === "guide" ? streamingOutput.text : ""} /> : <>
+        <section className="assistant-section selected-context">
+          <div className="section-heading"><h2>{visual ? selectedBlock?.kind === "table" ? "表格理解" : "图表理解" : selectionText ? "选中句子" : "段落理解"}</h2><span className="context-count">{selectedBlock ? `第 ${selectedBlock.pageNumber} 页` : "未选择"}</span></div>
+          {selectedBlock && visual ? <ChartContext originalId={originalId} block={selectedBlock} reading={chartReading} busy={isBusy} loading={pendingAction === "chart"} aiAvailable={aiAvailable} onRead={onReadChart} onOpenSettings={onOpenSettings} />
+            : selectedBlock ? <>
+          <div className="paragraph-tabs" role="tablist" aria-label="段落分析">
+            {PARAGRAPH_TABS.map(({ operation, label, icon: Icon }, index) => <button key={operation} type="button"
+              ref={(element) => { paragraphTabsRef.current[index] = element; }} data-operation={operation}
+              id={`${id}-${operation}-tab`} aria-controls={`${id}-${operation}-panel`} role="tab"
+              aria-selected={paragraphTab === operation} tabIndex={paragraphTab === operation ? 0 : -1}
+              className={paragraphTab === operation ? "is-active" : ""}
+              onClick={() => selectParagraphTab(operation)} onKeyDown={(event) => changeParagraphTab(event, index)}>
+              {pendingAction === operation || (operation !== "insight" && pendingParagraphActions.includes(operation))
+                ? <LoaderCircle className="spin" size={14} /> : <Icon size={14} />}{label}
+            </button>)}
+          </div>
+          <div className="paragraph-result" id={`${id}-${paragraphTab}-panel`} role="tabpanel" aria-labelledby={`${id}-${paragraphTab}-tab`} tabIndex={0}>
+          {paragraphTab === "translate" ? translationText || translating ? <div className="assistant-translation" aria-live="polite" aria-busy={translating}>
+            <div className="assistant-result-heading"><h3>中文译文</h3>
+              {translating ? <span className="assistant-result-state"><LoaderCircle className="spin" size={12} />翻译中</span>
+                : <button type="button" className="assistant-copy-button" aria-label={copyState === "copied" ? "已复制译文" : "复制译文"} title={copyState === "copied" ? "已复制译文" : "复制译文"} onClick={() => void copyTranslation()}>{copyState === "copied" ? <Check size={15} /> : <Copy size={15} />}</button>}
+            </div>
+            {translationText ? <TranslationContent text={translationText} /> : <p className="muted-copy">正在生成中文译文…</p>}
+            {copyState !== "idle" ? <span className={`assistant-copy-status ${copyState === "failed" ? "is-error" : ""}`} role="status">{copyState === "copied" ? "已复制" : "复制失败，请重试"}</span> : null}
+          </div> : <div className="paragraph-empty"><p className="muted-copy">尚无译文</p><button type="button" className="secondary-button compact" disabled={isBusy} onClick={() => runParagraphAction("translate")}><Languages size={14} />{aiAvailable ? selectionText ? "翻译选中句子" : "翻译整段" : "配置翻译服务"}</button></div> : null}
+          {paragraphTab === "insight" ? insight ? <div className="assistant-insight"><div className="assistant-result-heading"><h3>这段讲什么</h3></div><p>{insight.summary}</p><h3>在上下文中的作用</h3><p>{insight.role}</p></div>
+            : pendingAction === "insight" ? <p className="muted-copy paragraph-progress" role="status"><LoaderCircle className="spin" size={14} />正在生成摘要与作用…</p>
+            : <div className="paragraph-empty"><p className="muted-copy">尚无段落摘要</p><button type="button" className="secondary-button compact" aria-label="段落摘要与作用" disabled={isBusy} onClick={() => runParagraphAction("insight")}><Sparkles size={14} />{aiAvailable ? "生成摘要与作用" : "配置 AI 服务"}</button></div> : null}
+          {paragraphTab === "explain" ? explanation || explaining ? <div className="assistant-explanation" aria-live="polite" aria-busy={explaining}><div className="assistant-result-heading"><h3>术语与逻辑</h3>{explaining ? <LoaderCircle className="spin" size={13} /> : <button type="button" className="assistant-copy-button" aria-label="重新生成解释" title="重新生成解释" disabled={isBusy} onClick={() => runParagraphAction("explain")}><RotateCcw size={14} /></button>}</div><p className="assistant-copy">{explanation || "正在生成解释…"}</p></div>
+            : <div className="paragraph-empty"><p className="muted-copy">尚无内容解释</p><button type="button" className="secondary-button compact" aria-label="解释术语与逻辑" disabled={isBusy} onClick={() => runParagraphAction("explain")}><MessageSquareText size={14} />{aiAvailable ? "生成解释" : "配置 AI 服务"}</button></div> : null}
+          </div></>
+            : <div className="assistant-empty"><BookOpen size={24} /><p className="muted-copy">未选择阅读内容</p></div>}
+          {!aiAvailable ? <button className="text-button assistant-configure" type="button" onClick={onOpenSettings}><Settings2 size={14} />配置 AI 服务</button> : null}
+        </section>
+        {answer || pendingAction === "qa" ? <section ref={answerRef} className="assistant-section qa-section">
+          <div className="section-heading"><h2>论文回答</h2>{pendingAction === "qa" ? <LoaderCircle className="spin" size={14} /> : <MessageSquareText size={14} />}</div>
+          <p className="assistant-copy answer-copy" aria-live="polite" aria-busy={pendingAction === "qa"}>{answer || "正在生成回答…"}</p>
+        </section> : null}
+        <details className="assistant-section assistant-overview">
+          <summary><span><Sparkles size={14} />论文摘要</span><ChevronDown size={14} /></summary>
+          {overview ? <p className="assistant-copy">{overview}</p> : <button className="text-button" type="button" onClick={aiAvailable ? onOverview : onOpenSettings} disabled={isBusy}>{pendingAction === "overview" ? <LoaderCircle className="spin" size={14} /> : <Sparkles size={14} />}{aiAvailable ? "生成 AI 概览" : "配置 AI 服务"}</button>}
+        </details>
+      </>}
+      <details className="assistant-section pipeline-assistant-section">
+        <summary><span><FileText size={14} />导入与翻译</span><span className="assistant-pipeline-count">{pipeline.translatedCount} 段已翻译<ChevronDown size={14} /></span></summary>
         <p className="pipeline-assistant-status">{pipeline.currentLabel || (pipeline.stage === "ready" ? "PDF 已就绪，MinerU 交互层已叠加" : "正在准备阅读内容…")}</p>
         <div className="pipeline-assistant-meta">
           {pipeline.queuedCount > 0 ? <span>队列 {pipeline.queuedCount}</span> : null}
@@ -52,37 +208,15 @@ export function ReaderAssistant({
           {pipeline.paused ? <span>后台翻译已暂停</span> : null}
         </div>
         <div className="pipeline-assistant-actions">
-          {pipeline.paused ? <button className="text-button" onClick={onResumePipeline} type="button">继续翻译</button> : <button className="text-button" onClick={onPausePipeline} type="button">暂停后台翻译</button>}
-          {pipeline.failedCount > 0 ? <button className="text-button" onClick={onRetryPipeline} type="button">重试失败段落</button> : null}
+          {pipeline.paused ? <button className="text-button" onClick={onResumePipeline} type="button"><Play size={13} />继续翻译</button> : <button className="text-button" onClick={onPausePipeline} type="button"><Pause size={13} />暂停后台翻译</button>}
+          {pipeline.failedCount > 0 ? <button className="text-button" onClick={onRetryPipeline} type="button"><RotateCcw size={13} />重试失败段落</button> : null}
         </div>
-      </section>
-      {tab === "vocabulary" ? <VocabularyPanel terms={vocabulary} onJump={onJump} onGuide={onGuide} aiAvailable={aiAvailable} busy={pendingAction === "guide"} enriched={Boolean(guide)} guideOverview={guide?.overview} streamingGuide={streamingOutput?.operation === "guide" ? streamingOutput.text : ""} error={pendingAction === "guide" ? null : actionError} /> : <>
-        <section className="assistant-section">
-          <div className="section-heading"><span>论文摘要</span><Sparkles size={14} /></div>
-          {overview ? <p className="assistant-copy">{overview}</p> : <div className="assistant-placeholder"><p>还没有生成摘要。</p><button className="text-button" onClick={aiAvailable ? onOverview : onOpenSettings} disabled={isBusy}>{pendingAction === "overview" ? <LoaderCircle className="spin" size={14} /> : <Sparkles size={14} />}{aiAvailable ? "生成 AI 概览" : "配置 AI 服务"}</button></div>}
-        </section>
-        <section className="assistant-section selected-context">
-          <div className="section-heading"><span>{selectionText ? "选中句子" : "段落理解"}</span><span className="context-count">{selectedBlock ? `第 ${selectedBlock.pageNumber} 页` : "未选择"}</span></div>
-          {selectedBlock ? <><p className="selected-block-text">{selectionText || selectedBlock.text}</p><div className="context-actions">
-            <button className="secondary-button compact" onClick={aiAvailable ? onTranslate : onOpenSettings} disabled={isBusy}>{pendingAction === "translate" ? <LoaderCircle className="spin" size={14} /> : <Languages size={14} />}{aiAvailable ? selectionText ? "翻译选中句子" : "翻译整段" : "配置翻译服务"}</button>
-            <button className="text-button" disabled={isBusy} onClick={aiAvailable ? onInsight : onOpenSettings}>{pendingAction === "insight" ? <LoaderCircle className="spin" size={14} /> : <Sparkles size={14} />}段落摘要与作用</button>
-          </div>
-          {translation || streamingOutput?.operation === "translate" ? <div className="assistant-translation" aria-live="polite"><span>{streamingOutput?.operation === "translate" && !translation ? "正在生成中文译文…" : "中文译文"}</span><p>{translation || streamingOutput?.text}</p>{translation ? <button type="button" className="text-button" onClick={() => void navigator.clipboard.writeText(translation)}>复制译文</button> : null}</div> : null}
-          {streamingOutput?.operation === "insight" ? <pre className="assistant-streaming-output" aria-live="polite">{streamingOutput.text}</pre>
-            : insight ? <div className="assistant-insight"><strong>这段讲什么</strong><p>{insight.summary}</p><strong>在上下文中的作用</strong><p>{insight.role}</p></div> : null}
-          <button className="text-button" type="button" disabled={isBusy} onClick={aiAvailable ? onExplain : onOpenSettings}>解释术语与逻辑</button>
-          {explanation ? <div className="assistant-explanation" aria-live="polite"><strong>内容解释</strong><p className="assistant-copy">{explanation}</p></div> : null}</>
-            : <p className="muted-copy">在 PDF 上点击 MinerU 识别出的段落，默认翻译整段；划选一句或几句后可单独翻译。</p>}
-          {!aiAvailable ? <p className="translation-help">翻译、摘要和解释需要配置百炼或 DeepSeek，原文阅读无需密钥。</p> : <p className="translation-help">{serviceLabel} · {serviceModel}</p>}
-          {actionError ? <p className="assistant-action-error" role="alert">{actionError}<button type="button" className="text-button" onClick={onOpenSettings}><Settings2 size={13} />检查配置</button></p> : null}
-        </section>
-        <section className="assistant-section qa-section">
-          <div className="section-heading"><span>论文问答</span><MessageSquareText size={14} /></div>
-          {answer ? <p className="assistant-copy answer-copy" aria-live="polite">{answer}</p> : null}
-          <div className="question-box"><textarea aria-label="向论文提问" value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") submitQuestion(); }} placeholder="例如：这篇论文的核心贡献是什么？" rows={3} /><button aria-label="发送问题" className="send-button" disabled={!question.trim() || isBusy || !aiAvailable} onClick={submitQuestion} title="发送问题" type="button"><CornerDownLeft size={16} /></button></div>
-          <span className="helper-copy">按快捷键 Ctrl 或 Command + Enter 发送</span>
-        </section>
-      </>}
+      </details>
+    </div>
+    <div className="assistant-composer">
+      <div className="assistant-composer-heading"><label htmlFor={`${id}-question`}>论文问答</label><MessageSquareText size={14} /></div>
+      <div className="question-box"><textarea id={`${id}-question`} aria-label="向论文提问" value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (!event.nativeEvent.isComposing && (event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); submitQuestion(); } }} placeholder="这篇论文的核心贡献是什么？" rows={2} /><button aria-label="发送问题" className="send-button" disabled={!question.trim() || isBusy || !aiAvailable} onClick={submitQuestion} title="发送问题 (Ctrl / Command + Enter)" type="button">{pendingAction === "qa" ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}</button></div>
+      {actionError ? <div className="assistant-action-error" role="alert">{actionError}<button type="button" className="text-button" onClick={onOpenSettings}><Settings2 size={13} />检查配置</button></div> : null}
     </div>
   </aside>;
 }

@@ -1,5 +1,6 @@
 export interface ParagraphInsight { summary: string; role: string }
 export interface ReadingGuide { overview: string; terms: Array<{ term: string; translation: string; definition: string }> }
+export interface ChartReading { summary: string; encoding: string; findings: string[]; role: string; caveats: string[] }
 
 function parseObject(text: string): Record<string, unknown> {
   try {
@@ -15,6 +16,15 @@ function requiredText(value: unknown, maximum = 3000) {
 export function parseParagraphInsight(text: string): ParagraphInsight {
   const value = parseObject(text);
   return { summary: requiredText(value.summary, 1200), role: requiredText(value.role, 1800) };
+}
+export function parseChartReading(text: string): ChartReading {
+  const value = parseObject(text);
+  function textList(list: unknown): string[] {
+    if (!Array.isArray(list) || !list.length) throw new Error("模型返回的结构不完整，请重试");
+    return list.slice(0, 6).map((item) => requiredText(item, 1000));
+  }
+  return { summary: requiredText(value.summary, 1200), encoding: requiredText(value.encoding, 1800),
+    findings: textList(value.findings), role: requiredText(value.role, 1800), caveats: textList(value.caveats) };
 }
 export function parseReadingGuide(text: string): ReadingGuide {
   const value = parseObject(text);
