@@ -1,4 +1,4 @@
-export type AnalysisOperation = "overview" | "translate" | "qa" | "insight" | "guide" | "chart";
+export type AnalysisOperation = "overview" | "translate" | "qa" | "insight" | "guide" | "chart" | "vocabulary";
 
 export interface AnalysisCacheEntry {
   key: string;

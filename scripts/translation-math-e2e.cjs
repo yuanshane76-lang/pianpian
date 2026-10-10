@@ -57,8 +57,7 @@ if (process.versions.electron) {
           serviceLabel: "DeepSeek", serviceModel: "deepseek-flash", aiAvailable: true,
           onOpenSettings: noop, actionError: null, pendingAction: null, insight: null,
           streamingOutput: null, onInsight: noop, guide: null, onGuide: noop, vocabulary: [],
-          pipeline: { paperId: "fixture", source: "mineru", stage: "ready", translatedCount: 5, queuedCount: 0, failedCount: 0, paused: false },
-          onPausePipeline: noop, onResumePipeline: noop, onRetryPipeline: noop, onJump: noop,
+          onJump: noop,
           translation: String.raw`生成器组件 $p _ { \theta } ( y _ { i } | x , z , y _ { 1 : i - 1 } )$ 可以采用任意编码器-解码器进行建模。我们使用的是 BART-large [32]，这是一个预训练的序列到序列变换器 [58]，拥有4亿参数。为了在从 BART 生成时结合输入 $x$ 与检索到的内容 $z$，我们简单地将它们拼接起来。BART 通过去噪目标及多种不同的噪声函数进行了预训练。它在众多生成任务上取得了最先进的结果，并且优于同等规模的 T5 模型 [32]。此后，我们将 BART 生成器参数 $\theta$ 称为参数化记忆。`,
         };
         window.renderMathFixture = (overrides = {}) => fixture.render(React.createElement(ReaderAssistant, { ...base, ...overrides }));

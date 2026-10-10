@@ -175,6 +175,32 @@ describe("paragraph translation interaction", () => {
     expect(stream).toHaveBeenCalledOnce();
     await act(async () => root.unmount()); container.remove();
   });
+  it("renders chart-reading deltas before the structured result is complete", async () => {
+    const value = JSON.stringify({ summary: "比较模型成绩", encoding: "NQ 是准确率，越高越好", findings: ["RAG 为 44.5"], role: "支持方法有效性", caveats: ["不能比较不同数据集的分数"] });
+    const source = { ...paper, blockData: [{ ...paper.blockData[0], kind: "table", text: "<table><tr><td>RAG</td><td>44.5</td></tr></table>", caption: "Table 1. Results" }, paper.blockData[1]] };
+    let finish!: (text: string) => void;
+    let emit!: (text: string) => void;
+    const { container, root, stream } = await mount(
+      () => new Promise((resolve) => { finish = resolve; }),
+      async (onDelta) => {
+        emit = onDelta;
+        return new Promise((resolve) => { finish = resolve; });
+      },
+      source,
+    );
+    await act(async () => (container.querySelector(".pdf-block-hit-area") as HTMLElement).click());
+    await act(async () => container.querySelector<HTMLButtonElement>(".chart-context .secondary-button")!.click());
+    await vi.waitFor(() => expect(stream).toHaveBeenCalledOnce());
+    await act(async () => emit('{"summary":"图表正在'));
+    expect(container.querySelector(".assistant-chart-streaming")?.textContent).toContain("图表正在");
+    expect(container.querySelector(".assistant-chart-reading")).toBeNull();
+    expect(container.querySelector(".assistant-chart-streaming")?.textContent).not.toContain("summary");
+    expect(window.localStorage.getItem("zhiyan-workbench.analysis.v1")).not.toContain("图表正在");
+    await act(async () => finish(value));
+    expect(container.querySelector(".assistant-chart-streaming")).toBeNull();
+    expect(container.querySelector(".assistant-chart-reading")?.textContent).toContain("RAG 为 44.5");
+    await act(async () => root.unmount()); container.remove();
+  });
   it("uses the complete paragraph by default and displays its Chinese result beside the selection", async () => {
     const { container, root, stream } = await mount(async () => "模型使用注意力机制。它效果很好。");
     await act(async () => (container.querySelector(".pdf-block-hit-area") as HTMLElement).click());

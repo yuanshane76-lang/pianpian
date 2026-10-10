@@ -22,8 +22,7 @@ async function mount(overrides: Partial<ComponentProps<typeof ReaderAssistant>> 
     serviceModel: "deepseek-flash", aiAvailable: true, onOpenSettings: vi.fn(), actionError: null,
     pendingAction: null, insight: null, streamingOutput: null, onInsight: vi.fn(), guide: null,
     onGuide: vi.fn(), vocabulary: [],
-    pipeline: { paperId: "paper", source: "mineru", stage: "ready", translatedCount: 5, queuedCount: 0, failedCount: 0, paused: false },
-    onPausePipeline: vi.fn(), onResumePipeline: vi.fn(), onRetryPipeline: vi.fn(), onJump: vi.fn(),
+    onJump: vi.fn(),
     ...overrides,
   };
   await act(async () => root!.render(<ReaderAssistant {...props} />));

@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowUpRight, FilePlus2, FolderOpen, Pencil, Sparkles, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, BookMarked, FilePlus2, FolderOpen, Pencil, Sparkles, Trash2 } from "lucide-react";
 import { useState } from "react";
 import type { PaperMetadataPatch, PaperRecord } from "../../domain/library";
 import { LibrarySidebar } from "./LibrarySidebar";
@@ -6,6 +6,8 @@ import { PaperEditDialog } from "./PaperEditDialog";
 import { PaperList } from "./PaperList";
 
 interface LibraryViewProps {
+  onOpenWordbook?: () => void;
+  wordbookCount?: number;
   papers: PaperRecord[];
   selectedPaper: PaperRecord | null;
   selectedId: string | null;
@@ -43,6 +45,7 @@ export function LibraryView({
   onDelete,
   onOpenSettings,
   importing,
+  onOpenWordbook, wordbookCount,
 }: LibraryViewProps) {
   const [editing, setEditing] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -66,6 +69,7 @@ export function LibraryView({
   return (
     <>
       <div className="workspace-shell">
+        <button type="button" className="wordbook-button library-wordbook-button" aria-label="打开单词表" title="单词表" onClick={onOpenWordbook}><BookMarked size={17} /><span>单词表</span><small>{wordbookCount ?? 0}</small></button>
         <LibrarySidebar activeFilter={filter} tags={tags} onFilterChange={onFilterChange} onOpenSettings={onOpenSettings} />
         <PaperList
           papers={papers}

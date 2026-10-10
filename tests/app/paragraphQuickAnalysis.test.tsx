@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../../src/app/App";
 import type { AiRequest } from "../../src/services/ai";
 import { extractPdfBlocks } from "../../src/services/document";
+import { preparePdfFile } from "../../src/services/library";
 import { DEFAULT_SERVICE_SETTINGS, toPublicServiceSettings } from "../../src/domain/serviceSettings";
 
 vi.mock("../../src/services/originalPdf", () => ({
@@ -22,6 +23,10 @@ vi.mock("../../src/services/document", () => ({
 }));
 vi.mock("../../src/services/pdfTextLayer", () => ({
   renderPdfTextLayer: () => ({ promise: Promise.resolve(), cancel: vi.fn() }),
+}));
+vi.mock("../../src/services/library", async (importActual) => ({
+  ...await importActual<typeof import("../../src/services/library")>(),
+  preparePdfFile: vi.fn(),
 }));
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -65,8 +70,10 @@ afterEach(async () => {
   delete window.zhiyan;
 });
 
-async function mount(source = paper, configured = true) {
-  window.localStorage.setItem("zhiyan-workbench.papers.v1", JSON.stringify([source]));
+async function mount(source = paper, configured = true, otherPapers: typeof paper[] = [], options: {
+  states?: unknown[]; mineruStatus?: unknown; documentState?: unknown;
+} = {}) {
+  window.localStorage.setItem("zhiyan-workbench.papers.v1", JSON.stringify([source, ...otherPapers]));
   const jobs: Job[] = [];
   const stream = vi.fn((_channel: string, request: AiRequest, emit: Job["emit"],
     onAbort?: (cancel: () => void) => (() => void)) => new Promise<string>((finish, fail) => {
@@ -78,9 +85,14 @@ async function mount(source = paper, configured = true) {
     invoke: vi.fn(async (channel: string) => {
       if (channel === "zhiyan:settings:get") return {
         ...(configured ? settings : toPublicServiceSettings(DEFAULT_SERVICE_SETTINGS)),
+        mineru: { ...settings.mineru, configured: Boolean(options.mineruStatus) },
         revision: `quick-analysis-${++revision}`,
       };
-      if (channel === "zhiyan:documents:states") return [];
+      if (channel === "zhiyan:documents:states") return options.states ?? [];
+      if (channel === "zhiyan:documents:state") return options.documentState;
+      if (channel === "zhiyan:mineru:start") return { batchId: "synthetic-batch" };
+      if (channel === "zhiyan:mineru:status") return typeof options.mineruStatus === "function"
+        ? options.mineruStatus() : options.mineruStatus;
       return undefined;
     }) as never,
     stream: stream as never,
@@ -105,6 +117,280 @@ async function doubleClick(element: HTMLElement) {
 }
 
 describe("paragraph quick analysis", () => {
+  it("shows no background translation UI and does not request AI until the user asks", async () => {
+    const { container, blocks, stream, jobs } = await mount();
+    expect(container.textContent).not.toContain("中文预览");
+    expect(container.textContent).not.toContain("后台翻译");
+    expect(container.textContent).not.toContain("导入与翻译");
+    expect(container.querySelector(".pipeline-assistant-section")).toBeNull();
+    expect(stream).not.toHaveBeenCalled();
+    await act(async () => blocks[0].click());
+    expect(stream).not.toHaveBeenCalled();
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="translate"]')!.click());
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].request.operation).toBe("translate");
+    await act(async () => jobs[0].emit("即时译文"));
+    expect(container.querySelector(".assistant-translation p")?.textContent).toBe("即时译文");
+    await act(async () => jobs[0].finish("即时译文"));
+  });
+
+  it("imports and parses a new PDF without generating any model request", async () => {
+    const source = { ...paper, id: "new-paper", originalId: "new-document", sourcePath: "local://new" };
+    vi.mocked(preparePdfFile).mockResolvedValueOnce({
+      paper: { ...source, parseStatus: "pending", blockData: [], blocks: 0 } as never,
+      data: new ArrayBuffer(8), duplicate: false,
+    });
+    vi.mocked(extractPdfBlocks).mockResolvedValueOnce(source.blockData as never);
+    const { container, stream } = await mount();
+    await act(async () => container.querySelector<HTMLButtonElement>(".back-button")!.click());
+    const input = container.querySelector<HTMLInputElement>(".import-button input")!;
+    Object.defineProperty(input, "files", { configurable: true, value: [new File(["synthetic"], "new.pdf", { type: "application/pdf" })] });
+    await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
+    expect(preparePdfFile).toHaveBeenCalledOnce();
+    expect(extractPdfBlocks).toHaveBeenCalledOnce();
+    expect(container.querySelector(".reader-shell")).not.toBeNull();
+    expect(stream).not.toHaveBeenCalled();
+  });
+
+  it("restores completed MinerU results without starting background translation", async () => {
+    const { container, stream } = await mount(paper, true, [], {
+      states: [{ paperId: paper.id, task: { state: "done" }, result: { blocks: paper.blockData, pageCount: 1 } }],
+    });
+    expect(container.querySelectorAll(".pdf-block-hit-area")).toHaveLength(2);
+    expect(stream).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain("中文预览");
+  });
+
+  it("completes MinerU parsing without starting background translation", async () => {
+    const source = { ...paper, blockData: paper.blockData.map((block) => ({ ...block, bbox: undefined })) } as unknown as typeof paper;
+    const { container, stream } = await mount(source, true, [], {
+      mineruStatus: { state: "done", result: { blocks: paper.blockData, pageCount: 1 } },
+    });
+    window.localStorage.setItem("zhiyan.mineru-upload-approved", "yes");
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent === "开始 MinerU 解析")!.click());
+    expect(container.querySelectorAll(".pdf-block-hit-area")).toHaveLength(2);
+    expect(stream).not.toHaveBeenCalled();
+  });
+
+  it("retries an interrupted MinerU download without another upload or consent prompt", async () => {
+    const task = { batchId: "existing-batch", state: "downloading" };
+    const mineruStatus = vi.fn()
+      .mockRejectedValueOnce(new Error("结果下载中断"))
+      .mockResolvedValue({ state: "done", result: { blocks: paper.blockData, pageCount: 1 } });
+    const { container, stream } = await mount(paper, true, [], {
+      states: [{ paperId: paper.id, task, result: null }],
+      documentState: { task, result: null }, mineruStatus,
+    });
+    expect(mineruStatus).toHaveBeenCalledOnce();
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="重试论文处理"]')!.click());
+    expect(mineruStatus).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[aria-label="确认云端解析"]')).toBeNull();
+    expect(vi.mocked(window.zhiyan!.invoke).mock.calls.map(([channel]) => channel)).not.toContain("zhiyan:mineru:start");
+    expect(container.querySelectorAll(".pdf-block-hit-area")).toHaveLength(2);
+    expect(stream).not.toHaveBeenCalled();
+  });
+
+  it("still confirms a new upload when the previous MinerU batch has failed", async () => {
+    const task = { batchId: "failed-batch", state: "failed", error: "云端解析失败" };
+    const { container } = await mount(paper, true, [], {
+      states: [{ paperId: paper.id, task, result: null }],
+      documentState: { task, result: null }, mineruStatus: task,
+    });
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="重试论文处理"]')!.click());
+    expect(container.querySelector('[aria-label="确认云端解析"]')).not.toBeNull();
+    expect(vi.mocked(window.zhiyan!.invoke).mock.calls.map(([channel]) => channel)).not.toContain("zhiyan:mineru:start");
+  });
+  it("keeps vocabulary scoped to the full paragraph when a sentence is selected", async () => {
+    const { container, jobs } = await mount();
+    const stage = container.querySelector<HTMLElement>(".pdf-page-stage")!;
+    vi.spyOn(stage, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, width: 600, height: 800 } as DOMRect);
+    const text = document.createElement("span");
+    text.textContent = "It works well.";
+    container.querySelector(".pdf-text-layer")!.append(text);
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    Object.defineProperty(range, "getClientRects", { value: () => [{ left: 150, top: 110, width: 20, height: 20 }] });
+    window.getSelection()?.addRange(range);
+    await act(async () => text.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })));
+    expect(container.querySelector(".selected-context h2")?.textContent).toBe("选中句子");
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>(".assistant-tabs button")]
+      .find((button) => button.textContent?.includes("学术词汇"))!.click());
+    expect(container.querySelector(".vocabulary-panel")?.textContent).toContain("attention");
+    await act(async () => container.querySelector<HTMLButtonElement>(".vocabulary-intro button")!.click());
+    expect(jobs[0].request.block?.text).toBe(paper.blockData[0].text);
+    await act(async () => jobs[0].finish('{"overview":"重点","terms":[]}'));
+  });
+
+  it("keeps the same word across papers with separate sources and jumps back without retaining stale navigation", async () => {
+    const other = { ...paper, id: "other-paper", title: "Another Paper", sourcePath: "local://other", originalId: "other-document" };
+    const { container, jobs, stream } = await mount(paper, true, [other]);
+    async function collect() {
+      await act(async () => container.querySelector<HTMLButtonElement>(".pdf-block-hit-area")!.click());
+      await act(async () => [...container.querySelectorAll<HTMLButtonElement>(".assistant-tabs button")]
+        .find((button) => button.textContent?.includes("学术词汇"))!.click());
+      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="将 attention 加入单词表"]')!.click());
+    }
+    await collect();
+    await act(async () => container.querySelector<HTMLButtonElement>(".back-button")!.click());
+    await act(async () => [...container.querySelectorAll<HTMLElement>(".paper-row")]
+      .find((element) => element.textContent?.includes("Another Paper"))!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.includes("打开阅读"))!.click());
+    await collect();
+    const question = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="向论文提问"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(question, "这篇论文讲什么？");
+      question.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="发送问题"]')!.click());
+    await act(async () => jobs[0].finish("另一篇论文的问答结果"));
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="打开单词表"]')!.click());
+    expect(container.querySelectorAll(".wordbook-entry")).toHaveLength(1);
+    expect(container.querySelectorAll(".wordbook-source")).toHaveLength(2);
+    await act(async () => container.querySelector<HTMLButtonElement>(".wordbook-source button")!.click());
+    expect(container.querySelector(".reader-title")?.textContent).toContain(paper.title);
+    expect(container.querySelector(".pdf-block-hit-area.is-active")?.id).toBe(`pdf-block-${paper.blockData[0].id}`);
+    expect(container.querySelector(".reader-assistant")).not.toBeNull();
+    expect(container.textContent).not.toContain("另一篇论文的问答结果");
+    await act(async () => container.querySelector<HTMLButtonElement>(".back-button")!.click());
+    await act(async () => [...container.querySelectorAll<HTMLElement>(".paper-row")]
+      .find((element) => element.textContent?.includes("Another Paper"))!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.includes("打开阅读"))!.click());
+    expect(container.querySelector(".reader-assistant")).not.toBeNull();
+    expect(stream).toHaveBeenCalledTimes(1);
+  });
+  it("does not execute HTML, load remote images or enable model-generated links in explanations", async () => {
+    const { container, blocks, jobs } = await mount();
+    await doubleClick(blocks[0]);
+    await act(async () => jobs.find((job) => job.request.operation === "explain")!
+      .emit('<script>window.hacked=true</script>\n\n<img src="https://example.com/track" onerror="alert(1)">\n\n[阅读](javascript:alert(1)) ![插图](https://example.com/track.png)'));
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="explain"]')!.click());
+    expect(container.querySelector(".assistant-explanation script")).toBeNull();
+    expect(container.querySelector(".assistant-explanation img")).toBeNull();
+    expect(container.querySelector(".assistant-explanation a")).toBeNull();
+    expect(container.querySelector(".assistant-explanation")?.textContent).toContain("阅读");
+    await act(async () => jobs.forEach((job) => job.finish("已完成")));
+  });
+
+  it("cancels vocabulary generation on paragraph changes and caches only complete validated results", async () => {
+    const { container, blocks, jobs, stream } = await mount();
+    const tab = [...container.querySelectorAll<HTMLButtonElement>('.assistant-tabs button')]
+      .find((button) => button.textContent?.includes("学术词汇"))!;
+    await act(async () => { blocks[0].click(); tab.click(); });
+    await act(async () => container.querySelector<HTMLButtonElement>(".vocabulary-intro button")!.click());
+    await act(async () => jobs[0].emit('{"overview":"未结束'));
+    expect(window.localStorage.getItem("zhiyan-workbench.analysis.v1")).not.toContain("未结束");
+    await act(async () => blocks[1].click());
+    expect(jobs[0].cancel).toHaveBeenCalledOnce();
+    await act(async () => jobs[0].finish('{"overview":"旧段落","terms":[]}'));
+    expect(container.textContent).not.toContain("旧段落");
+    await act(async () => blocks[0].click());
+    await act(async () => container.querySelector<HTMLButtonElement>(".vocabulary-intro button")!.click());
+    await act(async () => jobs[1].finish('{"overview":"本段重点","terms":[{"term":"attention","translation":"注意力"}]}'));
+    await act(async () => { blocks[1].click(); blocks[0].click(); });
+    expect(container.querySelector(".vocabulary-panel")?.textContent).toContain("本段重点");
+    expect(stream).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports a failed wordbook save without falsely marking a word collected", async () => {
+    const { container, blocks } = await mount();
+    await act(async () => blocks[0].click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.assistant-tabs button')]
+      .find((button) => button.textContent?.includes("学术词汇"))!.click());
+    const original = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+      if (key === "zhiyan-workbench.wordbook.v1") throw new Error("quota");
+      original.call(this, key, value);
+    });
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="将 attention 加入单词表"]')!.click());
+    expect(container.querySelector(".wordbook-error")?.textContent).toContain("保存失败");
+    expect(container.querySelector(".wordbook-entry")).toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="关闭单词表"]')!.click());
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="将 attention 加入单词表"]')?.disabled).toBe(false);
+  });
+
+  it("renders explanation Markdown instead of showing heading and emphasis markers", async () => {
+    const { container, blocks, jobs } = await mount();
+    await doubleClick(blocks[0]);
+    const explain = jobs.find((job) => job.request.operation === "explain")!;
+    await act(async () => explain.emit("## 核心术语\n\n**注意力**用于选择信息。\n\n- 保留上下文\n- 区分权重"));
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="explain"]')!.click());
+    expect(container.querySelector(".assistant-explanation h2")?.textContent).toBe("核心术语");
+    expect(container.querySelector(".assistant-explanation strong")?.textContent).toBe("注意力");
+    expect(container.querySelectorAll(".assistant-explanation li")).toHaveLength(2);
+    expect(container.querySelector(".assistant-explanation")?.textContent).not.toContain("**");
+    await act(async () => jobs.forEach((job) => job.finish("已完成")));
+  });
+
+  it("shows readable insight fields before the structured response is complete", async () => {
+    const { container, blocks, jobs } = await mount();
+    await act(async () => blocks[0].click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="insight"]')!.click());
+    expect(jobs).toHaveLength(1);
+    await act(async () => jobs[0].emit('{"summary":"这段说明注意力'));
+    expect(container.querySelector(".assistant-insight")?.textContent).toContain("这段说明注意力");
+    expect(container.querySelector(".assistant-insight")?.getAttribute("aria-busy")).toBe("true");
+    expect(container.querySelector(".assistant-insight")?.textContent).not.toContain('{"summary"');
+    await act(async () => jobs[0].emit('机制。","role":"连接方法与'));
+    expect(container.querySelector(".assistant-insight")?.textContent).toContain("连接方法与");
+    await act(async () => jobs[0].finish('{"summary":"这段说明注意力机制。","role":"连接方法与实验。"}'));
+    expect(container.querySelector(".assistant-insight")?.getAttribute("aria-busy")).toBe("false");
+    await act(async () => blocks[1].click());
+    expect(container.textContent).not.toContain("这段说明注意力机制。");
+  });
+
+  it("limits academic vocabulary to the full selected paragraph, not the paper or selected sentence", async () => {
+    const source = structuredClone(paper);
+    source.blockData[1].text = "The hypothesis supports inference.";
+    const { container, blocks, jobs } = await mount(source);
+    await act(async () => blocks[0].click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.assistant-tabs button')]
+      .find((button) => button.textContent?.includes("学术词汇"))!.click());
+    expect(container.querySelector(".vocabulary-panel")?.textContent).toContain("attention");
+    expect(container.querySelector(".vocabulary-panel")?.textContent).not.toContain("hypothesis");
+    expect(container.querySelector(".vocabulary-panel")?.textContent).toContain("当前段落");
+    const generate = container.querySelector<HTMLButtonElement>(".vocabulary-intro button")!;
+    await act(async () => generate.click());
+    expect(jobs[0].request.operation).toBe("vocabulary");
+    expect(jobs[0].request.block?.text).toBe(source.blockData[0].text);
+    await act(async () => jobs[0].finish('{"overview":"重点术语","terms":[{"term":"attention","translation":"注意力","definition":"按相关性分配权重。"},{"term":"hypothesis","translation":"假设"}]}'));
+    expect(container.querySelector(".vocabulary-panel")?.textContent).not.toContain("hypothesis");
+    await act(async () => blocks[1].click());
+    expect(container.querySelector(".vocabulary-panel")?.textContent).toContain("hypothesis");
+    expect(container.querySelector(".vocabulary-panel")?.textContent).not.toContain("attention");
+  });
+
+  it("collects words only on explicit clicks and restores the personal wordbook after reload", async () => {
+    const { container, blocks, stream } = await mount();
+    await act(async () => blocks[0].click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.assistant-tabs button')]
+      .find((button) => button.textContent?.includes("学术词汇"))!.click());
+    const openBook = () => container.querySelector<HTMLButtonElement>('[aria-label="打开单词表"]')!.click();
+    await act(async () => openBook());
+    expect(container.querySelector('[role="dialog"][aria-label="单词表"]')?.textContent).toContain("暂无收藏");
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="关闭单词表"]')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="将 attention 加入单词表"]')!.click());
+    expect(stream).not.toHaveBeenCalled();
+    await act(async () => openBook());
+    expect(container.querySelector(".wordbook-entry")?.textContent).toContain("attention");
+    expect(container.querySelector(".wordbook-entry")?.textContent).toContain(paper.title);
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="将 attention 标记为已掌握"]')!.click());
+    const saved = JSON.parse(window.localStorage.getItem("zhiyan-workbench.wordbook.v1")!);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].mastered).toBe(true);
+    const previous = mounted.pop()!;
+    await act(async () => previous.root.unmount());
+    previous.container.remove();
+    const reloaded = await mount();
+    await act(async () => reloaded.container.querySelector<HTMLButtonElement>('[aria-label="打开单词表"]')!.click());
+    expect(reloaded.container.querySelector(".wordbook-entry")?.textContent).toContain("attention");
+    expect(reloaded.container.querySelector('[aria-label="将 attention 标记为待熟悉"]')).not.toBeNull();
+    await act(async () => reloaded.container.querySelector<HTMLButtonElement>('[aria-label="从单词表移除 attention"]')!.click());
+    expect(reloaded.container.querySelector(".wordbook-entry")).toBeNull();
+  });
+
   it("selects on a single click without AI calls and exposes the double-click hint", async () => {
     const { blocks, stream } = await mount();
     await act(async () => blocks[0].click());
@@ -213,10 +499,10 @@ describe("paragraph quick analysis", () => {
     expect(container.querySelector(".selected-context h2")?.textContent).toBe("选中句子");
   });
 
-  it("does not let background preview translation cancel a foreground quick-analysis pair", async () => {
+  it("does not start model requests or cancel active analysis when local text extraction is retried", async () => {
     const source = {
       ...paper, parseStatus: "fallback",
-      blockData: paper.blockData.map((block) => ({ ...block, text: `${block.text} This paragraph has enough content for preview translation.` })),
+      blockData: paper.blockData.map((block) => ({ ...block, text: `${block.text} This paragraph has enough academic content to translate.` })),
     };
     vi.mocked(extractPdfBlocks).mockResolvedValueOnce(source.blockData as never);
     const { container, blocks, jobs, stream } = await mount(source);
@@ -224,17 +510,12 @@ describe("paragraph quick analysis", () => {
     expect(stream).toHaveBeenCalledTimes(2);
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")]
       .find((button) => button.textContent === "重试正文整理")!.click());
-    expect(stream).toHaveBeenCalledTimes(3);
-    expect(jobs[0].cancel).not.toHaveBeenCalled();
-    expect(jobs[1].cancel).not.toHaveBeenCalled();
-    await act(async () => jobs[2].finish("后台预翻译"));
-    expect(stream).toHaveBeenCalledTimes(4);
+    expect(stream).toHaveBeenCalledTimes(2);
     expect(jobs[0].cancel).not.toHaveBeenCalled();
     expect(jobs[1].cancel).not.toHaveBeenCalled();
     await act(async () => {
       jobs[0].finish("前台翻译");
       jobs[1].finish("前台解释");
-      jobs[3].finish("后台第二段");
     });
   });
 

@@ -37,7 +37,7 @@ async function mount(blocks: DocumentBlock[], options: Partial<Parameters<typeof
   const onSelect = vi.fn();
   const render = (props: Partial<Parameters<typeof PdfPreview>[0]>) => root.render(
     <PdfPreview paperId="paper" originalId="original" page={1} blocks={blocks} activeBlockId={null}
-      translations={{}} onPage={vi.fn()} onReimport={vi.fn()} onSelect={onSelect} onSelectText={vi.fn()} {...options} {...props} />,
+      onPage={vi.fn()} onReimport={vi.fn()} onSelect={onSelect} onSelectText={vi.fn()} {...options} {...props} />,
   );
   await act(async () => render({}));
   mounted.push(async () => { await act(async () => root.unmount()); container.remove(); });

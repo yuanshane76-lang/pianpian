@@ -16,6 +16,35 @@ function sseResponse(data: string) {
 }
 
 describe("real translation transport", () => {
+  it("extracts vocabulary from only the selected paragraph with streaming and thinking disabled", async () => {
+    for (const provider of ["deepseek", "aliyun"]) {
+      const settings = { ...DEFAULT, aiProvider: provider, [provider]: { ...DEFAULT[provider], apiKey: "unit-test-secret" } };
+      const fetchImpl = vi.fn().mockResolvedValue(sseResponse('{"choices":[{"delta":{"content":"{}"}}]}'));
+      await callModel(settings, { operation: "vocabulary",
+        paper: { blockData: [{ id: "before", text: "UNRELATED hypothesis" }, { id: "selected", text: "Attention weighs features." }] },
+        block: { id: "selected", kind: "paragraph", text: "Attention weighs features." },
+      }, fetchImpl);
+      const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+      expect(body.stream).toBe(true);
+      if (provider === "deepseek") expect(body.thinking).toEqual({ type: "disabled" });
+      else expect(body.enable_thinking).toBe(false);
+      expect(body.messages[1].content).toContain("Attention weighs features.");
+      expect(body.messages[1].content).not.toContain("UNRELATED");
+      expect(body.messages[0].content).toContain("当前段落");
+    }
+  });
+
+  it("streams paragraph insight with thinking disabled on both providers", async () => {
+    for (const provider of ["deepseek", "aliyun"]) {
+      const settings = { ...DEFAULT, aiProvider: provider, [provider]: { ...DEFAULT[provider], apiKey: "unit-test-secret" } };
+      const fetchImpl = vi.fn().mockResolvedValue(sseResponse('{"choices":[{"delta":{"content":"{}"}}]}'));
+      await callModel(settings, { operation: "insight", paper: {}, block: { text: "Attention weighs features." } }, fetchImpl);
+      const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+      expect(body.stream).toBe(true);
+      if (provider === "deepseek") expect(body.thinking).toEqual({ type: "disabled" });
+      else expect(body.enable_thinking).toBe(false);
+    }
+  });
   it("disables thinking specifically for translations on each configured provider", async () => {
     for (const provider of ["deepseek", "aliyun"]) {
       const settings = { ...DEFAULT, aiProvider: provider, [provider]: { ...DEFAULT[provider], apiKey: "unit-test-secret" } };

@@ -73,6 +73,7 @@ git worktree add -b fix/pdf-selection ../zhiyan-pdf-selection origin/main
 | 命令 | 数据与服务边界 |
 | --- | --- |
 | `node scripts/desktop-e2e.cjs` | 临时空用户目录：验证中文壳、配置和 IPC；无需密钥和论文，禁止外部服务请求 |
+| `npm run test:paragraph-vocabulary:e2e` | 合成 PDF、模拟 SSE 与隔离桌面用户目录：验证段落词汇、单词表、Markdown、摘要和图表流式显示、定位提示及多种窗口尺寸；不调用真实模型服务 |
 | `node scripts/translation-math-e2e.cjs` | 临时用户目录和固定公式数据，无付费请求 |
 | `node scripts/paragraph-quick-analysis-e2e.cjs` | 读取本机已解析论文和配置，隔离浏览器会话、模拟模型响应；不是空文献库检查 |
 | `node scripts/reader-chart-e2e.cjs` | 读取本机已解析论文和配置，隔离浏览器会话；默认跳过 AI 操作、禁止外部请求，检查连续翻页、图表和布局 |

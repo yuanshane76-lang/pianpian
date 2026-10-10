@@ -88,8 +88,7 @@ const report = { checks: [], errors: [], aiRequests: 0, content: "UI fixtures wi
           { term: "parametric memory", translation: "参数化记忆", definition: "训练后保存在模型参数中的知识。", example: "A pre-trained seq2seq model provides parametric memory.",
             blockId: paragraph.id, pageNumber: paragraph.pageNumber, count: 8, source: "local" },
         ],
-        pipeline: { paperId: paper.id, source: "mineru", stage: "ready", translatedCount: 5, queuedCount: 0, failedCount: 0, paused: false },
-        onPausePipeline: noop, onResumePipeline: noop, onRetryPipeline: noop, onJump: noop,
+        onJump: noop,
       };
       window.renderAssistantFixture = (overrides = {}) => {
         const props = { ...base, ...overrides };

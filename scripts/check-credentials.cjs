@@ -1,5 +1,6 @@
 const { execFileSync } = require("node:child_process");
 const { readFileSync } = require("node:fs");
+const path = require("node:path");
 
 const patterns = [
   ["service-key", /sk-[A-Za-z0-9_-]{24,}/],
@@ -37,7 +38,13 @@ function auditRepository(cwd = process.cwd()) {
     .split("\0").filter(Boolean);
   for (const file of files) {
     if (textFile.test(file) || sensitiveFile.test(file)) {
-      inspect(file, readFileSync(require("node:path").join(cwd, file), "utf8"), "worktree");
+      const target = path.join(cwd, file);
+      try {
+        inspect(file, readFileSync(target, "utf8"), "worktree");
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+        inspect(file, git(["show", `:${file}`]), "index");
+      }
     }
   }
   return findings;

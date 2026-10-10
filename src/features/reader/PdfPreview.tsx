@@ -18,7 +18,6 @@ interface Props {
   onReimport: (file: File) => void;
   blocks: DocumentBlock[];
   activeBlockId: string | null;
-  translations: Record<string, string>;
   onSelect: (block: DocumentBlock) => void;
   onSelectText: (block: DocumentBlock, text: string) => void;
   onAnalyzeParagraph?: (block: DocumentBlock) => void;
