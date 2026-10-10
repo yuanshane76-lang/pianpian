@@ -34,6 +34,7 @@ function createWindow() {
     height: 920,
     minWidth: 980,
     minHeight: 680,
+    show: false,
     backgroundColor: "#f4f7f7",
     webPreferences: {
       contextIsolation: true,
@@ -41,6 +42,12 @@ function createWindow() {
       sandbox: true,
       preload: path.join(__dirname, "preload.cjs"),
     },
+  });
+
+  // 先隐藏窗口，等首帧画好再显示，避免深色主题启动时闪白；加载失败时兜底显示。
+  window.once("ready-to-show", () => window.show());
+  window.webContents.once("did-fail-load", (_event, _code, _description, _url, isMainFrame) => {
+    if (isMainFrame) window.show();
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
