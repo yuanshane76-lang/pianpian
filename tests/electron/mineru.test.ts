@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const require = createRequire(import.meta.url);
 type Fetch = typeof fetch;
 type NetworkOptions = { fetchImpl?: Fetch; timeoutMs?: number };
-type Block = { id: string; kind: "heading" | "paragraph" | "image" | "table" | "equation"; text: string; pageNumber: number; order: number; assetPath?: string; caption?: string; bbox?: [number, number, number, number]; pageWidth?: number; pageHeight?: number };
+type Block = { id: string; kind: "heading" | "paragraph" | "image" | "table" | "equation"; text: string; pageNumber: number; order: number; headingLevel?: number; assetPath?: string; caption?: string; bbox?: [number, number, number, number]; pageWidth?: number; pageHeight?: number };
 type Extracted = { result: { blocks: Block[]; title?: string; pageCount?: number }; assets: { path: string; data: Uint8Array }[] };
 type Mineru = {
   requestUpload(options: NetworkOptions & { apiKey: string; name: string }): Promise<{ batchId: string; uploadUrl: string }>;
@@ -225,6 +225,21 @@ describe("official MinerU hosted v4 API", () => {
 });
 
 describe("bounded MinerU ZIP extraction", () => {
+  it("normalizes nested heading levels without changing stable block identities", () => {
+    const rows = [
+      { type: "heading", text: "Method", page_idx: 0 },
+      { type: "heading", text: "Dataset", page_idx: 0 },
+      { type: "heading", text: "Training", page_idx: 0 },
+      { type: "heading", text: "Deep heading", page_idx: 0 },
+    ];
+    const before = mineru().extractResultZip(zip([{ name: "content_list.json", data: JSON.stringify(rows) }])).result;
+    const after = mineru().extractResultZip(zip([{ name: "content_list.json", data: JSON.stringify(rows.map((row, index) => ({
+      ...row, text_level: [1, "2", 3, 9][index],
+    }))) }])).result;
+    expect(after.blocks.map((block) => block.headingLevel)).toEqual([1, 2, 3, 6]);
+    expect(after.blocks.map((block) => block.id)).toEqual(before.blocks.map((block) => block.id));
+  });
+
   it("prefers content-list blocks, converts page indices, and resolves images relative to metadata", () => {
     const content = [
       { type: "text", text: "Paper title", text_level: 1, page_idx: 0 },
@@ -247,6 +262,7 @@ describe("bounded MinerU ZIP extraction", () => {
     expect(result.blocks.map((block) => block.pageNumber)).toEqual([1, 1, 2, 2, 3]);
     expect(result.blocks.map((block) => block.order)).toEqual([0, 1, 2, 3, 4]);
     expect(new Set(result.blocks.map((block) => block.id)).size).toBe(5);
+    expect(result.blocks[0].headingLevel).toBe(1);
     expect(result.blocks[1].text).toBe("Actual paragraph");
     expect(result.blocks[2]).toMatchObject({ assetPath: "paper/auto/images/figure.png", caption: "Figure 1\nDetails" });
     expect(result.blocks[3]).toMatchObject({ text: "<table><tr><td>A</td></tr></table>", assetPath: "paper/auto/images/table.jpg", caption: "Table 1" });
@@ -306,17 +322,18 @@ describe("bounded MinerU ZIP extraction", () => {
   });
 
   it("falls back to Markdown headings, paragraphs, tables, equations, and local images without inventing a page count", () => {
-    const markdown = "# Paper\n\nA paragraph\ncontinued.\n\n![Figure](images/a.png)\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\n$$\nx+y\n$$";
+    const markdown = "# Paper\n\n## Method\n\nA paragraph\ncontinued.\n\n![Figure](images/a.png)\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\n$$\nx+y\n$$";
     const { result, assets } = mineru().extractResultZip(zip([
       { name: "result/full.md", data: markdown },
       { name: "result/images/a.png", data: Buffer.from([4]) },
     ]));
     expect(result.title).toBe("Paper");
     expect(result.pageCount).toBeUndefined();
-    expect(result.blocks.map((block) => block.kind)).toEqual(["heading", "paragraph", "image", "table", "equation"]);
-    expect(result.blocks[1].text).toBe("A paragraph\ncontinued.");
-    expect(result.blocks[2]).toMatchObject({ assetPath: "result/images/a.png", caption: "Figure", pageNumber: 1 });
-    expect(result.blocks[4].text).toBe("x+y");
+    expect(result.blocks.map((block) => block.kind)).toEqual(["heading", "heading", "paragraph", "image", "table", "equation"]);
+    expect(result.blocks.slice(0, 2).map((block) => block.headingLevel)).toEqual([1, 2]);
+    expect(result.blocks[2].text).toBe("A paragraph\ncontinued.");
+    expect(result.blocks[3]).toMatchObject({ assetPath: "result/images/a.png", caption: "Figure", pageNumber: 1 });
+    expect(result.blocks[5].text).toBe("x+y");
     expect(assets[0].path).toBe("result/images/a.png");
   });
 

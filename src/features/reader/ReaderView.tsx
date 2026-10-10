@@ -1,6 +1,6 @@
 import { ArrowLeft, BookMarked, Check, FileText, PanelLeftClose, PanelRightClose, Search, Settings2, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { DocumentBlock } from "../../domain/documentBlocks";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { getDocumentOutline, type DocumentBlock } from "../../domain/documentBlocks";
 import type { PaperRecord } from "../../domain/library";
 import type { PaperPipelineState } from "../../domain/pipeline";
 import { PipelineStatusBar } from "./PipelineStatusBar";
@@ -56,12 +56,39 @@ interface ReaderViewProps {
   pipeline: PaperPipelineState;
 }
 
+function getDefaultReaderPanelWidths() {
+  const compactDesktop = typeof window !== "undefined" && window.matchMedia?.("(max-width: 1120px)")?.matches;
+  return compactDesktop ? { outline: 145, assistant: 320 } : { outline: 175, assistant: 380 };
+}
+
+const panelLimits = { outline: { min: 140, max: 360 }, assistant: { min: 280, max: 560 } };
+const documentMinimum = 320;
+
+function fitPanelWidths(widths: { outline: number; assistant: number }, layoutWidth: number, leftOpen: boolean, rightOpen: boolean) {
+  if (layoutWidth <= 840) return widths;
+  const outline = leftOpen ? widths.outline : 0;
+  const assistant = rightOpen ? widths.assistant : 0;
+  const overflow = Math.max(0, outline + assistant + documentMinimum - layoutWidth);
+  const assistantReduction = rightOpen ? Math.min(overflow, assistant - panelLimits.assistant.min) : 0;
+  return {
+    outline: leftOpen ? Math.max(panelLimits.outline.min, outline - (overflow - assistantReduction)) : widths.outline,
+    assistant: rightOpen ? assistant - assistantReduction : widths.assistant,
+  };
+}
+
 export function ReaderView(props: ReaderViewProps) {
   const { paper, selectedBlock, answer, isBusy, onBack, onSelectBlock, onOverview, onTranslate, onAsk, onOpenSettings, actionError } = props;
   const blocks = paper.blockData ?? [];
+  const defaultPanelWidths = useMemo(getDefaultReaderPanelWidths, []);
   const [page, setPage] = useState(paper.readingPosition?.page ?? 1);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
+  const [preferredOutlineWidth, setOutlineWidth] = useState(defaultPanelWidths.outline);
+  const [preferredAssistantWidth, setAssistantWidth] = useState(defaultPanelWidths.assistant);
+  const [layoutWidth, setLayoutWidth] = useState(window.innerWidth);
+  const { outline: outlineWidth, assistant: assistantWidth } = fitPanelWidths(
+    { outline: preferredOutlineWidth, assistant: preferredAssistantWidth }, layoutWidth, leftOpen, rightOpen,
+  );
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const layoutReady = blocks.some(hasPageBounds);
@@ -72,10 +99,27 @@ export function ReaderView(props: ReaderViewProps) {
   const focusSequence = useRef(0);
   const [focusTarget, setFocusTarget] = useState<{ id: string; requestId: number }>();
   const [navigationTarget, setNavigationTarget] = useState<{ page: number; requestId: number }>();
+  const outline = useMemo(() => getDocumentOutline(blocks), [blocks]);
+  const resizeRef = useRef<{ side: "outline" | "assistant"; startX: number; startWidth: number; pointerId: number }>();
+  const widthsRef = useRef(defaultPanelWidths);
+  const openRef = useRef({ left: true, right: true });
+  widthsRef.current = { outline: outlineWidth, assistant: assistantWidth };
+  openRef.current = { left: leftOpen, right: rightOpen };
   const visibleBlocks = useMemo(() => {
     const query = searchQuery.trim().toLocaleLowerCase();
     return query ? blocks.filter((block) => block.text.toLocaleLowerCase().includes(query)) : blocks;
   }, [blocks, searchQuery]);
+
+  useEffect(() => {
+    const layout = readerLayoutRef.current;
+    if (!layout) return;
+    const update = () => setLayoutWidth(layout.getBoundingClientRect().width || window.innerWidth);
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(update);
+    observer?.observe(layout);
+    window.addEventListener("resize", update);
+    update();
+    return () => { observer?.disconnect(); window.removeEventListener("resize", update); };
+  }, []);
 
   useEffect(() => {
     if (readyNotice.current.paperId !== paper.id) {
@@ -119,6 +163,10 @@ export function ReaderView(props: ReaderViewProps) {
     setRightOpen((current) => !current);
   }
 
+  function toggleOutline() {
+    setLeftOpen((current) => !current);
+  }
+
   useEffect(() => {
     setPage(paper.readingPosition?.page ?? 1);
     setNavigationTarget(undefined);
@@ -159,6 +207,78 @@ export function ReaderView(props: ReaderViewProps) {
     setFocusTarget({ id: block.id, requestId: ++focusSequence.current });
   }
 
+  function clampWidth(side: "outline" | "assistant", value: number) {
+    const { min, max } = panelLimits[side];
+    const layoutWidth = readerLayoutRef.current?.getBoundingClientRect().width || window.innerWidth;
+    const otherWidth = side === "outline"
+      ? (openRef.current.right ? widthsRef.current.assistant : 0)
+      : (openRef.current.left ? widthsRef.current.outline : 0);
+    const available = layoutWidth - otherWidth - documentMinimum;
+    return Math.round(Math.min(max, Math.max(min, Math.min(value, available))));
+  }
+
+  function resizeBy(side: "outline" | "assistant", delta: number) {
+    if (side === "outline") setOutlineWidth(clampWidth(side, outlineWidth + delta));
+    else setAssistantWidth(clampWidth(side, assistantWidth - delta));
+  }
+
+  function handleResizeKeyDown(side: "outline" | "assistant", event: KeyboardEvent<HTMLDivElement>) {
+    const step = event.shiftKey ? 48 : 16;
+    if (event.key === "ArrowLeft") { event.preventDefault(); resizeBy(side, -step); }
+    else if (event.key === "ArrowRight") { event.preventDefault(); resizeBy(side, step); }
+    else if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      const value = clampWidth(side, panelLimits[side][event.key === "Home" ? "min" : "max"]);
+      if (side === "outline") setOutlineWidth(value); else setAssistantWidth(value);
+    }
+  }
+
+  function startResize(side: "outline" | "assistant", event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    resizeRef.current = {
+      side,
+      startX: event.clientX,
+      startWidth: side === "outline" ? outlineWidth : assistantWidth,
+      pointerId: event.pointerId,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    document.body.classList.add("is-reader-resizing");
+  }
+
+  useEffect(() => {
+    function move(event: PointerEvent) {
+      const resize = resizeRef.current;
+      if (!resize || resize.pointerId !== event.pointerId) return;
+      const delta = event.clientX - resize.startX;
+      const value = resize.side === "outline" ? resize.startWidth + delta : resize.startWidth - delta;
+      if (resize.side === "outline") setOutlineWidth(clampWidth(resize.side, value));
+      else setAssistantWidth(clampWidth(resize.side, value));
+    }
+    function stop() {
+      if (!resizeRef.current) return;
+      resizeRef.current = undefined;
+      document.body.classList.remove("is-reader-resizing");
+    }
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+    window.addEventListener("blur", stop);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      window.removeEventListener("blur", stop);
+      resizeRef.current = undefined;
+      document.body.classList.remove("is-reader-resizing");
+    };
+  }, []);
+
+  const layoutStyle = {
+    "--reader-outline-width": `${outlineWidth}px`,
+    "--reader-assistant-width": `${assistantWidth}px`,
+  } as CSSProperties;
+
   return (
     <div className="reader-shell">
       <header className="reader-topbar">
@@ -167,7 +287,7 @@ export function ReaderView(props: ReaderViewProps) {
         <div className="reader-surface-label"><FileText size={15} />原始排版 · MinerU 交互层</div>
         <div className="reader-toolbar">
           <button type="button" className="wordbook-button" aria-label="打开单词表" title="单词表" onClick={props.onOpenWordbook}><BookMarked size={17} /><span>单词表</span><small>{props.wordbookCount ?? 0}</small></button>
-          <button className="icon-button" aria-label={leftOpen ? "收起目录" : "展开目录"} onClick={() => setLeftOpen(!leftOpen)}><PanelLeftClose size={17} /></button>
+          <button className="icon-button" aria-label={leftOpen ? "收起目录" : "展开目录"} onClick={toggleOutline}><PanelLeftClose size={17} /></button>
           <button ref={assistantToggleRef} className="icon-button" aria-label={rightOpen ? "收起助手" : "展开助手"} onClick={toggleAssistant}><PanelRightClose size={17} /></button>
           <button className="icon-button" aria-label="服务配置" onClick={onOpenSettings}><Settings2 size={17} /></button>
           <button className="icon-button" aria-label="搜索正文" aria-pressed={searchOpen} onClick={() => setSearchOpen(!searchOpen)}><Search size={17} /></button>
@@ -184,12 +304,14 @@ export function ReaderView(props: ReaderViewProps) {
         <button className="icon-button" aria-label="关闭定位提示" type="button" onClick={() => setToastPaperId(null)}><X size={16} /></button>
       </div> : null}
       {searchOpen ? <div className="reader-searchbar"><Search size={16} /><input autoFocus aria-label="搜索正文内容" onChange={(event) => setSearchQuery(event.target.value)} placeholder="搜索正文内容" type="search" value={searchQuery} /><span>{visibleBlocks.length} 个匹配段落</span></div> : null}
-      <div ref={readerLayoutRef} className={`reader-layout ${!leftOpen ? "left-collapsed" : ""} ${!rightOpen ? "right-collapsed" : ""}`}>
+      <div ref={readerLayoutRef} className={`reader-layout ${!leftOpen ? "left-collapsed" : ""} ${!rightOpen ? "right-collapsed" : ""}`} style={layoutStyle}>
         {leftOpen ? <aside className="reader-outline">
-          <div className="outline-label">原文页码</div>
-          <div className="outline-pages">{Array.from({ length: paper.pageCount ?? 1 }, (_, index) => <button className={page === index + 1 ? "is-active" : ""} key={index} onClick={() => original(index + 1)}>第 {index + 1} 页</button>)}</div>
-          <nav className="outline-sections">{blocks.filter((block) => block.kind === "heading").map((block) => <button key={block.id} onClick={() => navigate(block)} title={block.text}>{block.text}</button>)}</nav>
+          <div className="outline-label">论文目录</div>
+          {outline.length ? <nav className="outline-sections" aria-label="论文目录">
+            {outline.map(({ block, level }) => <button className="outline-heading" data-heading-level={level} key={block.id} onClick={() => navigate(block)} style={{ "--outline-level": level } as CSSProperties} title={block.text}>{block.text}</button>)}
+          </nav> : <p className="outline-empty">尚未识别出论文标题</p>}
         </aside> : null}
+        {leftOpen ? <div className="reader-resizer reader-resizer-left" role="separator" aria-label="调整目录宽度" title="拖动调整目录宽度" aria-orientation="vertical" aria-valuemin={panelLimits.outline.min} aria-valuemax={clampWidth("outline", panelLimits.outline.max)} aria-valuenow={outlineWidth} tabIndex={0} onKeyDown={(event) => handleResizeKeyDown("outline", event)} onPointerDown={(event) => startResize("outline", event)} /> : null}
         <main className="reader-document is-pdf">
           <PdfPreview paperId={paper.id} originalId={paper.originalId} page={page} onPage={original} navigationTarget={navigationTarget}
             onAnalyzeParagraph={(block) => {
@@ -202,6 +324,7 @@ export function ReaderView(props: ReaderViewProps) {
             onVisiblePage={(visiblePage) => { setPage(visiblePage); props.onPosition({ mode: "pdf", page: visiblePage }); }}
             onReimport={props.onReimport} blocks={visibleBlocks} activeBlockId={selectedBlock?.id ?? null} onSelect={select} onSelectText={(block, text) => { select(block); props.onSelectText(block, text); }} focusTarget={focusTarget} onVisibleBlock={(block) => props.onPosition({ mode: "pdf", page: block.pageNumber, blockId: block.id })} />
         </main>
+        {rightOpen ? <div className="reader-resizer reader-resizer-right" role="separator" aria-label="调整研究助手宽度" title="拖动调整研究助手宽度" aria-orientation="vertical" aria-valuemin={panelLimits.assistant.min} aria-valuemax={clampWidth("assistant", panelLimits.assistant.max)} aria-valuenow={assistantWidth} tabIndex={0} onKeyDown={(event) => handleResizeKeyDown("assistant", event)} onPointerDown={(event) => startResize("assistant", event)} /> : null}
         {rightOpen ? <ReaderAssistant vocabularyBlock={props.vocabularyBlock} onSaveTerm={props.onSaveTerm} isTermSaved={props.isTermSaved} originalId={paper.originalId} selectedBlock={selectedBlock} overview={props.streamingOutput?.operation === "overview" ? props.streamingOutput.text : paper.overview} answer={props.streamingOutput?.operation === "qa" ? props.streamingOutput.text : answer} isBusy={isBusy} onOverview={props.aiAvailable ? onOverview : onOpenSettings} onTranslate={onTranslate} onReadChart={props.onReadChart} chartReading={props.chartReading} onExplain={props.onExplain} explanation={props.streamingOutput?.operation === "explain" ? props.streamingOutput.text : props.explanation} onAsk={props.aiAvailable ? onAsk : onOpenSettings} translation={props.streamingOutput?.operation === "translate" ? props.streamingOutput.text : props.translation} selectionText={props.selectionText} serviceLabel={props.serviceLabel} serviceModel={props.serviceModel} aiAvailable={props.aiAvailable} onOpenSettings={onOpenSettings} actionError={actionError} pendingAction={props.pendingAction} pendingParagraphActions={props.pendingParagraphActions} paragraphAnalysisRequestId={props.paragraphAnalysisRequestId} streamingOutput={props.streamingOutput} insight={props.insight} onInsight={props.aiAvailable ? props.onInsight : onOpenSettings} guide={props.guide} onGuide={props.aiAvailable ? props.onGuide : onOpenSettings} vocabulary={props.vocabulary} onJump={(id) => { const block = blocks.find((item) => item.id === id); if (block) navigate(block); }} /> : null}
       </div>
     </div>
