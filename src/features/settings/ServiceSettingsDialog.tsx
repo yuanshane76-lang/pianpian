@@ -73,7 +73,12 @@ export function ServiceSettingsDialog({ onClose, onSaved }: Props) {
     setFeedback("");
     setError("");
     try {
-      const result = await desktop.invoke<{ message: string }>("zhiyan:settings:test", name);
+      const result = await desktop.invoke<{ message: string }>("zhiyan:settings:test", {
+        provider: name,
+        ...(keys[name].trim() ? { apiKey: keys[name] } : {}),
+        ...(name === "aliyun" || name === "deepseek" ? { model: model[name] } : {}),
+        ...(clearKeys[name] ? { clearApiKey: true } : {}),
+      });
       setFeedback(result.message);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "连接失败");
@@ -83,9 +88,17 @@ export function ServiceSettingsDialog({ onClose, onSaved }: Props) {
   }
 
   function keyField(name: "aliyun" | "deepseek" | "mineru", label: string) {
+    const hasDraftKey = Boolean(keys[name].trim());
+    const keyStatus = clearKeys[name]
+      ? "待删除"
+      : hasDraftKey
+        ? "待保存"
+        : current[name].configured
+          ? "已保存"
+          : "未配置";
     return (
       <div className="settings-field" key={name}>
-        <label htmlFor={`${name}-key`}>{label} <span>{current[name].configured && !clearKeys[name] ? "已保存" : "未配置"}</span></label>
+        <label htmlFor={`${name}-key`}>{label} <span>{keyStatus}</span></label>
         <div className="settings-key-row">
           <input
             id={`${name}-key`}
@@ -134,7 +147,7 @@ export function ServiceSettingsDialog({ onClose, onSaved }: Props) {
                 <label className="settings-field" htmlFor="aliyun-model">模型名称<input id="aliyun-model" value={model.aliyun} onChange={(event) => setModel((value) => ({ ...value, aliyun: event.target.value }))} /></label>
                 <p className="settings-endpoint">官方接口：{current.aliyun.baseUrl}</p>
                 <a href="https://bailian.console.aliyun.com/" target="_blank" rel="noreferrer">打开百炼控制台 <ExternalLink size={13} /></a>
-                <button type="button" className="secondary-button compact" disabled={busy || !current.aliyun.configured} onClick={() => testConnection("aliyun")}>测试所选模型（可能计费）</button>
+                <button type="button" className="secondary-button compact" disabled={busy || (!current.aliyun.configured && !keys.aliyun.trim()) || clearKeys.aliyun} onClick={() => testConnection("aliyun")}>测试所选模型（可能计费）</button>
               </>
             ) : null}
             {provider === "deepseek" ? (
@@ -143,7 +156,7 @@ export function ServiceSettingsDialog({ onClose, onSaved }: Props) {
                 <label className="settings-field" htmlFor="deepseek-model">模型名称<input id="deepseek-model" value={model.deepseek} onChange={(event) => setModel((value) => ({ ...value, deepseek: event.target.value }))} /></label>
                 <p className="settings-endpoint">官方接口：{current.deepseek.baseUrl}</p>
                 <a href="https://platform.deepseek.com/" target="_blank" rel="noreferrer">打开 DeepSeek 开放平台 <ExternalLink size={13} /></a>
-                <button type="button" className="secondary-button compact" disabled={busy || !current.deepseek.configured} onClick={() => testConnection("deepseek")}>测试所选模型（可能计费）</button>
+                <button type="button" className="secondary-button compact" disabled={busy || (!current.deepseek.configured && !keys.deepseek.trim()) || clearKeys.deepseek} onClick={() => testConnection("deepseek")}>测试所选模型（可能计费）</button>
               </>
             ) : null}
           </div>
@@ -162,7 +175,7 @@ export function ServiceSettingsDialog({ onClose, onSaved }: Props) {
               <a href="https://mineru.net/apiManage/token" target="_blank" rel="noreferrer">打开 Token 管理页 <ExternalLink size={13} /></a>
               <a href="https://mineru.net/apiManage/docs" target="_blank" rel="noreferrer">查看官方 API 文档 <ExternalLink size={13} /></a>
             </div>
-            <button type="button" className="secondary-button compact" disabled={busy || !current.mineru.configured} onClick={() => testConnection("mineru")}>检查 MinerU 配置</button>
+            <button type="button" className="secondary-button compact" disabled={busy || (!current.mineru.configured && !keys.mineru.trim()) || clearKeys.mineru} onClick={() => testConnection("mineru")}>检查 MinerU 配置</button>
           </div>
         </div>
         <footer className="settings-footer">

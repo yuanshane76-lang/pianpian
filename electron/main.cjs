@@ -3,7 +3,7 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { resolveAppAsset } = require("./resource.cjs");
 const { createEncryptedSecretStore } = require("./secret-store.cjs");
-const { DEFAULT, normalize, summary, update } = require("./settings.cjs");
+const { DEFAULT, normalize, resolveTestService, summary, update } = require("./settings.cjs");
 const { assertAppSender } = require("./ipc-security.cjs");
 const { streamModel } = require("./ai.cjs");
 const { registerAiStreamHandlers } = require("./ai-stream-ipc.cjs");
@@ -93,24 +93,25 @@ app.whenReady().then(() => {
     store.write(next);
     return summary(next);
   });
-  secureHandle("zhiyan:settings:test", async (provider) => {
+  secureHandle("zhiyan:settings:test", async (input) => {
+    const provider = typeof input === "string" ? input : input?.provider;
+    const draft = typeof input === "object" && input ? input : {};
+    const settings = readSettings();
     if (provider === "mineru") {
-      const settings = readSettings();
-      if (!settings.mineru.apiKey) throw new Error("请先保存 MinerU Token");
-      return { ok: true, message: "MinerU Token 已保存。请在阅读器点击“增强解析”，通过实际 PDF 上传和解析验证权限与额度。" };
+      resolveTestService(settings, provider, draft);
+      return { ok: true, message: "当前 MinerU Token 可用。请在阅读器点击“增强解析”，通过实际 PDF 上传和解析验证权限与额度。" };
     }
     if (!["aliyun", "deepseek"].includes(provider)) throw new Error("请选择模型服务");
-    const settings = readSettings();
+    const serviceDraft = resolveTestService(settings, provider, draft);
     const service = settings[provider];
-    if (!service.apiKey) throw new Error("请先保存对应服务的密钥");
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
     try {
       const response = await fetch(`${service.baseUrl}/chat/completions`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${service.apiKey}`, "Content-Type": "application/json" },
+        headers: { Authorization: `Bearer ${serviceDraft.apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: service.model,
+          model: serviceDraft.model,
           messages: [{ role: "user", content: "只回复：好" }],
           max_tokens: 8,
         }),

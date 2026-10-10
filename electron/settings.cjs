@@ -21,6 +21,13 @@ function normalize(value) {
   };
 }
 
+function validateModel(model) {
+  if (typeof model !== "string" || !/^[a-zA-Z0-9._-]{1,80}$/.test(model)) {
+    throw new Error("模型名称只能包含字母、数字、点、横线和下划线");
+  }
+  return model;
+}
+
 function summary(value) {
   const settings = normalize(value);
   return {
@@ -50,8 +57,7 @@ function update(current, input) {
     }
     if (name !== "mineru" && typeof edit.model === "string") {
       const model = edit.model.trim();
-      if (!/^[a-zA-Z0-9._-]{1,80}$/.test(model)) throw new Error("模型名称只能包含字母、数字、点、横线和下划线");
-      settings[name].model = model;
+      settings[name].model = validateModel(model);
     }
     if (name === "mineru") settings[name].endpoint = DEFAULT.mineru.endpoint;
     else settings[name].baseUrl = DEFAULT[name].baseUrl;
@@ -59,4 +65,25 @@ function update(current, input) {
   return settings;
 }
 
-module.exports = { DEFAULT, normalize, summary, update };
+function resolveTestService(value, provider, input = {}) {
+  if (!["aliyun", "deepseek", "mineru"].includes(provider)) {
+    throw new Error("请选择模型服务或 MinerU");
+  }
+  const settings = normalize(value);
+  const service = settings[provider];
+  const draft = input && typeof input === "object" ? input : {};
+  const apiKey = draft.clearApiKey === true
+    ? ""
+    : typeof draft.apiKey === "string" && draft.apiKey.trim()
+      ? draft.apiKey.trim()
+      : service.apiKey;
+  if (!apiKey) throw new Error(provider === "mineru" ? "请先输入或保存 MinerU Token" : "请先输入或保存对应服务的密钥");
+  if (apiKey.length > 4096) throw new Error("密钥长度异常");
+  if (provider === "mineru") return { apiKey };
+  const model = typeof draft.model === "string" && draft.model.trim()
+    ? validateModel(draft.model.trim())
+    : service.model;
+  return { apiKey, model };
+}
+
+module.exports = { DEFAULT, normalize, summary, update, resolveTestService };
