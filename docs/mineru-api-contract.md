@@ -19,6 +19,7 @@ type Block = {
   text: string;
   pageNumber: number; // 1-based
   order: number;      // 0-based, ordered within this result
+  headingLevel?: number; // 1-6 when MinerU or Markdown identifies heading depth
   assetPath?: string;
   caption?: string;
   bbox?: [number, number, number, number]; // left, top, right, bottom; normalized 0-1
@@ -83,7 +84,7 @@ IDs must be exactly 64 lowercase hex characters. Asset paths use relative `/` se
 
 Original/upload limit: **100 MiB**, with `%PDF-n.n` header validation. Asset limit: **64 MiB** per file. Parse/task JSON limits: **16 MiB / 1 MiB**. ZIP bounds: **100 MiB** compressed, **256 MiB** expanded, **4096** members, **64 MiB** per member, **16 MiB** per JSON/Markdown member, **1000:1** expansion ratio, **50000** blocks. The built-in ZIP reader supports stored and deflate members, UTF-8/ASCII filenames, directories and data descriptors, validates local/central records, CRC and sizes, and rejects encryption, ZIP64, multi-disk archives, special files, path collisions and overlapping members.
 
-Extraction prioritizes one `content_list.json` or `*_content_list.json`. A corrupt primary list throws; absent lists use `full.md`, then `markdown.md`, then another `.md`. `text_level > 0` maps to headings; images, tables and equations retain captions/body text. `page_idx + 1` maps source pages; content-list `pageCount` is the highest observed source page, not a verified PDF total. Markdown lacks page mapping: its blocks use page 1 and omit `pageCount`. Unknown textual list items become paragraphs. IDs are deterministic. Missing/remote images have no `assetPath`; no image reference triggers network access. HTML table text is data and must be rendered safely by the parent.
+Extraction prioritizes one `content_list.json` or `*_content_list.json`. A corrupt primary list throws; absent lists use `full.md`, then `markdown.md`, then another `.md`. `text_level > 0` maps to headings and is retained as `headingLevel`; Markdown heading depth is retained in the same field. Images, tables and equations retain captions/body text. `page_idx + 1` maps source pages; content-list `pageCount` is the highest observed source page, not a verified PDF total. Markdown lacks page mapping: its blocks use page 1 and omit `pageCount`. Unknown textual list items become paragraphs. IDs are deterministic. Missing/remote images have no `assetPath`; no image reference triggers network access. HTML table text is data and must be rendered safely by the parent.
 
 Each `block.assetPath` matches an extracted `asset.path` **exactly**, including archive subdirectories. Persist all assets before publishing the parse result:
 

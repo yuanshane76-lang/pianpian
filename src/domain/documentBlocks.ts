@@ -1,4 +1,5 @@
 export type DocumentBlockKind = "heading" | "paragraph" | "image" | "table" | "equation";
+export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
 export interface ExtractedPage {
   pageNumber: number;
@@ -11,6 +12,8 @@ export interface DocumentBlock {
   order: number;
   kind: DocumentBlockKind;
   text: string;
+  /** Heading nesting level, when the parser can identify one. */
+  headingLevel?: HeadingLevel;
   assetPath?: string;
   caption?: string;
   /** Top-left page fractions [x0, y0, x1, y1], all in 0–1. */
@@ -19,14 +22,31 @@ export interface DocumentBlock {
   pageHeight?: number;
 }
 
-function isHeading(line: string): boolean {
+export function inferHeadingLevel(line: string): HeadingLevel | undefined {
   const normalized = line.trim();
-  return (
-    /^(abstract|摘要|introduction|background|method|methods|结果|结论|references?)$/i.test(
-      normalized,
-    ) ||
-    /^\d+(?:\.\d+)*[.)]?\s+\S+/.test(normalized)
-  );
+  const numbered = /^(\d+(?:\.\d+)*)(?:[.)])?\s+\S+/.exec(normalized);
+  if (numbered) return Math.min(6, numbered[1].split(".").length) as HeadingLevel;
+  return /^(abstract|摘要|introduction|background|method|methods|结果|结论|references?)$/i.test(normalized)
+    ? 1
+    : undefined;
+}
+
+export interface DocumentOutlineEntry {
+  block: DocumentBlock;
+  level: HeadingLevel;
+}
+
+function isHeadingLevel(value: unknown): value is HeadingLevel {
+  return Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 6;
+}
+
+export function getDocumentOutline(blocks: DocumentBlock[]): DocumentOutlineEntry[] {
+  return blocks
+    .filter((block) => block.kind === "heading")
+    .map((block) => ({
+      block,
+      level: isHeadingLevel(block.headingLevel) ? block.headingLevel : inferHeadingLevel(block.text) ?? 1,
+    }));
 }
 
 function hashText(value: string): string {
@@ -45,7 +65,7 @@ export function createDocumentBlocks(pages: ExtractedPage[]): DocumentBlock[] {
   for (const page of orderedPages) {
     let pageOrder = 0;
     let paragraph = "";
-    function add(text: string, kind: DocumentBlockKind) {
+    function add(text: string, kind: DocumentBlockKind, headingLevel?: HeadingLevel) {
       if (!text) return;
       pageOrder += 1;
       blocks.push({
@@ -54,6 +74,7 @@ export function createDocumentBlocks(pages: ExtractedPage[]): DocumentBlock[] {
         order: blocks.length,
         kind,
         text,
+        ...(headingLevel ? { headingLevel } : {}),
       });
     }
     function flush() {
@@ -63,7 +84,8 @@ export function createDocumentBlocks(pages: ExtractedPage[]): DocumentBlock[] {
     for (const rawLine of page.lines) {
       const text = rawLine.replace(/\s+/g, " ").trim();
       if (!text) { flush(); continue; }
-      if (isHeading(text)) { flush(); add(text, "heading"); continue; }
+      const headingLevel = inferHeadingLevel(text);
+      if (headingLevel) { flush(); add(text, "heading", headingLevel); continue; }
       if (paragraph.endsWith("-") && /^[a-z]/.test(text)) paragraph = paragraph.slice(0, -1) + text;
       else paragraph += `${paragraph && !/[\u3400-\u9fff]$/.test(paragraph) ? " " : ""}${text}`;
     }

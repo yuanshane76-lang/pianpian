@@ -18,7 +18,7 @@ const IMAGE_EXTENSION = /\.(?:png|jpe?g|webp|gif|bmp|jp2|tiff?)$/i;
 /** @typedef {{fetchImpl?: typeof fetch, timeoutMs?: number}} NetworkOptions */
 /** @typedef {"waiting-file" | "pending" | "running" | "converting" | "failed" | "done"} BatchState */
 /** @typedef {{state: BatchState, progress: number, error?: string, zipUrl?: string}} BatchStatus */
-/** @typedef {{id: string, kind: "heading" | "paragraph" | "image" | "table" | "equation", text: string, pageNumber: number, order: number, assetPath?: string, caption?: string, bbox?: [number, number, number, number], pageWidth?: number, pageHeight?: number}} Block */
+/** @typedef {{id: string, kind: "heading" | "paragraph" | "image" | "table" | "equation", text: string, order: number, pageNumber: number, headingLevel?: number, assetPath?: string, caption?: string, bbox?: [number, number, number, number], pageWidth?: number, pageHeight?: number}} Block */
 /** @typedef {{blocks: Block[], title?: string, pageCount?: number}} ParseResult */
 /** @typedef {{result: ParseResult, assets: {path: string, data: Uint8Array}[]}} ExtractedResult */
 
@@ -375,7 +375,7 @@ function assetReference(reference, sourcePath, files) {
 }
 
 function makeBlock(kind, text, pageNumber, order, extra = {}) {
-  const { bbox, pageWidth, pageHeight, ...identity } = extra;
+  const { bbox, pageWidth, pageHeight, headingLevel, ...identity } = extra;
   const fingerprint = createHash("sha256").update(JSON.stringify([kind, text, pageNumber, order, identity])).digest("hex").slice(0, 20);
   return { id: `mineru-${fingerprint}`, kind, text, pageNumber, order, ...extra };
 }
@@ -431,6 +431,8 @@ function normalizeContentList(bytes, sourcePath, files) {
     if (!text && !assetPath && (kind === "paragraph" || kind === "heading")) continue;
     const bbox = normalizeBboxToUnit(row.bbox || row.box || row.coordinates);
     blocks.push(makeBlock(kind, text, pageNumber, blocks.length, {
+      ...(kind === "heading" && Number.isInteger(Number(row.text_level)) && Number(row.text_level) > 0
+        ? { headingLevel: Math.min(6, Number(row.text_level)) } : {}),
       ...(assetPath ? { assetPath } : {}), ...(caption ? { caption } : {}),
       ...(bbox ? { bbox } : {}), ...normalizePageSize(row),
     }));
@@ -454,8 +456,8 @@ function normalizeMarkdown(bytes, sourcePath, files) {
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
     if (!line.trim()) { flush(); continue; }
-    const heading = /^#{1,6}\s+(.+?)\s*#*\s*$/.exec(line);
-    if (heading) { flush(); add("heading", heading[1]); continue; }
+    const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
+    if (heading) { flush(); add("heading", heading[2], { headingLevel: heading[1].length }); continue; }
     const image = /^\s*!\[([^\]]*)\]\((\S+?)(?:\s+["'][^"']*["'])?\)\s*$/.exec(line);
     if (image) {
       flush();
