@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="title desc">
+  <title id="title">纸研工作台 · Zhiyan Workbench</title>
+  <desc id="desc">Read research in its original layout, with Chinese explanations and vocabulary beside the paper.</desc>
+  <defs>
+    <linearGradient id="background" x2="1" y2="1">
+      <stop stop-color="#102e32"/>
+      <stop offset="1" stop-color="#183f40"/>
+    </linearGradient>
+    <linearGradient id="glow" x2="1" y2="1">
+      <stop stop-color="#85d9c1" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#85d9c1" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="400" rx="24" fill="url(#background)"/>
+  <circle cx="1100" cy="60" r="300" fill="url(#glow)"/>
+  <g stroke="#7cd0bc" stroke-opacity=".07" fill="none">
+    <path d="M0 80H1200M0 160H1200M0 240H1200M0 320H1200M80 0V400M160 0V400M240 0V400M320 0V400M400 0V400M480 0V400M560 0V400M640 0V400M720 0V400M800 0V400M880 0V400M960 0V400M1040 0V400M1120 0V400"/>
+  </g>
+  <g font-family="'Segoe UI','Microsoft YaHei',Arial,sans-serif">
+    <rect x="58" y="50" width="48" height="48" rx="13" fill="#7ed4bc"/>
+    <g stroke="#173d3b" stroke-width="2.5" stroke-linejoin="round" fill="none">
+      <path d="M70 65h8c3 0 5 2 5 4v16c-1-2-3-3-6-3h-7zm26 0h-8c-3 0-5 2-5 4v16c1-2 3-3 6-3h7z"/>
+    </g>
+    <text x="122" y="70" font-size="13" letter-spacing="2.5" fill="#a6d4ca">ZHIYAN WORKBENCH</text>
+    <text x="122" y="94" font-size="13" fill="#9cbbb6">RESEARCH READING, IN CONTEXT</text>
+    <text x="56" y="167" font-size="48" font-weight="700" fill="#f5faf8">纸研工作台</text>
+    <text x="58" y="211" font-size="24" font-weight="500" fill="#d9ece5">Keep the paper. Understand the research.</text>
+    <text x="58" y="249" font-size="16" fill="#a9c7c0">原文排版 · 中文理解 · 学术词汇</text>
+    <g font-size="12" fill="#d4e8e1">
+      <rect x="58" y="305" width="116" height="29" rx="14.5" fill="#ffffff" fill-opacity=".07" stroke="#ffffff" stroke-opacity=".1"/>
+      <text x="77" y="324">Windows x64</text>
+      <rect x="185" y="305" width="113" height="29" rx="14.5" fill="#ffffff" fill-opacity=".07" stroke="#ffffff" stroke-opacity=".1"/>
+      <text x="205" y="324">Original PDF</text>
+      <rect x="309" y="305" width="129" height="29" rx="14.5" fill="#ffffff" fill-opacity=".07" stroke="#ffffff" stroke-opacity=".1"/>
+      <text x="328" y="324">AI on demand</text>
+    </g>
+    <g transform="translate(726 52)">
+      <rect x="18" y="18" width="269" height="296" rx="12" fill="#061e20" opacity=".2"/>
+      <rect width="269" height="296" rx="12" fill="#f5f8f4"/>
+      <rect x="24" y="25" width="69" height="5" rx="2.5" fill="#77b7a7"/>
+      <rect x="24" y="48" width="196" height="10" rx="3" fill="#233e3d"/>
+      <rect x="24" y="66" width="151" height="10" rx="3" fill="#233e3d"/>
+      <path d="M24 98H244" stroke="#dde6df"/>
+      <rect x="24" y="116" width="85" height="6" rx="3" fill="#557b72"/>
+      <g fill="#c3d0c8">
+        <rect x="24" y="135" width="212" height="4" rx="2"/>
+        <rect x="24" y="146" width="203" height="4" rx="2"/>
+        <rect x="24" y="157" width="185" height="4" rx="2"/>
+      </g>
+      <rect x="17" y="179" width="235" height="53" rx="6" fill="#dcedf5" stroke="#6e9abd"/>
+      <g fill="#7a9994">
+        <rect x="24" y="190" width="212" height="4" rx="2"/>
+        <rect x="24" y="201" width="198" height="4" rx="2"/>
+        <rect x="24" y="212" width="170" height="4" rx="2"/>
+      </g>
+      <rect x="24" y="251" width="110" height="5" rx="2.5" fill="#c3d0c8"/>
+      <rect x="24" y="263" width="187" height="5" rx="2.5" fill="#c3d0c8"/>
+      <g transform="translate(174 132)">
+        <rect x="7" y="9" width="212" height="152" rx="12" fill="#081c20" opacity=".15"/>
+        <rect width="212" height="152" rx="12" fill="#ffffff"/>
+        <rect x="17" y="16" width="25" height="25" rx="7" fill="#d9f0e9"/>
+        <path d="m24 29 4 4 8-9" stroke="#1a8272" stroke-width="2" fill="none"/>
+        <text x="51" y="34" font-size="13" font-weight="700" fill="#1e4b43">Read with context</text>
+        <path d="M17 54H195" stroke="#e1ebe5"/>
+        <text x="17" y="79" font-size="12" fill="#436f64">Translate · Explain</text>
+        <text x="17" y="102" font-size="12" fill="#436f64">Summarize · Learn terms</text>
+        <rect x="17" y="121" width="86" height="15" rx="7.5" fill="#e6f2ec"/>
+        <text x="26" y="132" font-size="9" fill="#2d7162">YOUR WORDBOOK</text>
+      </g>
+    </g>
+  </g>
+</svg>
