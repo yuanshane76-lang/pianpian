@@ -9,9 +9,11 @@ import {
 } from "../domain/documentBlocks";
 import {
   buildAnalysisCacheKey,
+  buildParagraphCacheIdentity,
   getCachedAnalysis,
   setCachedAnalysis,
   type AnalysisCacheEntry,
+  type ParagraphOperation,
 } from "../domain/analysis";
 import {
   filterPapers,
@@ -24,11 +26,9 @@ import {
 import type { AiRequest } from "../services/ai";
 import { loadAnalysisCache, saveAnalysisCache } from "../services/analysisCache";
 import { preparePdfFile, loadPapers, savePapers } from "../services/library";
-import { extractPdfBlocks } from "../services/document";
-import { deleteOriginalPdf, readOriginalPdf } from "../services/originalPdf";
+import { deleteOriginalPdf } from "../services/originalPdf";
 import { getAnalysisAvailability, getTranslationTarget, isVisualBlock } from "../domain/readingFlow";
-import { hasPageBounds } from "../domain/pdfLayout";
-import type { PaperPipelineState } from "../domain/pipeline";
+import { canOpenPaper, getPaperPipelineState, hasCompletePageBounds, type PaperPipelineState } from "../domain/pipeline";
 import { parseChartReading, parseParagraphInsight, parseReadingGuide } from "../domain/learning";
 import { loadChartImage } from "../services/chartImage";
 import { extractAcademicVocabulary, type AcademicTerm } from "../domain/vocabulary";
@@ -42,7 +42,10 @@ import { DEFAULT_SERVICE_SETTINGS, toPublicServiceSettings, type PublicServiceSe
 import { getDesktopBridge } from "../platform/electron";
 
 type AppView = "library" | "reader";
-type ParagraphOperation = "translate" | "explain";
+const PARAGRAPH_OPERATIONS: ParagraphOperation[] = ["translate", "explain", "insight", "vocabulary"];
+const PARAGRAPH_LABELS: Record<ParagraphOperation, string> = {
+  translate: "翻译", explain: "解释", insight: "摘要与作用", vocabulary: "精选词汇",
+};
 interface AnalysisRequestOptions {
   concurrent?: boolean;
 }
@@ -70,7 +73,11 @@ export default function App() {
   const [selectionText, setSelectionText] = useState("");
   const [processing, setProcessing] = useState<Record<string, string>>({});
   const activeParsing = useRef(new Set<string>());
-  const activeBasicParsing = useRef(new Set<string>());
+  const activeUploads = useRef(new Set<string>());
+  const queuedImports = useRef(new Set<string>());
+  const taskGenerations = useRef(new Map<string, number>());
+  const alive = useRef(true);
+  const pollWaiters = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; resolve: () => void }>());
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [analysisCache, setAnalysisCache] = useState<Map<string, AnalysisCacheEntry>>(() =>
@@ -88,8 +95,6 @@ export default function App() {
   const activeParagraphAnalysisRef = useRef<string | null>(null);
   const [importing, setImporting] = useState(false);
   const importingRef = useRef(false);
-  const [cloudApprovalOpen, setCloudApprovalOpen] = useState(false);
-  const [rememberCloudApproval, setRememberCloudApproval] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [storageError, setStorageError] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -100,6 +105,8 @@ export default function App() {
   const [actionError, setActionError] = useState<string | null>(null);
   const activeAnalysisAbortRef = useRef(new Set<AbortController>());
   const [pipelineStates, setPipelineStates] = useState<Record<string, PaperPipelineState>>({});
+  const serviceSettingsRef = useRef(serviceSettings);
+  serviceSettingsRef.current = serviceSettings;
 
   function cancelActiveAnalysis() {
     for (const controller of activeAnalysisAbortRef.current) controller.abort();
@@ -116,57 +123,86 @@ export default function App() {
     if (!importingRef.current) setIsBusy(false);
   }
 
-  useEffect(() => () => cancelActiveAnalysis(), []);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      cancelActiveAnalysis();
+      for (const waiter of pollWaiters.current.values()) {
+        clearTimeout(waiter.timer);
+        waiter.resolve();
+      }
+      pollWaiters.current.clear();
+    };
+  }, []);
 
   useEffect(() => {
     const bridge = getDesktopBridge();
     if (!bridge) return;
+    let cancelled = false;
+    const snapshotGenerations = new Map(papers.map((paper) => [paper.id, taskGenerations.current.get(paper.id) ?? 0]));
     bridge.invoke<PublicServiceSettings>("zhiyan:settings:get")
       .then((settings) => {
+        if (!alive.current || cancelled) return [];
+        serviceSettingsRef.current = settings;
         setServiceSettings(settings);
-        setPapers((current) => current.map((paper) => ({ ...paper, overview: null })));
-        return bridge.invoke<Array<{
+        type Snapshot = {
           paperId: string;
           task: { batchId?: string; state?: string; progress?: number; error?: string } | null;
           result: { blocks: DocumentBlock[]; title?: string; pageCount?: number } | null;
           layoutRecoveryNeeded?: boolean;
-        }>>("zhiyan:documents:states", papers
+        };
+        const documents = papers
           .filter((paper) => paper.originalId)
-          .map((paper) => ({ paperId: paper.id, documentId: paper.originalId })));
+          .map((paper) => ({ paperId: paper.id, documentId: paper.originalId }));
+        const batches = Array.from({ length: Math.ceil(documents.length / 200) }, (_, index) => documents.slice(index * 200, (index + 1) * 200));
+        return Promise.all(batches.map((batch) => bridge.invoke<Snapshot[]>("zhiyan:documents:states", batch))).then((states) => states.flat());
       })
       .then((states) => {
-        if (!Array.isArray(states)) return;
+        if (!alive.current || cancelled || !Array.isArray(states)) return;
         setPapers((current) => current.map((paper) => {
           const state = states.find((item) => item.paperId === paper.id);
-          if (!state) return paper;
-          if (state.result?.blocks?.length) {
+          if (!state || (taskGenerations.current.get(paper.id) ?? 0) !== snapshotGenerations.get(paper.id)
+            || activeUploads.current.has(paper.id) || activeParsing.current.has(paper.id)) return paper;
+          if (state.task?.state === "done" && state.result?.blocks?.length && !state.layoutRecoveryNeeded) {
+            const positioned = hasCompletePageBounds(state.result.blocks);
             return {
               ...paper,
               blockData: state.result.blocks,
               blocks: state.result.blocks.length,
               title: state.result.title || paper.title,
               pageCount: paper.pageCount || state.result.pageCount,
-              parseStatus: "ready",
-              parseError: undefined,
-              mineruBatchId: state.layoutRecoveryNeeded ? state.task?.batchId : undefined,
+              parseStatus: positioned ? "ready" : "pending",
+              parseError: positioned ? undefined : "MinerU 坐标不完整，请重新解析",
+              mineruBatchId: undefined,
             };
           }
           if (state.task?.batchId && (state.layoutRecoveryNeeded || ["waiting-file", "pending", "running", "converting", "downloading"].includes(state.task.state || ""))) {
-            return { ...paper, mineruBatchId: state.task.batchId, parseError: undefined };
+            return { ...paper, parseStatus: "pending", mineruBatchId: state.task.batchId, parseError: undefined };
           }
           if (state.task?.state === "failed") {
-            return { ...paper, mineruBatchId: state.task.batchId, parseError: state.task.error || "MinerU 解析失败，可重试" };
+            return { ...paper, parseStatus: "pending", mineruBatchId: state.task.batchId, parseError: state.task.error || "MinerU 解析失败，可重试" };
           }
           return paper;
         }));
         for (const item of states) {
           const paper = papersRef.current.find((candidate) => candidate.id === item.paperId);
-          if (!paper) continue;
+          if (!paper || (taskGenerations.current.get(paper.id) ?? 0) !== snapshotGenerations.get(paper.id)
+            || activeUploads.current.has(paper.id) || activeParsing.current.has(paper.id)) continue;
+          const requiresRecovery = item.layoutRecoveryNeeded || item.task?.batchId
+            && ["waiting-file", "pending", "running", "converting", "downloading"].includes(item.task.state || "");
+          if (requiresRecovery && !serviceSettingsRef.current.mineru.configured) {
+            queuedImports.current.add(paper.id);
+            updatePipeline(paper.id, { stage: "partial", source: "mineru", error: undefined,
+              mineruMessage: "等待配置 MinerU 后继续已有解析任务" });
+            continue;
+          }
           if (item.layoutRecoveryNeeded) {
             updatePipeline(paper.id, { stage: "mineru-downloading", source: "mineru", mineruMessage: "正在恢复已有 MinerU 任务的段落坐标…" });
-          } else if (item.result?.blocks?.length) {
-            const positioned = item.result.blocks.some(hasPageBounds);
-            updatePipeline(paper.id, { stage: positioned ? "ready" : "partial", source: "mineru", mineruMessage: positioned ? "PDF 已就绪，MinerU 交互层已叠加" : "MinerU 结果不含可用坐标，原文仍可阅读；可重新解析" });
+            void pollMineru(paper);
+          } else if (item.task?.state === "done" && item.result?.blocks?.length) {
+            const positioned = hasCompletePageBounds(item.result.blocks);
+            updatePipeline(paper.id, { stage: positioned ? "ready" : "failed", source: "mineru", error: positioned ? undefined : "MinerU 坐标不完整，请重新解析" });
           } else if (item.task?.batchId && ["waiting-file", "pending", "running", "converting", "downloading"].includes(item.task.state || "")) {
             updatePipeline(paper.id, {
               stage: item.task.state === "downloading" ? "mineru-downloading" : "mineru-processing",
@@ -175,13 +211,17 @@ export default function App() {
               mineruProgress: item.task.progress,
               mineruMessage: "正在恢复 MinerU 解析任务…",
             });
+            void pollMineru(paper);
           } else if (item.task?.state === "failed") {
             updatePipeline(paper.id, { stage: "failed", source: "mineru", error: item.task.error || "MinerU 解析失败，可重试" });
+          } else if (!item.task && paper.parseStatus === "pending") {
+            queuedImports.current.add(paper.id);
           }
         }
       })
-      .catch(() => setActionError("无法读取服务配置，请打开设置检查本机密钥存储。"))
-      .finally(() => setSettingsReady(true));
+      .catch(() => { if (alive.current && !cancelled) setActionError("无法读取服务配置或解析任务，请打开设置检查后重试。"); })
+      .finally(() => { if (alive.current && !cancelled) setSettingsReady(true); });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -229,8 +269,8 @@ export default function App() {
   errorContextRef.current = `${selectedPaperId}:${targetSignature || visualSignature}:${serviceIdentity}`;
   const vocabularyBlock = selectedBlock?.kind === "paragraph" ? selectedBlock : null;
   const vocabularySignature = vocabularyBlock ? getDocumentContentSignature(vocabularyBlock) : "";
-  const guideKey = buildAnalysisCacheKey(selectedPaperId ?? "", vocabularySignature, "vocabulary", `${serviceIdentity}:paragraph-v1:${vocabularySignature}`);
-  const insightKey = buildAnalysisCacheKey(selectedPaperId ?? "", translationTarget?.id ?? "", "insight", `${serviceIdentity}:${documentSignature}:${targetSignature}`);
+  const guideKey = vocabularyBlock ? buildParagraphCacheIdentity(selectedPaperId ?? "", vocabularyBlock, "vocabulary", serviceIdentity, documentSignature).key : "";
+  const insightKey = translationTarget ? buildParagraphCacheIdentity(selectedPaperId ?? "", translationTarget, "insight", serviceIdentity, documentSignature).key : "";
   const chartKey = buildAnalysisCacheKey(selectedPaperId ?? "", selectedBlock?.id ?? "", "chart", `${serviceIdentity}:${selectedPaper?.originalId}:${documentSignature}:${visualSignature}`);
   const chartReading = useMemo(() => {
     const entry = analysisCache.get(chartKey);
@@ -277,6 +317,13 @@ export default function App() {
   function handleWordbookJump(source: WordbookSource) {
     const target = findWordbookSource(source);
     if (!target) return;
+    if (!canOpenPaper(target.paper, pipelineStates[target.paper.id])) {
+      setSelectedPaperId(target.paper.id);
+      setView("library");
+      setWordbookOpen(false);
+      setActionError("请等待这篇论文完成 MinerU 解析与坐标定位后再跳转。");
+      return;
+    }
     invalidateAnalysisRequests();
     setAnswer(null);
     selectedPaperIdRef.current = target.paper.id;
@@ -352,8 +399,8 @@ export default function App() {
     setPipelineStates((current) => {
       const previous = current[paperId] ?? {
         paperId,
-        source: "local",
-        stage: "local-extracting",
+        source: "mineru",
+        stage: "partial",
       };
       return {
         ...current,
@@ -384,19 +431,25 @@ export default function App() {
     setIsBusy(true);
     setErrorMessage(null);
     try {
-      const { paper, data } = await preparePdfFile(file);
-      const existing = papers.find((item) => item.id === paper.id);
+      const { paper } = await preparePdfFile(file);
+      const existing = papersRef.current.find((item) => item.id === paper.id);
       invalidateAnalysisRequests();
+      if (!existing) papersRef.current = [paper, ...papersRef.current];
       setPapers((current) => existing ? current : [paper, ...current]);
       setSelectedPaperId(paper.id);
       setSelectedBlock(null);
       setSelectionText("");
       setAnswer(null);
-      setView("reader");
-      if (!existing?.blockData?.length) void prepareReading(paper, data);
-      if (!existing && serviceSettings.mineru.configured) {
-        updatePipeline(paper.id, { stage: "mineru-consent", source: "local" });
-        setCloudApprovalOpen(true);
+      setView("library");
+      if (!existing || !canOpenPaper(existing, pipelineStates[existing.id])) {
+        queuedImports.current.add(paper.id);
+        if (serviceSettingsRef.current.mineru.configured) {
+          queuedImports.current.delete(paper.id);
+          void handleEnhance(existing ?? paper);
+        } else {
+          updatePipeline(paper.id, { stage: "partial", source: "mineru", error: undefined,
+            mineruMessage: "原始 PDF 已保存，配置 MinerU 后自动解析" });
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "未知错误";
@@ -408,27 +461,15 @@ export default function App() {
     }
   }
 
-  async function prepareReading(paper: PaperRecord, data?: ArrayBuffer) {
-    if (activeBasicParsing.current.has(paper.id)) return;
-    activeBasicParsing.current.add(paper.id);
-    updatePipeline(paper.id, { stage: "local-extracting", source: "local", error: undefined });
-    setProcessing((current) => ({ ...current, [paper.id]: "原文已可阅读，正在整理正文…" }));
-    try {
-      const blockData = await extractPdfBlocks(data ?? await readOriginalPdf(paper.originalId!));
-      setPapers((current) => current.map((item) => item.id === paper.id ? {
-        ...item, blockData, blocks: blockData.length, parseStatus: "ready", parseVersion: 2,
-        parseError: blockData.length ? undefined : "没有提取到正文，扫描件请使用 MinerU 增强解析。",
-      } : item));
-      updatePipeline(paper.id, { stage: "partial", source: "local" });
-    } catch (cause) {
-      setPapers((current) => current.map((item) => item.id === paper.id ? {
-        ...item, parseStatus: "fallback", parseError: cause instanceof Error ? cause.message : "正文整理失败",
-      } : item));
-      updatePipeline(paper.id, { stage: "partial", source: "local", error: "本地正文整理失败，仍可查看原始 PDF" });
-    } finally {
-      activeBasicParsing.current.delete(paper.id);
-      setProcessing((current) => ({ ...current, [paper.id]: "" }));
-    }
+  function taskIsCurrent(paper: PaperRecord) {
+    return alive.current && papersRef.current.some((item) => item.id === paper.id && item.originalId === paper.originalId);
+  }
+
+  function waitForNextPoll(paperId: string): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => { pollWaiters.current.delete(paperId); resolve(); }, 3000);
+      pollWaiters.current.set(paperId, { timer, resolve });
+    });
   }
 
   async function pollMineru(paper: PaperRecord) {
@@ -438,21 +479,25 @@ export default function App() {
     try {
       for (;;) {
         const task = await bridge.invoke<{ state: string; progress?: number; batchId?: string; error?: string; result?: { blocks: DocumentBlock[]; title?: string; pageCount?: number } }>("zhiyan:mineru:status", paper.originalId);
+        if (!taskIsCurrent(paper)) return;
         if (task.state === "done" && task.result) {
           const result = task.result;
+          const positioned = hasCompletePageBounds(result.blocks);
           setPapers((current) => current.map((item) => item.id === paper.id ? {
             ...item, blockData: result.blocks, blocks: result.blocks.length, parseVersion: 2,
-            parseStatus: "ready", parseError: undefined, title: result.title || item.title,
-            pageCount: item.pageCount || result.pageCount, mineruBatchId: undefined, overview: null,
+            parseStatus: positioned ? "ready" : "pending",
+            parseError: positioned ? undefined : "MinerU 坐标不完整，请重新解析",
+            title: result.title || item.title,
+            pageCount: item.pageCount || result.pageCount, mineruBatchId: undefined,
           } : item));
-          const positioned = result.blocks.some(hasPageBounds);
-          updatePipeline(paper.id, { stage: positioned ? "ready" : "partial", source: "mineru", mineruMessage: positioned ? "PDF 已就绪，MinerU 交互层已叠加" : "MinerU 结果不含可用坐标，原文仍可阅读；可重新解析" });
+          updatePipeline(paper.id, { stage: positioned ? "ready" : "failed", source: "mineru", error: positioned ? undefined : "MinerU 坐标不完整，请重新解析" });
           if (selectedPaperIdRef.current === paper.id) { setSelectedBlock(null); setSelectionText(""); }
           return;
         }
         if (task.state === "failed" || task.state === "error") throw new Error(task.error || "MinerU 解析失败");
         if (task.state === "waiting-file") throw new Error("MinerU 等待重新上传文件，可重试解析");
-        if (task.state === "idle") return;
+        if (task.state === "idle") throw new Error("解析任务不存在，请重新解析");
+        if (task.state === "done") throw new Error("MinerU 结果尚未保存，请重试解析");
         const message = (task as { message?: string }).message || "MinerU 正在整理正文、图表和公式…";
         updatePipeline(paper.id, {
           stage: task.state === "downloading" ? "mineru-downloading" : "mineru-processing",
@@ -462,75 +507,101 @@ export default function App() {
           mineruMessage: message,
         });
         setProcessing((current) => ({ ...current, [paper.id]: message }));
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        await waitForNextPoll(paper.id);
+        if (!taskIsCurrent(paper)) return;
       }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "MinerU 解析失败";
-      setActionError(message);
-      setPapers((current) => current.map((item) => item.id === paper.id ? { ...item, parseError: message } : item));
+      if (!taskIsCurrent(paper)) return;
+      if (!serviceSettingsRef.current.mineru.configured) {
+        queuedImports.current.add(paper.id);
+        updatePipeline(paper.id, { stage: "partial", source: "mineru", error: undefined, mineruMessage: "等待配置 MinerU 后继续解析" });
+        return;
+      }
+      setPapers((current) => current.map((item) => item.id === paper.id ? {
+        ...item,
+        parseStatus: "pending",
+        parseError: message,
+      } : item));
       updatePipeline(paper.id, { stage: "failed", source: "mineru", error: message });
     } finally {
       activeParsing.current.delete(paper.id);
-      setProcessing((current) => ({ ...current, [paper.id]: "" }));
+      if (alive.current) setProcessing((current) => ({ ...current, [paper.id]: "" }));
     }
   }
 
-  async function handleEnhance(approved = false, requestedPaper?: PaperRecord) {
+  async function handleEnhance(requestedPaper?: PaperRecord) {
     const targetPaper = requestedPaper ?? selectedPaper;
     if (!targetPaper?.originalId) { setActionError("请先重新导入原始 PDF"); return; }
     const bridge = getDesktopBridge();
     if (!bridge) { setActionError("MinerU 增强解析需要桌面版"); return; }
     const paper = targetPaper;
-    if (paper.mineruBatchId) {
-      try {
-        const snapshot = await bridge.invoke<{
-          task: { state?: string; batchId?: string } | null;
-          result: { blocks: DocumentBlock[] } | null;
-          layoutRecoveryNeeded?: boolean;
-        }>("zhiyan:documents:state", paper.originalId);
-        if (snapshot.layoutRecoveryNeeded || (snapshot.task?.batchId &&
-          (["pending", "running", "converting", "downloading"].includes(snapshot.task.state || "") ||
-            snapshot.task.state === "done" && snapshot.result?.blocks.some(hasPageBounds)))) {
-          setActionError(null);
-          updatePipeline(paper.id, {
-            stage: snapshot.task?.state === "downloading" ? "mineru-downloading" : "mineru-processing",
-            source: "mineru", error: undefined, mineruState: snapshot.task?.state,
-            mineruMessage: "正在继续已有 MinerU 任务…",
-          });
-          void pollMineru(paper);
-          return;
-        }
-      } catch {
-        setActionError("无法读取已有解析任务，请稍后重试");
-        return;
-      }
+    if (!serviceSettingsRef.current.mineru.configured) {
+      queuedImports.current.add(paper.id);
+      updatePipeline(paper.id, { source: "mineru", stage: "partial", error: undefined,
+        mineruMessage: "等待配置 MinerU 后继续解析" });
+      return;
     }
-    const remembered = window.localStorage.getItem("zhiyan.mineru-upload-approved") === "yes";
-    if (!remembered && !approved) { setCloudApprovalOpen(true); return; }
-    setActionError(null);
-    updatePipeline(paper.id, { stage: "mineru-uploading", source: "mineru", error: undefined, mineruProgress: undefined, mineruState: undefined });
-    setProcessing((current) => ({ ...current, [paper.id]: "正在上传 PDF 到 MinerU…" }));
+    queuedImports.current.delete(paper.id);
+    if (activeUploads.current.has(paper.id) || activeParsing.current.has(paper.id)) return;
+    activeUploads.current.add(paper.id);
+    taskGenerations.current.set(paper.id, (taskGenerations.current.get(paper.id) ?? 0) + 1);
     try {
+      if (paper.mineruBatchId) {
+        try {
+          const snapshot = await bridge.invoke<{
+            task: { state?: string; batchId?: string } | null;
+            result: { blocks: DocumentBlock[] } | null;
+            layoutRecoveryNeeded?: boolean;
+          }>("zhiyan:documents:state", paper.originalId);
+          if (snapshot.layoutRecoveryNeeded || (snapshot.task?.batchId &&
+            (["pending", "running", "converting", "downloading"].includes(snapshot.task.state || "") ||
+              snapshot.task.state === "done" && hasCompletePageBounds(snapshot.result?.blocks)))) {
+            if (!taskIsCurrent(paper)) return;
+            setActionError(null);
+            updatePipeline(paper.id, {
+              stage: snapshot.task?.state === "downloading" ? "mineru-downloading" : "mineru-processing",
+              source: "mineru", error: undefined, mineruState: snapshot.task?.state,
+              mineruMessage: "正在继续已有 MinerU 任务…",
+            });
+            void pollMineru(paper);
+            return;
+          }
+        } catch {
+          throw new Error("无法读取已有解析任务，请稍后重试");
+        }
+      }
+      setActionError(null);
+      updatePipeline(paper.id, { stage: "mineru-uploading", source: "mineru", error: undefined, mineruProgress: undefined, mineruState: undefined });
+      setProcessing((current) => ({ ...current, [paper.id]: "正在上传 PDF 到 MinerU…" }));
       const task = await bridge.invoke<{ batchId: string }>("zhiyan:mineru:start", paper.originalId);
-      setPapers((current) => current.map((item) => item.id === paper.id ? { ...item, mineruBatchId: task.batchId } : item));
+      if (!taskIsCurrent(paper)) return;
+      setPapers((current) => current.map((item) => item.id === paper.id ? { ...item, parseStatus: "pending", parseError: undefined, mineruBatchId: task.batchId } : item));
       updatePipeline(paper.id, { stage: "mineru-processing", source: "mineru", mineruState: "pending", mineruMessage: "PDF 已上传，等待 MinerU 开始解析…" });
       void pollMineru(paper);
     } catch (cause) {
-      setActionError(cause instanceof Error ? cause.message : "MinerU 上传失败");
-      updatePipeline(paper.id, { stage: "failed", source: "mineru", error: cause instanceof Error ? cause.message : "MinerU 上传失败" });
+      if (!taskIsCurrent(paper)) return;
+      if (!serviceSettingsRef.current.mineru.configured) {
+        queuedImports.current.add(paper.id);
+        updatePipeline(paper.id, { stage: "partial", source: "mineru", error: undefined, mineruMessage: "等待配置 MinerU 后继续解析" });
+        return;
+      }
+      const message = cause instanceof Error ? cause.message : "MinerU 上传失败";
+      setPapers((current) => current.map((item) => item.id === paper.id ? { ...item, parseStatus: "pending", parseError: message } : item));
+      updatePipeline(paper.id, { stage: "failed", source: "mineru", error: message });
       setProcessing((current) => ({ ...current, [paper.id]: "" }));
+    } finally {
+      activeUploads.current.delete(paper.id);
     }
   }
 
   useEffect(() => {
-    if (settingsReady && selectedPaper?.mineruBatchId) void pollMineru(selectedPaper);
-  }, [settingsReady, selectedPaper?.id, selectedPaper?.mineruBatchId]);
-
-  useEffect(() => {
-    if (!selectedPaper?.originalId || selectedPaper.parseStatus !== "pending") return;
-    if (processing[selectedPaper.id]) return;
-    void prepareReading(selectedPaper);
-  }, [selectedPaper?.id, selectedPaper?.originalId, selectedPaper?.parseStatus]);
+    if (!settingsReady || !serviceSettings.mineru.configured) return;
+    for (const paperId of queuedImports.current) {
+      const paper = papersRef.current.find((item) => item.id === paperId);
+      if (paper) void handleEnhance(paper);
+    }
+  }, [papers, settingsReady, serviceSettings.mineru.configured]);
 
   function handleSelectPaper(paperId: string) {
     invalidateAnalysisRequests();
@@ -538,6 +609,25 @@ export default function App() {
     setSelectedBlock(null);
     setSelectionText("");
     setAnswer(null);
+  }
+
+  function handleStartMineru(paperId: string) {
+    const paper = papersRef.current.find((item) => item.id === paperId);
+    if (!paper) return;
+    setSelectedPaperId(paperId);
+    if (!serviceSettings.mineru.configured) {
+      setSettingsOpen(true);
+      return;
+    }
+    void handleEnhance(paper);
+  }
+
+  function handleOpenReader() {
+    if (!selectedPaper || !canOpenPaper(selectedPaper, pipelineStates[selectedPaper.id])) {
+      setActionError("请等待 MinerU 完成正文解析和坐标定位后再阅读。");
+      return;
+    }
+    setView("reader");
   }
 
   function handleToggleFavorite(paperId: string) {
@@ -575,64 +665,14 @@ export default function App() {
     }
   }
 
-  async function handleOverview() {
-    if (!selectedPaper) return;
-    const requestIdentity = serviceIdentity;
-    const sourceSignature = getDocumentSourceSignature(selectedPaper.blockData ?? []);
-    const requestId = analysisRequestIdRef.current;
-    const key = buildAnalysisCacheKey(selectedPaper.id, "paper", "overview", `${serviceIdentity}:${sourceSignature}`);
-    const cached = getCachedAnalysis(analysisCache, key);
-    if (cached) {
-      setPapers((current) =>
-        current.map((paper) => (paper.id === selectedPaper.id ? { ...paper, overview: cached.value } : paper)),
-      );
-      return;
-    }
-    setIsBusy(true);
-    setPendingAction("overview");
-    setStreamingOutput({ operation: "overview", paperId: selectedPaper.id, text: "" });
-    try {
-      const overview = await requestAnalysis({ operation: "overview", paper: selectedPaper }, (delta) => {
-        setStreamingOutput((current) => current?.operation === "overview" && current.paperId === selectedPaper.id
-          ? { ...current, text: current.text + delta } : current);
-      });
-      const currentPaper = papersRef.current.find((paper) => paper.id === selectedPaper.id);
-      if (serviceIdentityRef.current !== requestIdentity || analysisRequestIdRef.current !== requestId ||
-          getDocumentSourceSignature(currentPaper?.blockData ?? []) !== sourceSignature) return;
-      setStreamingOutput(null);
-      const entry: AnalysisCacheEntry = {
-        key,
-        paperId: selectedPaper.id,
-        scopeId: "paper",
-        operation: "overview",
-        sourceSignature: `${serviceIdentity}:${sourceSignature}`,
-        value: overview,
-        createdAt: new Date().toISOString(),
-      };
-      setAnalysisCache((current) => {
-        const next = new Map(current);
-        setCachedAnalysis(next, entry);
-        return next;
-      });
-      setPapers((current) =>
-        current.map((paper) => (paper.id === selectedPaper.id ? { ...paper, overview } : paper)),
-      );
-    } finally {
-      if (analysisRequestIdRef.current === requestId) {
-        setIsBusy(false);
-        setPendingAction(null);
-        setStreamingOutput(null);
-      }
-    }
-  }
-
   async function handleTranslate() {
     if (!selectedPaper || !translationTarget) return;
     const target = translationTarget;
     const requestIdentity = serviceIdentity;
     const sourceSignature = getDocumentBlockSignature(target);
     const requestId = analysisRequestIdRef.current;
-    const key = buildAnalysisCacheKey(selectedPaper.id, `${target.id}:${sourceSignature}`, "translate", `${serviceIdentity}:${sourceSignature}`);
+    const cacheIdentity = buildParagraphCacheIdentity(selectedPaper.id, target, "translate", serviceIdentity, documentSignature);
+    const key = cacheIdentity.key;
     const cached = getCachedAnalysis(analysisCache, key);
     if (cached) {
       setStreamingOutput(null);
@@ -659,11 +699,7 @@ export default function App() {
           getDocumentSourceSignature(currentPaper?.blockData ?? []) !== getDocumentSourceSignature(selectedPaper.blockData ?? [])) return;
       setStreamingOutput(null);
       const entry: AnalysisCacheEntry = {
-        key,
-        paperId: selectedPaper.id,
-        scopeId: `${target.id}:${sourceSignature}`,
-        operation: "translate",
-        sourceSignature: `${serviceIdentity}:${sourceSignature}`,
+        ...cacheIdentity,
         value,
         createdAt: new Date().toISOString(),
       };
@@ -739,13 +775,19 @@ export default function App() {
     }
   }
 
-  async function handleExplain() {
+  async function handleExplain(force = false) {
     if (!selectedPaper || !translationTarget) return;
     const requestIdentity = serviceIdentity;
     const signature = getDocumentBlockSignature(translationTarget);
     const requestId = analysisRequestIdRef.current;
     const documentSignature = getDocumentSourceSignature(selectedPaper.blockData ?? []);
     const paperId = selectedPaper.id;
+    const cacheIdentity = buildParagraphCacheIdentity(paperId, translationTarget, "explain", requestIdentity, documentSignature);
+    const cached = getCachedAnalysis(analysisCache, cacheIdentity.key);
+    if (cached && !force) {
+      setExplanations((current) => ({ ...current, [`${paperId}:${signature}`]: cached.value }));
+      return;
+    }
     setIsBusy(true);
     setPendingAction("explain");
     setStreamingOutput({ operation: "explain", paperId, text: "" });
@@ -759,6 +801,11 @@ export default function App() {
           getDocumentSourceSignature(currentPaper?.blockData ?? []) === documentSignature) {
         setStreamingOutput(null);
         setExplanations((current) => ({ ...current, [`${paperId}:${signature}`]: value }));
+        setAnalysisCache((current) => {
+          const next = new Map(current);
+          setCachedAnalysis(next, { ...cacheIdentity, value, createdAt: new Date().toISOString() });
+          return next;
+        });
       }
     } finally {
       if (analysisRequestIdRef.current === requestId) {
@@ -784,13 +831,22 @@ export default function App() {
     if (!availability.available) { setSettingsOpen(true); return; }
     const requestId = analysisRequestIdRef.current;
     const documentSignature = getDocumentSourceSignature(paper.blockData ?? []);
-    const translationKey = buildAnalysisCacheKey(paper.id, `${block.id}:${signature}`, "translate", `${identity}:${signature}`);
-    const cachedTranslation = getCachedAnalysis(analysisCache, translationKey)?.value ?? translations[`${paper.id}:${signature}`];
-    const cachedExplanation = explanations[`${paper.id}:${signature}`];
-    const outputs = { translate: cachedTranslation ?? "", explain: cachedExplanation ?? "" };
+    const outputs: Record<ParagraphOperation, string> = { translate: "", explain: "", insight: "", vocabulary: "" };
     const pending: ParagraphOperation[] = [];
-    if (!cachedTranslation) pending.push("translate");
-    if (!cachedExplanation) pending.push("explain");
+    for (const operation of PARAGRAPH_OPERATIONS) {
+      const cacheIdentity = buildParagraphCacheIdentity(paper.id, block, operation, identity, documentSignature);
+      const cached = getCachedAnalysis(analysisCache, cacheIdentity.key)?.value ??
+        (operation === "translate" ? translations[`${paper.id}:${signature}`]
+          : operation === "explain" ? explanations[`${paper.id}:${signature}`] : undefined);
+      try {
+        if (!cached) throw new Error();
+        if (operation === "insight") parseParagraphInsight(cached);
+        if (operation === "vocabulary") parseReadingGuide(cached);
+        outputs[operation] = cached;
+      } catch {
+        pending.push(operation);
+      }
+    }
     activeParagraphAnalysisRef.current = activeKey;
     setParagraphAnalysis({ requestId, paperId: paper.id, signature, pending, outputs });
     setIsBusy(pending.length > 0);
@@ -802,7 +858,7 @@ export default function App() {
         getDocumentSourceSignature(currentPaper?.blockData ?? []) === documentSignature;
     }
 
-    // Each operation settles independently so a failure cannot cancel the other result.
+    // Each operation settles independently so a failure cannot cancel sibling results.
     await Promise.all(pending.map(async (operation) => {
       try {
         const value = await requestAnalysis({ operation, paper, block }, (delta) => {
@@ -811,17 +867,17 @@ export default function App() {
             ? { ...current, outputs: { ...current.outputs, [operation]: current.outputs[operation] + delta } } : current);
         }, { concurrent: true });
         if (!stillCurrent()) return;
+        if (operation === "insight") parseParagraphInsight(value);
+        if (operation === "vocabulary") parseReadingGuide(value);
+        const cacheIdentity = buildParagraphCacheIdentity(paper.id, block, operation, identity, documentSignature);
+        setAnalysisCache((current) => {
+          const next = new Map(current);
+          setCachedAnalysis(next, { ...cacheIdentity, value, createdAt: new Date().toISOString() });
+          return next;
+        });
         if (operation === "translate") {
-          setAnalysisCache((current) => {
-            const next = new Map(current);
-            setCachedAnalysis(next, {
-              key: translationKey, paperId: paper.id, scopeId: `${block.id}:${signature}`, operation,
-              sourceSignature: `${identity}:${signature}`, value, createdAt: new Date().toISOString(),
-            });
-            return next;
-          });
           setTranslations((current) => ({ ...current, [`${paper.id}:${signature}`]: value }));
-        } else {
+        } else if (operation === "explain") {
           setExplanations((current) => ({ ...current, [`${paper.id}:${signature}`]: value }));
         }
         setParagraphAnalysis((current) => current?.requestId === requestId
@@ -830,7 +886,7 @@ export default function App() {
         const failure = error as { name?: unknown; message?: unknown } | null;
         if (!stillCurrent() || failure?.name === "AbortError") return;
         const message = typeof failure?.message === "string" ? failure.message : "请求失败，请检查服务配置和网络";
-        setActionError((current) => [current, `${operation === "translate" ? "翻译" : "解释"}：${message}`].filter(Boolean).join("\n"));
+        setActionError((current) => [current, `${PARAGRAPH_LABELS[operation]}：${message}`].filter(Boolean).join("\n"));
         setParagraphAnalysis((current) => current?.requestId === requestId
           ? { ...current, outputs: { ...current.outputs, [operation]: "" } } : current);
       } finally {
@@ -849,8 +905,15 @@ export default function App() {
   async function handleLearning(operation: "vocabulary" | "insight") {
     const block = operation === "vocabulary" ? vocabularyBlock : translationTarget;
     if (!selectedPaper || !block) return;
-    const key = operation === "vocabulary" ? guideKey : insightKey;
-    if (analysisCache.has(key)) return;
+    const cacheIdentity = buildParagraphCacheIdentity(selectedPaper.id, block, operation, serviceIdentity, documentSignature);
+    const key = cacheIdentity.key;
+    const cached = analysisCache.get(key);
+    if (cached) {
+      try {
+        if (operation === "vocabulary") parseReadingGuide(cached.value); else parseParagraphInsight(cached.value);
+        return;
+      } catch { /* Invalid structured entries must be regenerated. */ }
+    }
     const identity = serviceIdentity;
     const requestPaper = selectedPaper;
     const requestId = analysisRequestIdRef.current;
@@ -869,8 +932,7 @@ export default function App() {
       setStreamingOutput(null);
       setAnalysisCache((current) => {
         const next = new Map(current);
-        next.set(key, { key, paperId: requestPaper.id, scopeId: operation === "vocabulary" ? vocabularySignature : block.id,
-          operation, sourceSignature: operation === "vocabulary" ? `${identity}:paragraph-v1:${vocabularySignature}` : `${identity}:${documentSignature}:${targetSignature}`, value, createdAt: new Date().toISOString() });
+        setCachedAnalysis(next, { ...cacheIdentity, value, createdAt: new Date().toISOString() });
         return next;
       });
     } finally {
@@ -942,8 +1004,8 @@ export default function App() {
       onSaved={(settings) => {
         serviceIdentityRef.current = `${settings.revision}:${settings.aiProvider}:${settings.aiProvider === "local" ? "demo" : settings[settings.aiProvider].model}`;
         invalidateAnalysisRequests();
+        serviceSettingsRef.current = settings;
         setServiceSettings(settings);
-        setPapers((current) => current.map((paper) => ({ ...paper, overview: null })));
         setTranslations({});
         setExplanations({});
         setAnswer(null);
@@ -951,18 +1013,6 @@ export default function App() {
       }}
     />
   ) : null;
-  const cloudDialog = cloudApprovalOpen ? <div className="settings-overlay">
-    <section className="settings-dialog cloud-approval" role="dialog" aria-modal="true" aria-label="确认云端解析">
-      <h2>导入后自动整理论文</h2>
-      <p>将《{selectedPaper?.title}》的完整 PDF 发送到 MinerU，整理自然段、图表、表格和公式，可能消耗账号解析额度。原文件会继续保存在本机。你可以在等待结构解析时先阅读和翻译临时正文。</p>
-      <label><input type="checkbox" checked={rememberCloudApproval} onChange={(event) => setRememberCloudApproval(event.target.checked)} />以后导入论文时自动开始 MinerU 解析</label>
-      <div className="detail-actions"><button className="secondary-button" onClick={() => setCloudApprovalOpen(false)}>暂不解析</button><button autoFocus className="primary-button" onClick={() => {
-        if (rememberCloudApproval) window.localStorage.setItem("zhiyan.mineru-upload-approved", "yes");
-        setCloudApprovalOpen(false); void handleEnhance(true);
-      }}>开始自动解析</button></div>
-    </section>
-  </div> : null;
-
   const wordbookDialog = wordbookOpen ? <WordbookDialog entries={wordbook.entries} error={wordbook.error || wordbookWriteError}
     onClose={() => setWordbookOpen(false)}
     onRemove={(id) => updateWordbook(wordbookRef.current.entries.filter((entry) => entry.id !== id))}
@@ -970,19 +1020,14 @@ export default function App() {
     canJump={(source) => Boolean(findWordbookSource(source))} onJump={handleWordbookJump}
     onRetry={() => { const next = loadWordbook(); wordbookRef.current = next; setWordbook(next); setWordbookWriteError(null); }} /> : null;
 
-  if (view === "reader" && selectedPaper) {
+  if (view === "reader" && selectedPaper && canOpenPaper(selectedPaper, pipelineStates[selectedPaper.id])) {
     const currentParagraphAnalysis = paragraphAnalysis?.paperId === selectedPaper.id &&
       paragraphAnalysis.signature === targetSignature ? paragraphAnalysis : null;
-    const pipeline = pipelineStates[selectedPaper.id] ?? {
-      paperId: selectedPaper.id,
-      source: "local" as const,
-      stage: selectedPaper.blockData?.length ? "ready" as const : "local-extracting" as const,
-    };
+    const pipeline = getPaperPipelineState(selectedPaper, pipelineStates[selectedPaper.id]);
     return (
       <>
         {storageWarning}
         {settingsDialog}
-        {cloudDialog}
         {wordbookDialog}
         <ReaderView
           paper={selectedPaper}
@@ -1010,18 +1055,17 @@ export default function App() {
           }}
           onSelectText={(block, text) => { invalidateAnalysisRequests(); setSelectedBlock(block); setSelectionText(text); setActionError(null); }}
           onAnalyzeParagraph={(block) => void handleAnalyzeParagraph(block)}
-          onOverview={() => void withAnalysisError(handleOverview)}
           onTranslate={() => void withAnalysisError(handleTranslate)}
           onReadChart={() => void withAnalysisError(handleReadChart)}
           chartReading={chartReading}
-          onExplain={() => void withAnalysisError(handleExplain)}
+          onExplain={(force) => void withAnalysisError(() => handleExplain(force))}
           explanation={currentParagraphAnalysis?.outputs.explain ?? explanations[`${selectedPaper.id}:${targetSignature}`] ?? null}
           onAsk={(question) => void withAnalysisError(() => handleAsk(question))}
           onOpenSettings={() => setSettingsOpen(true)}
           actionError={actionError}
           processingStatus={processing[selectedPaper.id] ?? ""}
           onEnhance={() => void handleEnhance()}
-          onRetryBasic={() => void prepareReading(selectedPaper)}
+          onRetryBasic={() => void handleEnhance(selectedPaper)}
           onReimport={(file) => void handleImport(file)}
           onPosition={(readingPosition) => setPapers((current) => current.map((paper) => paper.id === selectedPaper.id ? { ...paper, readingPosition } : paper))}
           aiAvailable={availability.available}
@@ -1031,6 +1075,7 @@ export default function App() {
           pendingAction={pendingAction}
           pendingParagraphActions={currentParagraphAnalysis?.pending}
           paragraphAnalysisRequestId={currentParagraphAnalysis?.requestId}
+          paragraphInsightText={currentParagraphAnalysis?.pending.includes("insight") ? currentParagraphAnalysis.outputs.insight : undefined}
           streamingOutput={streamingOutput?.paperId === selectedPaper.id
             ? { operation: streamingOutput.operation, text: streamingOutput.text }
             : null}
@@ -1049,7 +1094,6 @@ export default function App() {
     <>
       {storageWarning}
       {settingsDialog}
-      {cloudDialog}
       {wordbookDialog}
       <LibraryView
         papers={visiblePapers}
@@ -1060,16 +1104,19 @@ export default function App() {
         query={query}
         filter={filter}
         tags={availableTags}
-        errorMessage={errorMessage}
+        errorMessage={errorMessage || actionError}
         onFilterChange={setFilter}
         onQueryChange={setQuery}
         onSelect={handleSelectPaper}
         onImport={handleImport}
-        onOpenReader={() => setView("reader")}
+        onOpenReader={handleOpenReader}
+        onStartMineru={handleStartMineru}
         onToggleFavorite={handleToggleFavorite}
         onUpdateMetadata={handleUpdateMetadata}
         onDelete={handleDeletePaper}
         onOpenSettings={() => setSettingsOpen(true)}
+        pipelineStates={pipelineStates}
+        mineruConfigured={serviceSettings.mineru.configured}
         importing={importing}
       />
     </>

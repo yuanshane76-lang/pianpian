@@ -25,7 +25,10 @@ const report = { checks: [], errors: [], content: "Real local PDF with determini
       globalThis.fetch = async (url, options) => {
         if (!String(url).endsWith("/chat/completions")) return originalFetch(url, options);
         const body = JSON.parse(options.body);
-        const operation = body.messages[0].content.includes("只输出译文") ? "translate" : "explain";
+        const instruction = body.messages[0].content;
+        const operation = instruction.includes("学术搭配") ? "vocabulary"
+          : instruction.includes('"summary"') ? "insight"
+          : instruction.includes("只输出译文") ? "translate" : "explain";
         globalThis.paragraphQuickRequests.push({
           operation, model: body.model, thinking: body.thinking,
           enableThinking: body.enable_thinking, prompt: body.messages[1].content,
@@ -44,7 +47,7 @@ const report = { checks: [], errors: [], content: "Real local PDF with determini
       const parsed = JSON.parse(fs.readFileSync(path.join(documents, id, "parse.json"), "utf8"));
       return { id, title: parsed.title, authors: [], year: null, sourcePath: `local://paragraph-quick-check/${id}`,
         originalId: id, pageCount: parsed.pageCount, importedAt: "2026-10-09", tags: [], favorite: false,
-        overview: null, blocks: parsed.blocks.length, blockData: parsed.blocks, parseVersion: 2, parseStatus: "ready" };
+        blocks: parsed.blocks.length, blockData: parsed.blocks, parseVersion: 2, parseStatus: "ready" };
     });
     const paper = papers.find((item) => item.title.includes("Retrieval-Augmented")) || papers[0];
     const paragraph = paper?.blockData.find((block) => block.kind === "paragraph" && block.bbox && block.text.length > 150);
@@ -67,7 +70,7 @@ const report = { checks: [], errors: [], content: "Real local PDF with determini
     assert.equal(await electron.evaluate(() => globalThis.paragraphQuickRequests.length), 0);
     const tooltip = hit.locator('[role="tooltip"]');
     await tooltip.waitFor({ state: "visible" });
-    assert.equal(await tooltip.textContent(), "双击，翻译并解释整段");
+    assert.equal(await tooltip.textContent(), "双击分析整段");
     const hintBounds = await tooltip.boundingBox();
     assert(hintBounds && hintBounds.x >= 0 && hintBounds.x + hintBounds.width <= 1440, "The hint stays inside the viewport");
     await page.screenshot({ path: path.join(output, "01-selected-hint.png") });
@@ -91,17 +94,19 @@ const report = { checks: [], errors: [], content: "Real local PDF with determini
     }, paragraph);
     await page.mouse.dblclick(point.x, point.y);
     await page.waitForFunction(() => document.querySelector('[data-operation="translate"] .spin') &&
-      document.querySelector('[data-operation="explain"] .spin'));
+      document.querySelector('[data-operation="explain"] .spin') &&
+      document.querySelector('[data-operation="insight"] .spin') &&
+      document.querySelector(".assistant-tabs button:nth-child(2) .spin"));
     const requests = await electron.evaluate(() => globalThis.paragraphQuickRequests);
-    assert.equal(requests.length, 2, "Both requests start before either stream finishes");
-    assert.deepEqual(requests.map((request) => request.operation).sort(), ["explain", "translate"]);
+    assert.equal(requests.length, 4, "Four requests start before any stream finishes");
+    assert.deepEqual(requests.map((request) => request.operation).sort(), ["explain", "insight", "translate", "vocabulary"]);
     for (const request of requests) {
-      assert(request.prompt.endsWith(paragraph.text.slice(0, 15000)), "The entire paragraph is the request target");
+      assert(request.prompt.includes(paragraph.text.slice(0, 15000)), "The entire paragraph is the request target");
       assert(request.thinking?.type === "disabled" || request.enableThinking === false, "Thinking remains disabled");
     }
     assert.equal(await page.evaluate(() => getSelection().toString()), "");
-    await page.screenshot({ path: path.join(output, "02-both-running.png") });
-    report.checks.push({ name: "real-double-click-starts-two-full-paragraph-streams", textLayer: point.textLayer });
+    await page.screenshot({ path: path.join(output, "02-four-running.png") });
+    report.checks.push({ name: "real-double-click-starts-four-full-paragraph-streams", textLayer: point.textLayer });
 
     async function emit(operation, text, complete = false) {
       await electron.evaluate((_electron, { operation, text, complete }) => {
@@ -125,6 +130,8 @@ const report = { checks: [], errors: [], content: "Real local PDF with determini
       document.querySelector('[data-operation="explain"] .spin'));
     await emit("explain", "这有助于理解整篇论文的方法。", true);
     await page.waitForFunction(() => !document.querySelector('[data-operation="explain"] .spin'));
+    await emit("insight", '{"summary":"本段说明方法分工。","role":"连接问题与实现。"}', true);
+    await emit("vocabulary", '{"overview":"理解当前段落中的关键表达。","terms":[]}', true);
     await page.screenshot({ path: path.join(output, "03-explanation-complete.png") });
     await page.locator('[data-operation="translate"]').click();
     assert((await page.locator(".assistant-translation").textContent()).includes("译文已完成"));
@@ -132,7 +139,7 @@ const report = { checks: [], errors: [], content: "Real local PDF with determini
     report.checks.push({ name: "independent-streaming-and-completion-in-result-tabs" });
     await page.mouse.dblclick(point.x, point.y);
     await page.waitForFunction(() => document.querySelector('[data-operation="translate"]')?.getAttribute("aria-selected") === "true");
-    assert.equal(await electron.evaluate(() => globalThis.paragraphQuickRequests.length), 2);
+    assert.equal(await electron.evaluate(() => globalThis.paragraphQuickRequests.length), 4);
     report.checks.push({ name: "completed-results-reused-without-duplicate-requests" });
     for (const width of [1024, 375]) {
       await page.setViewportSize({ width, height: 812 });
@@ -151,7 +158,7 @@ const report = { checks: [], errors: [], content: "Real local PDF with determini
       await page.mouse.dblclick(point.x + point.width / 2, point.y + Math.min(10, point.height / 2));
       await page.getByRole("button", { name: "收起助手", exact: true }).waitFor();
       assert.equal(await page.locator('[data-operation="translate"]').getAttribute("aria-selected"), "true");
-      assert.equal(await electron.evaluate(() => globalThis.paragraphQuickRequests.length), 2);
+      assert.equal(await electron.evaluate(() => globalThis.paragraphQuickRequests.length), 4);
       await page.screenshot({ path: path.join(output, `05-assistant-${width}.png`) });
       report.checks.push({ name: `hint-and-double-click-reopen-assistant-${width}` });
     }

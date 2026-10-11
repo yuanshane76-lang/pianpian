@@ -1,6 +1,8 @@
 import { AlertTriangle, ArrowUpRight, BookMarked, FilePlus2, FolderOpen, Pencil, Sparkles, Trash2 } from "lucide-react";
 import { useState } from "react";
 import type { PaperMetadataPatch, PaperRecord } from "../../domain/library";
+import { canOpenPaper, getLibraryPreparation, getPaperPipelineState, type PaperPipelineState } from "../../domain/pipeline";
+import { PaperPreparation } from "./PaperPreparation";
 import { LibrarySidebar } from "./LibrarySidebar";
 import { PaperEditDialog } from "./PaperEditDialog";
 import { PaperList } from "./PaperList";
@@ -20,10 +22,13 @@ interface LibraryViewProps {
   onSelect: (paperId: string) => void;
   onImport: (file: File) => Promise<void>;
   onOpenReader: () => void;
+  onStartMineru: (paperId: string) => void;
   onToggleFavorite: (paperId: string) => void;
   onUpdateMetadata: (paperId: string, patch: PaperMetadataPatch) => void;
   onDelete: (paperId: string) => Promise<void>;
   onOpenSettings: () => void;
+  pipelineStates: Record<string, PaperPipelineState>;
+  mineruConfigured: boolean;
   importing: boolean;
 }
 
@@ -40,10 +45,13 @@ export function LibraryView({
   onSelect,
   onImport,
   onOpenReader,
+  onStartMineru,
   onToggleFavorite,
   onUpdateMetadata,
   onDelete,
   onOpenSettings,
+  pipelineStates,
+  mineruConfigured,
   importing,
   onOpenWordbook, wordbookCount,
 }: LibraryViewProps) {
@@ -66,6 +74,16 @@ export function LibraryView({
     }
   }
 
+  const selectedPipeline = selectedPaper
+    ? getPaperPipelineState(selectedPaper, pipelineStates[selectedPaper.id])
+    : null;
+  const selectedReady = selectedPaper
+    ? canOpenPaper(selectedPaper, pipelineStates[selectedPaper.id])
+    : false;
+  const selectedActive = selectedPaper
+    ? getLibraryPreparation(selectedPaper, pipelineStates[selectedPaper.id], mineruConfigured).active
+    : false;
+
   return (
     <>
       <div className="workspace-shell">
@@ -80,6 +98,9 @@ export function LibraryView({
           onImport={onImport}
           onSelect={onSelect}
           onToggleFavorite={onToggleFavorite}
+          onStartMineru={onStartMineru}
+          pipelineStates={pipelineStates}
+          mineruConfigured={mineruConfigured}
           importing={importing}
         />
         <section className="paper-detail-panel">
@@ -108,7 +129,7 @@ export function LibraryView({
                   </div>
                   <div>
                     <span>状态</span>
-                    <strong>{selectedPaper.parseStatus === "fallback" ? "解析需重试" : "本地可读"}</strong>
+                    <strong>{selectedReady ? "可阅读" : selectedPipeline?.stage === "failed" ? "解析失败" : selectedActive ? "处理中" : "等待 MinerU"}</strong>
                   </div>
                 </div>
                 <div className="tag-row">
@@ -118,10 +139,12 @@ export function LibraryView({
                     </span>
                   ))}
                 </div>
+                {!selectedReady && <PaperPreparation paper={selectedPaper} pipeline={selectedPipeline!}
+                  configured={mineruConfigured} onStart={() => onStartMineru(selectedPaper.id)} />}
                 <div className="detail-actions">
-                  <button className="primary-button" onClick={onOpenReader} type="button">
+                  <button className="primary-button" aria-label="打开阅读" disabled={!selectedReady} onClick={onOpenReader} type="button" title={selectedReady ? "打开阅读" : "MinerU 解析与坐标定位完成后才能阅读"}>
                     <ArrowUpRight size={17} />
-                    打开阅读
+                    {selectedReady ? "打开阅读" : "等待解析完成"}
                   </button>
                   <label className="secondary-button">
                     <FolderOpen size={17} />
@@ -129,6 +152,7 @@ export function LibraryView({
                     <input
                       accept="application/pdf,.pdf"
                       hidden
+                      disabled={importing}
                       onChange={(event) => {
                         const file = event.target.files?.[0];
                         if (file) onImport(file);
@@ -147,17 +171,8 @@ export function LibraryView({
                   </button>
                 </div>
                 <div className="detail-note">
-                  {selectedPaper.parseStatus === "fallback" ? (
-                    <>
-                      <AlertTriangle size={16} />
-                      <span>PDF 文本解析失败，当前仅保留错误提示块：{selectedPaper.parseError}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles size={16} />
-                      <span>AI 分析按需生成，结果会按内容签名缓存在本地。</span>
-                    </>
-                  )}
+                  <Sparkles size={16} />
+                  <span>{selectedReady ? "AI 分析按需生成，结果会按内容签名缓存在本地。" : "导入后自动上传到 MinerU 解析，会使用你的账号额度；原始 PDF 保存在本机。"}</span>
                 </div>
               </div>
             </>

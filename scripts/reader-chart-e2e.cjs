@@ -25,7 +25,7 @@ const report = { checks: [], errors: [] };
       const result = JSON.parse(fs.readFileSync(path.join(documents, id, "parse.json"), "utf8"));
       return { id, title: result.title, authors: [], year: null, sourcePath: `local://reader-e2e/${id}`,
         originalId: id, pageCount: result.pageCount, importedAt: "2026-10-09", tags: [], favorite: false,
-        overview: null, blocks: result.blocks.length, blockData: result.blocks, parseVersion: 2, parseStatus: "ready" };
+        blocks: result.blocks.length, blockData: result.blocks, parseVersion: 2, parseStatus: "ready" };
     });
     await page.evaluate((papers) => localStorage.setItem("zhiyan-workbench.papers.v1", JSON.stringify(papers)), fixtures);
     await page.reload();

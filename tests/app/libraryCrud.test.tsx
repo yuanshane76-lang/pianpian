@@ -15,7 +15,6 @@ const paper = {
   importedAt: "2026-10-07",
   tags: ["待整理"],
   favorite: false,
-  overview: null,
   blocks: 1,
   blockData: [{ id: "p001-b001", kind: "paragraph", pageNumber: 1, order: 0, text: "A paragraph." }],
 };

@@ -20,7 +20,7 @@ const headings = [
 function props(): ComponentProps<typeof ReaderView> {
   return {
     paper: { id: "paper", title: "Paper", authors: [], year: null, sourcePath: "local://paper",
-      originalId: "original", importedAt: "2026-10-09", tags: [], favorite: false, overview: null,
+      originalId: "original", importedAt: "2026-10-09", tags: [], favorite: false,
       blocks: 1, blockData: [paragraph], parseStatus: "ready" },
     selectedBlock: null, selectionText: "", translation: null, answer: null,
     isBusy: false, chartReading: null, explanation: null, actionError: null, processingStatus: "",
@@ -28,7 +28,7 @@ function props(): ComponentProps<typeof ReaderView> {
     pendingAction: null, streamingOutput: null, insight: null, guide: null, vocabulary: [],
     pipeline: { paperId: "paper", source: "mineru", stage: "ready" },
     onBack: vi.fn(), onSelectBlock: vi.fn(), onSelectText: vi.fn(), onAnalyzeParagraph: vi.fn(),
-    onOverview: vi.fn(), onTranslate: vi.fn(), onReadChart: vi.fn(), onExplain: vi.fn(), onAsk: vi.fn(),
+    onTranslate: vi.fn(), onReadChart: vi.fn(), onExplain: vi.fn(), onAsk: vi.fn(),
     onOpenSettings: vi.fn(), onEnhance: vi.fn(), onRetryBasic: vi.fn(), onReimport: vi.fn(),
     onPosition: vi.fn(), onInsight: vi.fn(), onGuide: vi.fn(),
   };

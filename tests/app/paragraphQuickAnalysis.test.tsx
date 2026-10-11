@@ -37,7 +37,7 @@ Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
 const paper = {
   id: "quick-analysis-paper", title: "Quick Analysis", authors: [], year: null,
   sourcePath: "local://quick-analysis", originalId: "quick-analysis-document", pageCount: 1,
-  importedAt: "2026-10-09", tags: [], favorite: false, overview: null, blocks: 2, parseVersion: 2,
+  importedAt: "2026-10-09", tags: [], favorite: false, blocks: 2, parseVersion: 2,
   blockData: [
     { id: "paragraph-a", kind: "paragraph", pageNumber: 1, order: 0,
       text: "The model uses attention. It works well.", bbox: [0.1, 0.1, 0.9, 0.2] },
@@ -71,7 +71,7 @@ afterEach(async () => {
 });
 
 async function mount(source = paper, configured = true, otherPapers: typeof paper[] = [], options: {
-  states?: unknown[]; mineruStatus?: unknown; documentState?: unknown;
+  states?: unknown[]; mineruStatus?: unknown; documentState?: unknown; settingsRevision?: string;
 } = {}) {
   window.localStorage.setItem("zhiyan-workbench.papers.v1", JSON.stringify([source, ...otherPapers]));
   const jobs: Job[] = [];
@@ -86,9 +86,11 @@ async function mount(source = paper, configured = true, otherPapers: typeof pape
       if (channel === "zhiyan:settings:get") return {
         ...(configured ? settings : toPublicServiceSettings(DEFAULT_SERVICE_SETTINGS)),
         mineru: { ...settings.mineru, configured: Boolean(options.mineruStatus) },
-        revision: `quick-analysis-${++revision}`,
+        revision: options.settingsRevision ?? `quick-analysis-${++revision}`,
       };
-      if (channel === "zhiyan:documents:states") return options.states ?? [];
+      if (channel === "zhiyan:documents:states") return options.states ?? [source, ...otherPapers].map((item) => ({
+        paperId: item.id, task: { state: "done" }, result: { blocks: item.blockData },
+      }));
       if (channel === "zhiyan:documents:state") return options.documentState;
       if (channel === "zhiyan:mineru:start") return { batchId: "synthetic-batch" };
       if (channel === "zhiyan:mineru:status") return typeof options.mineruStatus === "function"
@@ -102,8 +104,7 @@ async function mount(source = paper, configured = true, otherPapers: typeof pape
   const root = createRoot(container);
   mounted.push({ root, container });
   await act(async () => root.render(<App />));
-  await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")]
-    .find((button) => button.textContent?.includes("打开阅读"))!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="打开阅读"]')!.click());
   const blocks = container.querySelectorAll<HTMLButtonElement>(".pdf-block-hit-area");
   return { container, blocks, stream, jobs };
 }
@@ -116,7 +117,23 @@ async function doubleClick(element: HTMLElement) {
   });
 }
 
+function finishJobs(jobs: Job[], text = "已完成") {
+  for (const job of jobs) {
+    job.finish(job.request.operation === "insight" ? JSON.stringify({ summary: `${text}摘要`, role: `${text}作用` })
+      : job.request.operation === "vocabulary" ? JSON.stringify({ overview: `${text}词汇`, terms: [{ term: "attention", translation: "注意力" }] })
+      : text);
+  }
+}
+
 describe("paragraph quick analysis", () => {
+  it("does not expose a whole-paper overview module or action", async () => {
+    const { container, stream } = await mount();
+    expect(container.querySelector(".assistant-overview")).toBeNull();
+    expect(container.textContent).not.toContain("论文概览");
+    expect(container.textContent).not.toContain("生成全文概览");
+    expect(stream).not.toHaveBeenCalled();
+  });
+
   it("shows no background translation UI and does not request AI until the user asks", async () => {
     const { container, blocks, stream, jobs } = await mount();
     expect(container.textContent).not.toContain("中文预览");
@@ -147,8 +164,10 @@ describe("paragraph quick analysis", () => {
     Object.defineProperty(input, "files", { configurable: true, value: [new File(["synthetic"], "new.pdf", { type: "application/pdf" })] });
     await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
     expect(preparePdfFile).toHaveBeenCalledOnce();
-    expect(extractPdfBlocks).toHaveBeenCalledOnce();
-    expect(container.querySelector(".reader-shell")).not.toBeNull();
+    expect(extractPdfBlocks).not.toHaveBeenCalled();
+    expect(container.querySelector(".reader-shell")).toBeNull();
+    expect(container.querySelector(".paper-list")).not.toBeNull();
+    expect(container.querySelector('[role="progressbar"]')).not.toBeNull();
     expect(stream).not.toHaveBeenCalled();
   });
 
@@ -164,11 +183,12 @@ describe("paragraph quick analysis", () => {
   it("completes MinerU parsing without starting background translation", async () => {
     const source = { ...paper, blockData: paper.blockData.map((block) => ({ ...block, bbox: undefined })) } as unknown as typeof paper;
     const { container, stream } = await mount(source, true, [], {
+      states: [],
       mineruStatus: { state: "done", result: { blocks: paper.blockData, pageCount: 1 } },
     });
-    window.localStorage.setItem("zhiyan.mineru-upload-approved", "yes");
-    await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent === "开始 MinerU 解析")!.click());
+    expect(container.querySelector(".reader-shell")).toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label^="处理论文"]')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="打开阅读"]')!.click());
     expect(container.querySelectorAll(".pdf-block-hit-area")).toHaveLength(2);
     expect(stream).not.toHaveBeenCalled();
   });
@@ -183,7 +203,8 @@ describe("paragraph quick analysis", () => {
       documentState: { task, result: null }, mineruStatus,
     });
     expect(mineruStatus).toHaveBeenCalledOnce();
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="重试论文处理"]')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label^="处理论文"]')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="打开阅读"]')!.click());
     expect(mineruStatus).toHaveBeenCalledTimes(2);
     expect(container.querySelector('[aria-label="确认云端解析"]')).toBeNull();
     expect(vi.mocked(window.zhiyan!.invoke).mock.calls.map(([channel]) => channel)).not.toContain("zhiyan:mineru:start");
@@ -191,15 +212,16 @@ describe("paragraph quick analysis", () => {
     expect(stream).not.toHaveBeenCalled();
   });
 
-  it("still confirms a new upload when the previous MinerU batch has failed", async () => {
+  it("restarts a failed MinerU upload from the library and keeps reading locked", async () => {
     const task = { batchId: "failed-batch", state: "failed", error: "云端解析失败" };
     const { container } = await mount(paper, true, [], {
       states: [{ paperId: paper.id, task, result: null }],
       documentState: { task, result: null }, mineruStatus: task,
     });
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="重试论文处理"]')!.click());
-    expect(container.querySelector('[aria-label="确认云端解析"]')).not.toBeNull();
-    expect(vi.mocked(window.zhiyan!.invoke).mock.calls.map(([channel]) => channel)).not.toContain("zhiyan:mineru:start");
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label^="处理论文"]')!.click());
+    expect(container.querySelector('[aria-label="确认云端解析"]')).toBeNull();
+    expect(vi.mocked(window.zhiyan!.invoke).mock.calls.map(([channel]) => channel)).toContain("zhiyan:mineru:start");
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="打开阅读"]')!.disabled).toBe(true);
   });
   it("keeps vocabulary scoped to the full paragraph when a sentence is selected", async () => {
     const { container, jobs } = await mount();
@@ -271,7 +293,7 @@ describe("paragraph quick analysis", () => {
     expect(container.querySelector(".assistant-explanation img")).toBeNull();
     expect(container.querySelector(".assistant-explanation a")).toBeNull();
     expect(container.querySelector(".assistant-explanation")?.textContent).toContain("阅读");
-    await act(async () => jobs.forEach((job) => job.finish("已完成")));
+    await act(async () => finishJobs(jobs));
   });
 
   it("cancels vocabulary generation on paragraph changes and caches only complete validated results", async () => {
@@ -321,7 +343,7 @@ describe("paragraph quick analysis", () => {
     expect(container.querySelector(".assistant-explanation strong")?.textContent).toBe("注意力");
     expect(container.querySelectorAll(".assistant-explanation li")).toHaveLength(2);
     expect(container.querySelector(".assistant-explanation")?.textContent).not.toContain("**");
-    await act(async () => jobs.forEach((job) => job.finish("已完成")));
+    await act(async () => finishJobs(jobs));
   });
 
   it("shows readable insight fields before the structured response is complete", async () => {
@@ -396,61 +418,75 @@ describe("paragraph quick analysis", () => {
     await act(async () => blocks[0].click());
     expect(blocks[0].getAttribute("aria-pressed")).toBe("true");
     expect(stream).not.toHaveBeenCalled();
-    expect(blocks[0].querySelector('[role="tooltip"]')?.textContent ?? "").toContain("翻译并解释整段");
+    expect(blocks[0].querySelector('[role="tooltip"]')?.textContent ?? "").toContain("双击分析整段");
   });
 
-  it("starts both full-paragraph streams before either finishes and keeps independent progress", async () => {
+  it("starts translation, explanation, insight and vocabulary together on a paragraph double-click", async () => {
     const { container, blocks, jobs, stream } = await mount();
     await doubleClick(blocks[0]);
-    expect(stream).toHaveBeenCalledTimes(2);
-    expect(jobs.map((job) => job.request.operation).sort()).toEqual(["explain", "translate"]);
+    expect(stream).toHaveBeenCalledTimes(4);
+    expect(jobs.map((job) => job.request.operation).sort()).toEqual(["explain", "insight", "translate", "vocabulary"]);
     for (const job of jobs) {
       expect(job.request.block?.text).toBe(paper.blockData[0].text);
       expect(job.cancel).not.toHaveBeenCalled();
     }
     const translate = jobs.find((job) => job.request.operation === "translate")!;
     const explain = jobs.find((job) => job.request.operation === "explain")!;
+    const insight = jobs.find((job) => job.request.operation === "insight")!;
+    const vocabulary = jobs.find((job) => job.request.operation === "vocabulary")!;
     expect(container.querySelector('[data-operation="translate"] .spin')).not.toBeNull();
     expect(container.querySelector('[data-operation="explain"] .spin')).not.toBeNull();
+    expect(container.querySelector('[data-operation="insight"] .spin')).not.toBeNull();
+    expect(container.querySelector(".assistant-tabs [role='tab']:nth-child(2) .spin")).not.toBeNull();
     await act(async () => { translate.emit("中文开头"); explain.emit("解释开头"); });
     expect(container.querySelector(".assistant-translation p")?.textContent).toBe("中文开头");
     await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="explain"]')!.click());
     expect(container.querySelector(".assistant-explanation p")?.textContent).toBe("解释开头");
-    expect(stream).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      insight.emit('{"summary":"摘要开头');
+      vocabulary.emit('{"overview":"重点","terms":[]}');
+    });
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="insight"]')!.click());
+    expect(container.querySelector(".assistant-insight")?.textContent).toContain("摘要开头");
+    expect(stream).toHaveBeenCalledTimes(4);
     await act(async () => translate.finish("完整中文译文"));
     expect(container.querySelector('[data-operation="translate"] .spin')).toBeNull();
     expect(container.querySelector('[data-operation="explain"] .spin')).not.toBeNull();
     await act(async () => explain.finish("完整术语与逻辑解释"));
+    await act(async () => insight.finish('{"summary":"完整摘要","role":"完整作用"}'));
+    await act(async () => vocabulary.finish('{"overview":"重点","terms":[{"term":"attention","translation":"注意力"}]}'));
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="explain"]')!.click());
     expect(container.querySelector(".assistant-explanation p")?.textContent).toBe("完整术语与逻辑解释");
     await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="translate"]')!.click());
     expect(container.querySelector(".assistant-translation p")?.textContent).toBe("完整中文译文");
     await doubleClick(blocks[0]);
-    expect(stream).toHaveBeenCalledTimes(2);
+    expect(stream).toHaveBeenCalledTimes(4);
     expect(container.querySelector('[data-operation="translate"]')?.getAttribute("aria-selected")).toBe("true");
   });
 
-  it("cancels both streams when another paragraph is selected and discards late output", async () => {
+  it("cancels all four streams when another paragraph is selected and discards late output", async () => {
     const { container, blocks, jobs, stream } = await mount();
     await doubleClick(blocks[0]);
-    expect(stream).toHaveBeenCalledTimes(2);
+    expect(stream).toHaveBeenCalledTimes(4);
     await act(async () => blocks[1].click());
     for (const job of jobs) expect(job.cancel).toHaveBeenCalledOnce();
     await act(async () => {
-      jobs[0].emit("旧段落结果");
-      jobs[0].finish("旧段落结果");
-      jobs[1].fail(new Error("旧段落错误"));
+      for (const job of jobs) {
+        job.emit("旧段落结果");
+        job.fail(new Error("旧段落错误"));
+      }
     });
     expect(container.querySelector(".assistant-translation")).toBeNull();
     expect(container.querySelector(".assistant-action-error")).toBeNull();
   });
 
-  it("keeps an in-flight pair when the same paragraph is clicked or double-clicked again", async () => {
+  it("keeps the in-flight bundle when the same paragraph is clicked or double-clicked again", async () => {
     const { blocks, jobs, stream } = await mount();
     await doubleClick(blocks[0]);
     await doubleClick(blocks[0]);
-    expect(stream).toHaveBeenCalledTimes(2);
+    expect(stream).toHaveBeenCalledTimes(4);
     for (const job of jobs) expect(job.cancel).not.toHaveBeenCalled();
-    await act(async () => jobs.forEach((job) => job.finish("已完成")));
+    await act(async () => finishJobs(jobs));
   });
 
   it("uses the whole paragraph when the PDF text layer has a selected word", async () => {
@@ -468,10 +504,10 @@ describe("paragraph quick analysis", () => {
     await act(async () => text.dispatchEvent(new MouseEvent("dblclick", {
       bubbles: true, detail: 2, clientX: 160, clientY: 120,
     })));
-    expect(stream).toHaveBeenCalledTimes(2);
+    expect(stream).toHaveBeenCalledTimes(4);
     for (const job of jobs) expect(job.request.block?.text).toBe(paper.blockData[0].text);
     expect(window.getSelection()?.toString()).toBe("");
-    await act(async () => jobs.forEach((job) => job.finish("已完成")));
+    await act(async () => finishJobs(jobs));
   });
 
   it("keeps text selection for non-paragraph blocks on repeated clicks", async () => {
@@ -499,41 +535,38 @@ describe("paragraph quick analysis", () => {
     expect(container.querySelector(".selected-context h2")?.textContent).toBe("选中句子");
   });
 
-  it("does not start model requests or cancel active analysis when local text extraction is retried", async () => {
+  it("uses the published MinerU result instead of a legacy local extraction failure", async () => {
     const source = {
       ...paper, parseStatus: "fallback",
       blockData: paper.blockData.map((block) => ({ ...block, text: `${block.text} This paragraph has enough academic content to translate.` })),
     };
-    vi.mocked(extractPdfBlocks).mockResolvedValueOnce(source.blockData as never);
     const { container, blocks, jobs, stream } = await mount(source);
     await doubleClick(blocks[0]);
-    expect(stream).toHaveBeenCalledTimes(2);
-    await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent === "重试正文整理")!.click());
-    expect(stream).toHaveBeenCalledTimes(2);
-    expect(jobs[0].cancel).not.toHaveBeenCalled();
-    expect(jobs[1].cancel).not.toHaveBeenCalled();
+    expect(stream).toHaveBeenCalledTimes(4);
+    expect(container.textContent).not.toContain("重试正文整理");
+    expect(extractPdfBlocks).not.toHaveBeenCalled();
+    expect(stream).toHaveBeenCalledTimes(4);
+    for (const job of jobs) expect(job.cancel).not.toHaveBeenCalled();
     await act(async () => {
-      jobs[0].finish("前台翻译");
-      jobs[1].finish("前台解释");
+      finishJobs(jobs, "前台结果");
     });
   });
 
   it("displays a manually regenerated explanation after quick analysis has completed", async () => {
     const { container, blocks, jobs, stream } = await mount();
     await doubleClick(blocks[0]);
-    await act(async () => jobs.forEach((job) => job.finish("首次结果")));
+    await act(async () => finishJobs(jobs, "首次结果"));
     await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="explain"]')!.click());
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="重新生成解释"]')!.click());
-    expect(stream).toHaveBeenCalledTimes(3);
-    await act(async () => jobs[2].finish("重新生成的解释"));
+    expect(stream).toHaveBeenCalledTimes(5);
+    await act(async () => jobs[4].finish("重新生成的解释"));
     expect(container.querySelector(".assistant-explanation p")?.textContent).toBe("重新生成的解释");
   });
 
   it("retains the explanation if translation fails without cancelling its sibling request", async () => {
     const { container, blocks, jobs, stream } = await mount();
     await doubleClick(blocks[0]);
-    expect(stream).toHaveBeenCalledTimes(2);
+    expect(stream).toHaveBeenCalledTimes(4);
     const translate = jobs.find((job) => job.request.operation === "translate")!;
     const explain = jobs.find((job) => job.request.operation === "explain")!;
     await act(async () => translate.fail(new Error("翻译暂时不可用")));
@@ -543,6 +576,97 @@ describe("paragraph quick analysis", () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="explain"]')!.click());
     expect(container.querySelector(".assistant-explanation")?.textContent).toContain("完整解释仍然可用");
     expect(container.querySelector(".assistant-action-error")?.textContent).toContain("翻译暂时不可用");
+    await act(async () => finishJobs(jobs.filter((job) => ["insight", "vocabulary"].includes(job.request.operation))));
+  });
+
+  it("rejects malformed structured output without caching it or cancelling successful siblings and retries only missing results", async () => {
+    const { container, blocks, jobs, stream } = await mount();
+    await doubleClick(blocks[0]);
+    const insight = jobs.find((job) => job.request.operation === "insight")!;
+    const vocabulary = jobs.find((job) => job.request.operation === "vocabulary")!;
+    await act(async () => {
+      insight.emit('{"summary":"不完整摘要');
+      insight.finish('{"summary":"不完整摘要"}');
+      vocabulary.fail(new Error("词汇请求超时"));
+      finishJobs(jobs.filter((job) => ["translate", "explain"].includes(job.request.operation)), "完整段落结果");
+    });
+    expect(window.localStorage.getItem("zhiyan-workbench.analysis.v1")).not.toContain("不完整摘要");
+    expect(container.querySelector(".assistant-action-error")?.textContent).toContain("摘要与作用");
+    expect(container.querySelector(".assistant-action-error")?.textContent).toContain("精选词汇：词汇请求超时");
+    expect(jobs.every((job) => !job.cancel.mock.calls.length)).toBe(true);
+    await doubleClick(blocks[0]);
+    expect(stream).toHaveBeenCalledTimes(6);
+    expect(jobs.slice(4).map((job) => job.request.operation).sort()).toEqual(["insight", "vocabulary"]);
+    expect(container.querySelector(".assistant-translation p")?.textContent).toBe("完整段落结果");
+    await act(async () => finishJobs(jobs.slice(4), "重试"));
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="insight"]')!.click());
+    expect(container.querySelector(".assistant-insight")?.textContent).toContain("重试作用");
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>(".assistant-tabs button")]
+      .find((button) => button.textContent?.includes("学术词汇"))!.click());
+    expect(container.querySelector(".vocabulary-panel")?.textContent).toContain("重试词汇");
+    expect(container.querySelector(".vocabulary-panel")?.textContent).toContain("本段词汇已生成");
+  });
+
+  it("reuses results from individual actions in the double-click bundle and restores all four after reopening", async () => {
+    const { container, blocks, jobs, stream } = await mount();
+    await act(async () => blocks[0].click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="translate"]')!.click());
+    await act(async () => jobs[0].finish("已有译文"));
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="insight"]')!.click());
+    await act(async () => finishJobs([jobs[1]], "已有"));
+    await doubleClick(blocks[0]);
+    expect(stream).toHaveBeenCalledTimes(4);
+    expect(jobs.slice(2).map((job) => job.request.operation).sort()).toEqual(["explain", "vocabulary"]);
+    await act(async () => finishJobs(jobs.slice(2), "补齐"));
+    await act(async () => container.querySelector<HTMLButtonElement>(".back-button")!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.includes("打开阅读"))!.click());
+    await doubleClick(container.querySelector<HTMLElement>(".pdf-block-hit-area")!);
+    expect(stream).toHaveBeenCalledTimes(4);
+    expect(container.querySelector(".assistant-translation p")?.textContent).toBe("已有译文");
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="insight"]')!.click());
+    expect(container.querySelector(".assistant-insight")?.textContent).toContain("已有摘要");
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="explain"]')!.click());
+    expect(container.querySelector(".assistant-explanation")?.textContent).toContain("补齐");
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>(".assistant-tabs button")]
+      .find((button) => button.textContent?.includes("学术词汇"))!.click());
+    expect(container.querySelector(".vocabulary-panel")?.textContent).toContain("补齐词汇");
+  });
+
+  it("restores an explanation through its individual tab after a full app remount but explicitly regenerates on request", async () => {
+    const first = await mount(paper, true, [], { settingsRevision: "same-provider" });
+    await doubleClick(first.blocks[0]);
+    await act(async () => finishJobs(first.jobs, "缓存解释"));
+    const previous = mounted.pop()!;
+    await act(async () => previous.root.unmount());
+    previous.container.remove();
+    const restored = await mount(paper, true, [], { settingsRevision: "same-provider" });
+    await act(async () => restored.blocks[0].click());
+    await act(async () => restored.container.querySelector<HTMLButtonElement>('[data-operation="explain"]')!.click());
+    expect(restored.stream).not.toHaveBeenCalled();
+    expect(restored.container.querySelector(".assistant-explanation")?.textContent).toContain("缓存解释");
+    await act(async () => restored.container.querySelector<HTMLButtonElement>('[aria-label="重新生成解释"]')!.click());
+    expect(restored.stream).toHaveBeenCalledOnce();
+    await act(async () => restored.jobs[0].finish("主动更新的解释"));
+    expect(restored.container.querySelector(".assistant-explanation")?.textContent).toContain("主动更新的解释");
+  });
+
+  it("does not cache missing vocabulary fields and retries only the failed vocabulary operation", async () => {
+    const { container, blocks, jobs, stream } = await mount();
+    await doubleClick(blocks[0]);
+    const vocabulary = jobs.find((job) => job.request.operation === "vocabulary")!;
+    await act(async () => {
+      vocabulary.finish('{"overview":"缺少词汇数组"}');
+      finishJobs(jobs.filter((job) => job.request.operation !== "vocabulary"), "完整");
+    });
+    expect(window.localStorage.getItem("zhiyan-workbench.analysis.v1")).not.toContain("缺少词汇数组");
+    expect(container.querySelector(".assistant-action-error")?.textContent).toContain("精选词汇");
+    await doubleClick(blocks[0]);
+    expect(stream).toHaveBeenCalledTimes(5);
+    expect(jobs[4].request.operation).toBe("vocabulary");
+    await act(async () => jobs[4].finish('{"overview":"无适合词汇","terms":[]}'));
+    await doubleClick(blocks[0]);
+    expect(stream).toHaveBeenCalledTimes(5);
   });
 
   it("does not run paragraph translation or explanation for a table", async () => {

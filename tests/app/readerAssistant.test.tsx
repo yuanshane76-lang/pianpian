@@ -16,8 +16,8 @@ async function mount(overrides: Partial<ComponentProps<typeof ReaderAssistant>> 
   const props: ComponentProps<typeof ReaderAssistant> = {
     selectedBlock: { id: "p1-b1", kind: "paragraph", pageNumber: 1, order: 0, text: "Retrieval augments the language model with external knowledge." },
     originalId: "paper", chartReading: null, onReadChart: vi.fn(),
-    overview: "论文使用检索增强生成。", answer: null, isBusy: false,
-    onOverview: vi.fn(), onTranslate: vi.fn(), onExplain: vi.fn(), explanation: null, onAsk: vi.fn(),
+    answer: null, isBusy: false,
+    onTranslate: vi.fn(), onExplain: vi.fn(), explanation: null, onAsk: vi.fn(),
     translation: "检索为语言模型补充外部知识。", selectionText: "", serviceLabel: "DeepSeek",
     serviceModel: "deepseek-flash", aiAvailable: true, onOpenSettings: vi.fn(), actionError: null,
     pendingAction: null, insight: null, streamingOutput: null, onInsight: vi.fn(), guide: null,
@@ -39,6 +39,18 @@ afterEach(async () => {
 });
 
 describe("reader assistant layout", () => {
+  it("has no whole-paper overview and displays independent insight and vocabulary loading from quick analysis", async () => {
+    await mount({ isBusy: true, pendingParagraphActions: ["translate", "explain", "insight", "vocabulary"] });
+    expect(container.querySelector(".assistant-overview")).toBeNull();
+    expect(container.querySelector('[data-operation="insight"] .spin')).not.toBeNull();
+    const tabs = container.querySelectorAll<HTMLButtonElement>(".assistant-tabs [role='tab']");
+    expect(tabs[1].querySelector(".spin")).not.toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="insight"]')!.click());
+    expect(container.querySelector(".paragraph-progress")?.textContent).toContain("正在生成摘要与作用");
+    await act(async () => tabs[1].click());
+    expect(container.querySelector(".vocabulary-intro")?.textContent).toContain("正在挑选段落词汇");
+  });
+
   it("prioritizes the selected paragraph without duplicating the original text", async () => {
     await mount();
     expect(container.querySelector(".assistant-scroll")?.firstElementChild?.classList.contains("selected-context")).toBe(true);

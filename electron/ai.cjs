@@ -1,6 +1,6 @@
 const { DEFAULT } = require("./settings.cjs");
 
-const OPERATIONS = ["overview", "translate", "qa", "explain", "insight", "guide", "chart", "vocabulary"];
+const OPERATIONS = ["translate", "qa", "explain", "insight", "guide", "chart", "vocabulary"];
 
 function prepareModelRequest(settings, request) {
   const provider = settings.aiProvider;
@@ -40,9 +40,7 @@ function prepareModelRequest(settings, request) {
     ? '帮助英文论文阅读困难的中文读者理解选中的段落。只返回 JSON 对象 {"summary":"用1-3句中文概括这段讲什么","role":"用2-4句中文说明这段在给定上下文中的作用、与前后段如何衔接"}。基于给定内容，不编造段落位置或论文结论。'
     : request.operation === "guide"
       ? '帮助中文读者开始阅读英文论文。只返回 JSON 对象 {"overview":"不超过120字的中文阅读指南，说明研究问题、方法和建议先读的部分","terms":[{"term":"原文中实际出现的英文词或术语","translation":"中文释义","definition":"本文语境下的简短解释"}]}。只选取6-8个最重要的学术词或论文专有术语，每个 term 必须逐字出现在正文。不要杜撰。'
-      : request.operation === "overview"
-        ? "用中文概括给定论文的研究问题、方法、主要发现和局限。仅根据论文，内容不足时说明。"
-        : request.operation === "translate"
+      : request.operation === "translate"
           ? "将待翻译内容译成自然、准确的中文。保留术语、公式和引文；只输出译文，不增添信息。"
           : request.operation === "explain"
             ? "用中文解释选中段落在论文中的意思、作用与重要术语，依据给定上下文，内容不足时说明。用简洁 Markdown 组织内容，使用小标题、列表和必要的加粗，不使用 HTML。"
@@ -53,7 +51,7 @@ function prepareModelRequest(settings, request) {
     ? `第 ${request.block.pageNumber ?? "?"} 页${request.block.kind === "table" ? "表格" : "图形"}。\n图注：${String(request.block.caption ?? "").slice(0, 4000)}\n识别数据：\n${String(request.block.text ?? "").slice(0, 15000)}\n\n相邻正文：\n${context}\n\n请结合原图解读图表。`
     : isSelection
     ? `论文上下文：\n${context}\n\n待${request.operation === "translate" ? "翻译" : "解释"}内容：\n${String(request.block?.text ?? "").slice(0, 15000)}`
-    : `论文正文（最多开头 18 万字符，超出部分未提供）：\n${context}\n\n${request.operation === "qa" ? `问题：${String(request.question ?? "").slice(0, 2000)}` : request.operation === "guide" ? "请输出阅读指南和学术词汇 JSON。" : "请生成论文概览。"}`;
+    : `论文正文（最多开头 18 万字符，超出部分未提供）：\n${context}\n\n${request.operation === "qa" ? `问题：${String(request.question ?? "").slice(0, 2000)}` : "请输出阅读指南和学术词汇 JSON。"}`;
 
   return {
     provider,
@@ -65,7 +63,7 @@ function prepareModelRequest(settings, request) {
         ? [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: request.imageDataUrl } }]
         : prompt }],
       temperature: 0.2,
-      max_tokens: request.operation === "insight" ? 1000 : ["guide", "vocabulary"].includes(request.operation) ? 1800 : ["overview", "chart"].includes(request.operation) ? 3000 : 2000,
+      max_tokens: request.operation === "insight" ? 1000 : ["guide", "vocabulary"].includes(request.operation) ? 1800 : request.operation === "chart" ? 3000 : 2000,
       stream: true,
       ...(nonThinking ? provider === "deepseek" ? { thinking: { type: "disabled" } } : { enable_thinking: false } : {}),
     },

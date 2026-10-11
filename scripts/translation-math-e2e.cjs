@@ -52,7 +52,7 @@ if (process.versions.electron) {
         const base = {
           selectedBlock: { id: "math-p1", kind: "paragraph", pageNumber: 3, order: 0, text: "The generator component can be modeled using any encoder-decoder." },
           originalId: "fixture", chartReading: null, onReadChart: noop,
-          overview: null, answer: null, isBusy: false, onOverview: noop, onTranslate: noop,
+          answer: null, isBusy: false, onTranslate: noop,
           onExplain: noop, explanation: null, onAsk: noop, selectionText: "",
           serviceLabel: "DeepSeek", serviceModel: "deepseek-flash", aiAvailable: true,
           onOpenSettings: noop, actionError: null, pendingAction: null, insight: null,

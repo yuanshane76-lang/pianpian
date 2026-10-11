@@ -1,3 +1,7 @@
+import type { PaperRecord } from "./library";
+import type { DocumentBlock } from "./documentBlocks";
+import { hasPageBounds } from "./pdfLayout";
+
 export type PipelineStage =
   | "saving"
   | "local-extracting"
@@ -33,6 +37,55 @@ export interface ReaderProgressStep {
   description?: string;
   percent?: number;
   action?: "configure" | "parse" | "retry-local";
+}
+
+export function hasCompletePageBounds(blocks?: DocumentBlock[]): boolean {
+  return Boolean(blocks?.length && blocks.every(hasPageBounds));
+}
+
+export function getPaperPipelineState(
+  paper: PaperRecord,
+  state?: PaperPipelineState,
+): PaperPipelineState {
+  if (state) return state;
+  if (paper.parseError) {
+    return {
+      paperId: paper.id,
+      source: "mineru",
+      stage: "failed",
+      error: paper.parseError,
+    };
+  }
+  return {
+    paperId: paper.id,
+    source: "mineru",
+    stage: "partial",
+    mineruMessage: "等待 MinerU 完成解析与坐标定位…",
+  };
+}
+
+export function canOpenPaper(paper: PaperRecord, state?: PaperPipelineState): boolean {
+  // Only a published main-process result can establish the ready pipeline.
+  // Cached renderer records (including legacy records) cannot prove completion.
+  return Boolean(paper.originalId && paper.parseStatus === "ready"
+    && state?.paperId === paper.id && state.source === "mineru" && state.stage === "ready"
+    && hasCompletePageBounds(paper.blockData));
+}
+
+export function getLibraryPreparation(paper: PaperRecord, state: PaperPipelineState | undefined, configured: boolean) {
+  const pipeline = getPaperPipelineState(paper, state);
+  const active = ["saving", "mineru-uploading", "mineru-processing", "mineru-downloading"].includes(pipeline.stage);
+  const failed = pipeline.stage === "failed";
+  const percent = pipeline.stage === "mineru-processing" && pipeline.mineruState === "running"
+    && Number.isFinite(pipeline.mineruProgress)
+    ? Math.round(Math.max(0, Math.min(1, pipeline.mineruProgress!)) * 100) : undefined;
+  const detail = !paper.originalId ? "原始 PDF 缺失，请重新导入"
+    : !configured && !active ? "请配置 MinerU，配置后自动解析"
+    : pipeline.stage === "mineru-processing" && pipeline.mineruState === "pending" ? pipeline.mineruMessage || "已上传，等待云端开始解析"
+    : pipeline.stage === "mineru-processing" && pipeline.mineruState === "converting" ? "正在整理段落、图表与公式"
+    : pipelineStageLabel(pipeline);
+  return { active, failed, percent, detail,
+    action: !paper.originalId || active ? undefined : !configured ? "配置 MinerU" : failed ? "重新解析" : "开始解析" };
 }
 
 export function getReaderProgress(state: PaperPipelineState, context: ReaderProgressContext): {
@@ -76,7 +129,7 @@ export function getReaderProgress(state: PaperPipelineState, context: ReaderProg
   } else if (state.stage === "mineru-consent") {
     layout = { status: "waiting", detail: "等待确认上传", action: "parse" };
   } else if (state.source === "mineru" && state.stage === "partial") {
-    layout = { status: "warning", detail: "未获得可用坐标", action: "parse" };
+    layout = { status: "warning", detail: "等待 MinerU 完成解析", action: "parse" };
   } else {
     layout = { status: "idle", detail: "解析后可点击原文", action: "parse" };
   }
@@ -91,7 +144,7 @@ export function pipelineStageLabel(state: PaperPipelineState): string {
   if (state.stage === "mineru-uploading") return "正在上传 PDF 到 MinerU…";
   if (state.stage === "mineru-processing") return state.mineruMessage || "MinerU 正在解析正文、图表和公式…";
   if (state.stage === "mineru-downloading") return "正在下载 MinerU 结构化结果…";
-  if (state.stage === "partial") return state.mineruMessage || "PDF 已就绪，MinerU 交互层仍在生成…";
-  if (state.stage === "failed") return "处理失败，原文仍可阅读";
+  if (state.stage === "partial") return state.mineruMessage || "等待 MinerU 完成解析与坐标定位…";
+  if (state.stage === "failed") return state.error || "MinerU 解析失败，请重试";
   return "PDF 已就绪，MinerU 交互层已叠加";
 }

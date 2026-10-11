@@ -25,7 +25,7 @@ const liveAi = process.argv.includes("--live-ai");
       const parsed = JSON.parse(fs.readFileSync(path.join(documents, id, "parse.json"), "utf8"));
       return { id, originalId: id, title: parsed.title, authors: [], year: null, tags: [], favorite: false,
         sourcePath: `local://layout-e2e/${id}`, pageCount: parsed.pageCount, blocks: parsed.blocks.length,
-        blockData: parsed.blocks, importedAt: "2026-10-09", overview: null, parseVersion: 2, parseStatus: "ready" };
+        blockData: parsed.blocks, importedAt: "2026-10-09", parseVersion: 2, parseStatus: "ready" };
     });
     await page.evaluate((papers) => localStorage.setItem("zhiyan-workbench.papers.v1", JSON.stringify(papers)), fixtures);
     await page.reload();

@@ -62,7 +62,7 @@ export function loadPapers(): PaperRecord[] {
         pageNumber, lines: paper.blockData!.filter((block) => block.pageNumber === pageNumber).map((block) => block.text),
       }));
       const blockData = createDocumentBlocks(pages);
-      return { ...paper, blockData, blocks: blockData.length, parseVersion: 2, overview: null };
+      return { ...paper, blockData, blocks: blockData.length, parseVersion: 2 };
     }));
   } catch {
     return [];
@@ -138,7 +138,6 @@ export async function importPdfFile(file: File): Promise<PaperRecord> {
     importedAt: new Date().toISOString(),
     tags: ["待整理"],
     favorite: false,
-    overview: null,
     blocks: blocks.length,
     blockData: blocks,
     parseStatus,
@@ -162,7 +161,7 @@ export async function preparePdfFile(file: File): Promise<{ paper: PaperRecord; 
         id: saved.id, originalId: saved.id, sourcePath: `local://${saved.id}`,
         title: title && title.length > 4 && !/^(untitled|microsoft|latex)/i.test(title) ? title : file.name.replace(/\.pdf$/i, "").replaceAll("_", " "),
         authors: [], year: null, importedAt: new Date().toISOString(), tags: ["待整理"],
-        favorite: false, overview: null, blocks: 0, blockData: [], pageCount: document.numPages,
+        favorite: false, blocks: 0, blockData: [], pageCount: document.numPages,
         parseStatus: "pending", parseVersion: 2, readingPosition: { mode: "pdf", page: 1 },
       },
     };

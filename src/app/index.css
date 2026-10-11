@@ -658,6 +658,128 @@ textarea:focus-visible {
   min-width: 0;
 }
 
+.library-import-hint {
+  margin: 10px 0 0;
+  color: var(--muted-strong);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.paper-row-progress {
+  display: grid;
+  gap: 5px;
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.paper-row-progress-heading,
+.library-detail-progress-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted-strong);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.paper-preparation-message {
+  min-width: 0;
+  color: var(--ink);
+  font-weight: 650;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.paper-preparation-message > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.paper-preparation-message svg {
+  flex: 0 0 auto;
+}
+
+.paper-preparation-message .is-spinning {
+  animation: paper-preparation-spin 1.2s linear infinite;
+}
+
+@keyframes paper-preparation-spin {
+  to { transform: rotate(360deg); }
+}
+
+.paper-row-progress-heading > span:last-child,
+.library-detail-progress-heading > span:last-child {
+  flex: 0 0 auto;
+  color: var(--teal-dark);
+  font-variant-numeric: tabular-nums;
+}
+
+.is-failed .paper-preparation-message {
+  color: var(--coral);
+}
+
+.paper-row-progress-track {
+  height: 4px;
+  overflow: hidden;
+  background: var(--line);
+  border-radius: 4px;
+}
+
+.paper-row-progress-track > span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--teal);
+  transform-origin: left;
+  transition: transform 220ms ease;
+}
+
+.paper-row-progress.is-failed .paper-row-progress-track > span {
+  background: var(--coral);
+}
+
+.paper-preparation-hint {
+  margin: 0;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.library-detail-progress-heading .paper-preparation-message > span {
+  white-space: normal;
+}
+
+.paper-row-progress-track.is-indeterminate > span {
+  width: 34%;
+  animation: paper-row-progress-travel 1.5s ease-in-out infinite;
+}
+
+@keyframes paper-row-progress-travel {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(315%); }
+}
+
+.paper-row-progress-action {
+  justify-self: start;
+  min-height: 28px;
+  padding: 0 8px;
+  color: var(--teal-dark);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-size: 11px;
+}
+
+.paper-row-progress-action:hover {
+  background: var(--teal-soft);
+  border-color: var(--teal);
+}
+
 .paper-row h2 {
   margin: 1px 0 4px;
   overflow: hidden;
@@ -837,6 +959,20 @@ textarea:focus-visible {
   margin-top: 36px;
 }
 
+.library-detail-progress {
+  display: grid;
+  gap: 9px;
+  margin-top: 24px;
+  padding: 13px 14px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.library-detail-progress .secondary-button {
+  justify-self: start;
+}
+
 .primary-button,
 .secondary-button,
 .text-button {
@@ -857,8 +993,16 @@ textarea:focus-visible {
   border: 1px solid var(--teal);
 }
 
-.primary-button:hover {
+.primary-button:not(:disabled):hover {
   background: var(--teal-dark);
+}
+
+.primary-button:disabled {
+  color: var(--muted-strong);
+  background: var(--line);
+  border-color: var(--line);
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .secondary-button {
@@ -1850,8 +1994,6 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
 .assistant-insight h3 + p { margin: 8px 0 0; color: var(--assistant-ink); font-size: 14px; line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; }
 .assistant-insight p + h3 { margin-top: 18px; }
 .assistant-empty { display: grid; justify-items: center; gap: 12px; padding: 32px 0; color: #919ba4; }
-.assistant-overview { padding-top: 10px; padding-bottom: 10px; }
-.assistant-overview .assistant-copy, .assistant-overview .text-button { margin-top: 12px; }
 .reader-assistant .answer-copy { padding: 0; margin: 0; border: 0; background: transparent; }
 
 .assistant-composer {

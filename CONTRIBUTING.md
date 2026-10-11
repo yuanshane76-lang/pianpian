@@ -72,6 +72,7 @@ git worktree add -b fix/pdf-selection ../zhiyan-pdf-selection origin/main
 
 | 命令 | 数据与服务边界 |
 | --- | --- |
+| `node scripts/mineru-gate-e2e.cjs` | 隔离文献库、合成 PDF 和模拟 MinerU：验证强制解析门禁、真实阶段进度、下载持久化与重启恢复，不调用真实服务 |
 | `node scripts/desktop-e2e.cjs` | 临时空用户目录：验证中文壳、配置和 IPC；无需密钥和论文，禁止外部服务请求 |
 | `npm run test:paragraph-vocabulary:e2e` | 合成 PDF、模拟 SSE 与隔离桌面用户目录：验证段落词汇、单词表、Markdown、摘要和图表流式显示、定位提示及多种窗口尺寸；不调用真实模型服务 |
 | `node scripts/translation-math-e2e.cjs` | 临时用户目录和固定公式数据，无付费请求 |

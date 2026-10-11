@@ -1,11 +1,43 @@
 import { describe, expect, it } from "vitest";
-import { getReaderProgress, pipelineStageLabel, type PaperPipelineState } from "../../src/domain/pipeline";
+import { canOpenPaper, getReaderProgress, pipelineStageLabel, type PaperPipelineState } from "../../src/domain/pipeline";
+import type { PaperRecord } from "../../src/domain/library";
+
+const paper: PaperRecord = {
+  id: "paper", title: "Paper", authors: [], year: null, sourcePath: "local://paper",
+  originalId: "original", importedAt: "2026-10-11", tags: [], favorite: false, blocks: 1,
+  parseStatus: "ready", blockData: [{ id: "b", kind: "paragraph", text: "Body",
+    pageNumber: 1, order: 0, bbox: [.1, .1, .9, .2] }],
+};
 
 const pipeline: PaperPipelineState = { paperId: "paper", source: "mineru", stage: "ready" };
 const context = {
   originalAvailable: true, layoutReady: true, mineruConfigured: true,
   mineruPending: false, localParseFailed: false,
 };
+
+describe("mandatory reading readiness", () => {
+  it("only opens a completed MinerU result with an original and complete valid coordinates", () => {
+    expect(canOpenPaper(paper, pipeline)).toBe(true);
+    expect(canOpenPaper(paper)).toBe(false);
+    expect(canOpenPaper({ ...paper, parseStatus: undefined })).toBe(false);
+    expect(canOpenPaper(paper, { ...pipeline, source: "local" })).toBe(false);
+    expect(canOpenPaper({ ...paper, originalId: undefined }, pipeline)).toBe(false);
+    expect(canOpenPaper({ ...paper, parseStatus: "pending" }, pipeline)).toBe(false);
+  });
+
+  it("keeps older coordinates locked during processing, download, recovery and failure", () => {
+    for (const stage of ["mineru-processing", "mineru-downloading", "partial", "failed"] as const) {
+      expect(canOpenPaper(paper, { ...pipeline, stage })).toBe(false);
+    }
+  });
+
+  it("rejects missing, out-of-page, inverted, and partly positioned results", () => {
+    for (const bbox of [undefined, [-1, .1, .9, .2], [.1, .1, 2, .2], [.9, .1, .1, .2], [.1, .1, .9, NaN]]) {
+      expect(canOpenPaper({ ...paper, blockData: [{ ...paper.blockData![0], bbox: bbox as never }] }, pipeline)).toBe(false);
+    }
+    expect(canOpenPaper({ ...paper, blockData: [...paper.blockData!, { ...paper.blockData![0], id: "missing", bbox: undefined }] }, pipeline)).toBe(false);
+  });
+});
 
 describe("independent reading progress", () => {
   it("requires an original file before reporting readable", () => {
@@ -52,7 +84,7 @@ describe("independent reading progress", () => {
   it("makes missing coordinates and upload consent actionable", () => {
     expect(getReaderProgress(pipeline, { ...context, layoutReady: false, mineruConfigured: false }).layout.action).toBe("configure");
     expect(getReaderProgress({ ...pipeline, stage: "partial" }, { ...context, layoutReady: false }).layout)
-      .toMatchObject({ status: "warning", action: "parse", detail: "未获得可用坐标" });
+      .toMatchObject({ status: "warning", action: "parse", detail: "等待 MinerU 完成解析" });
     expect(getReaderProgress({ ...pipeline, source: "local", stage: "mineru-consent" }, { ...context, layoutReady: false }).layout)
       .toMatchObject({ status: "waiting", detail: "等待确认上传", action: "parse" });
   });
@@ -68,7 +100,7 @@ describe("paper processing pipeline", () => {
 
   it("keeps document preparation and parse failures separate from on-demand AI", () => {
     expect(pipelineStageLabel({ paperId: "paper", source: "local", stage: "local-extracting" })).toContain("整理临时正文");
-    expect(pipelineStageLabel({ paperId: "paper", source: "mineru", stage: "failed" })).toContain("原文仍可阅读");
+    expect(pipelineStageLabel({ paperId: "paper", source: "mineru", stage: "failed" })).toContain("MinerU 解析失败");
     expect(pipelineStageLabel({ paperId: "paper", source: "mineru", stage: "failed", error: "MinerU 解析失败" })).toBe("MinerU 解析失败");
     expect(pipelineStageLabel({ paperId: "paper", source: "mineru", stage: "ready" })).toContain("PDF 已就绪");
   });

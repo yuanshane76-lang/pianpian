@@ -1,5 +1,7 @@
 import { FilePlus2, FileText, Heart, Search } from "lucide-react";
 import type { PaperRecord } from "../../domain/library";
+import { canOpenPaper, type PaperPipelineState } from "../../domain/pipeline";
+import { PaperPreparation } from "./PaperPreparation";
 
 interface PaperListProps {
   papers: PaperRecord[];
@@ -10,6 +12,9 @@ interface PaperListProps {
   onImport: (file: File) => Promise<void>;
   onSelect: (paperId: string) => void;
   onToggleFavorite: (paperId: string) => void;
+  onStartMineru: (paperId: string) => void;
+  pipelineStates: Record<string, PaperPipelineState>;
+  mineruConfigured: boolean;
   importing: boolean;
 }
 
@@ -22,6 +27,9 @@ export function PaperList({
   onImport,
   onSelect,
   onToggleFavorite,
+  onStartMineru,
+  pipelineStates,
+  mineruConfigured,
   importing,
 }: PaperListProps) {
   return (
@@ -66,6 +74,8 @@ export function PaperList({
         />
       </label>
 
+      <p className="library-import-hint">导入后自动上传到 MinerU 解析，完成后即可阅读。</p>
+
       {errorMessage ? (
         <p className="import-error" role="alert">
           {errorMessage}
@@ -80,13 +90,18 @@ export function PaperList({
             <span>调整搜索条件，或导入 PDF 开始阅读。</span>
           </div>
         ) : (
-          papers.map((paper) => (
+          papers.map((paper) => {
+              const ready = canOpenPaper(paper, pipelineStates[paper.id]);
+              return (
             <article
               className={`paper-row ${selectedId === paper.id ? "is-selected" : ""}`}
               key={paper.id}
               onClick={() => onSelect(paper.id)}
               onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") onSelect(paper.id);
+                if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+                  event.preventDefault();
+                  onSelect(paper.id);
+                }
               }}
               role="button"
               tabIndex={0}
@@ -101,6 +116,10 @@ export function PaperList({
                   <span>{paper.year ?? "未标注年份"}</span>
                   <span>{paper.blocks} 个阅读块</span>
                 </div>
+                {!ready ? (
+                  <PaperPreparation compact paper={paper} pipeline={pipelineStates[paper.id]}
+                    configured={mineruConfigured} onStart={() => onStartMineru(paper.id)} />
+                ) : null}
               </div>
               <button
                 className={`icon-button favorite-button ${paper.favorite ? "is-favorite" : ""}`}
@@ -115,7 +134,8 @@ export function PaperList({
                 <Heart size={16} fill={paper.favorite ? "currentColor" : "none"} />
               </button>
             </article>
-          ))
+              );
+          })
         )}
       </div>
     </section>

@@ -52,12 +52,13 @@ export function previewChartReading(text: string): ChartReading | null {
 }
 export function parseReadingGuide(text: string): ReadingGuide {
   const value = parseObject(text);
-  const terms = Array.isArray(value.terms) ? value.terms.flatMap((item: unknown) => {
+  if (!Array.isArray(value.terms)) throw new Error("模型返回的结构不完整，请重试");
+  const terms = value.terms.flatMap((item: unknown) => {
     if (!item || typeof item !== "object") return [];
     const term = item as Record<string, unknown>;
     if (typeof term.term !== "string" || !term.term.trim() || typeof term.translation !== "string" || !term.translation.trim()) return [];
     return [{ term: term.term.trim().slice(0, 100), translation: term.translation.trim().slice(0, 160),
       definition: typeof term.definition === "string" ? term.definition.trim().slice(0, 500) : "" }];
-  }).slice(0, 12) : [];
+  }).slice(0, 12);
   return { overview: requiredText(value.overview, 5000), terms };
 }

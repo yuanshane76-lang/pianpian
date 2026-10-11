@@ -9,7 +9,6 @@ export interface PaperRecord {
   importedAt: string;
   tags: string[];
   favorite: boolean;
-  overview: string | null;
   blocks: number;
   blockData?: DocumentBlock[];
   parseStatus?: "pending" | "ready" | "fallback";

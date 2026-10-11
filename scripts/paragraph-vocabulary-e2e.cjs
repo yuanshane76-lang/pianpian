@@ -12,7 +12,7 @@ if (process.versions.electron) {
   const { createDocumentStore } = require("../electron/document-store.cjs");
   const fixtureDocuments = createDocumentStore({ rootDirectory: path.join(app.getPath("userData"), "documents") });
   globalThis.publishVocabularyFixture = async (paper) => {
-    await fixtureDocuments.saveParse(paper.originalId, { resultBatchId: "synthetic-batch", layoutVersion: 1,
+    await fixtureDocuments.saveParse(paper.originalId, { resultBatchId: "synthetic-batch", layoutVersion: 2,
       title: paper.title, blocks: paper.blockData, pageCount: 1 });
     await fixtureDocuments.saveTask(paper.originalId, { state: "done", batchId: "synthetic-batch", resultBatchId: "synthetic-batch" });
   };
@@ -117,22 +117,19 @@ if (process.versions.electron) {
       await page.locator(".import-button input").setInputFiles({
         name: "academic-fixture.pdf", mimeType: "application/pdf", buffer: Buffer.from(syntheticPdf()),
       });
-      await page.waitForSelector(".reader-shell");
-      await page.waitForSelector('.pdf-page-stage[data-rendered="true"]');
-      await page.waitForFunction(() => {
-        const paper = JSON.parse(localStorage.getItem("zhiyan-workbench.papers.v1") || "[]")[0];
-        return paper?.parseStatus === "ready" && paper.blockData?.length > 0;
-      });
-      assert.equal(await electron.evaluate(() => globalThis.vocabularyE2e.requests.length), 0, "Import and basic extraction do not call a model");
+      await page.waitForSelector(".paper-row-progress");
+      assert(await page.getByRole("button", { name: "打开阅读", exact: true }).isDisabled());
+      assert.equal(await page.locator(".reader-shell").count(), 0);
+      assert.equal(await electron.evaluate(() => globalThis.vocabularyE2e.requests.length), 0, "Import waiting for MinerU does not call a model");
       assert.equal(await page.getByText(/中文预览|后台翻译|导入与翻译/).count(), 0);
       await page.screenshot({ path: path.join(output, "00-import-no-background-ai.png") });
-      report.checks.push("Real PDF import and local extraction with configured AI produce zero model requests");
+      report.checks.push("Real PDF import waits for MinerU with configured AI and produces zero model requests");
       await page.evaluate(async (bytes) => {
         const saved = await window.zhiyan.invoke("zhiyan:documents:save", { name: "academic-fixture.pdf", data: new Uint8Array(bytes) });
         await window.zhiyan.invoke("zhiyan:settings:save", { aiProvider: "deepseek", deepseek: { apiKey: "synthetic-test-placeholder", model: "deepseek-flash" } });
         const paper = {
           id: saved.id, originalId: saved.id, title: "Academic Reading Fixture", authors: [], year: null, sourcePath: `local://${saved.id}`,
-          importedAt: "2026-10-09", tags: [], favorite: false, overview: null, blocks: 3, parseVersion: 2, parseStatus: "ready", pageCount: 1,
+          importedAt: "2026-10-09", tags: [], favorite: false, blocks: 3, parseVersion: 2, parseStatus: "ready", pageCount: 1,
           blockData: [
             { id: "fixture-a", kind: "paragraph", pageNumber: 1, order: 0, text: "The model uses attention to select useful features. An ablation study evaluates the model.", bbox: [.09, .14, .92, .20] },
             { id: "fixture-b", kind: "paragraph", pageNumber: 1, order: 1, text: "The hypothesis supports inference and estimation.", bbox: [.09, .36, .92, .40] },
@@ -185,12 +182,9 @@ if (process.versions.electron) {
       report.checks.push("Paragraph-only vocabulary, real secure IPC, SSE request and explicit collection");
 
       await page.getByRole("tab", { name: "读懂这段", exact: true }).click();
-      const arrow = page.locator(".assistant-overview > summary > svg");
-      assert.equal(await arrow.evaluate((element) => getComputedStyle(element).outlineStyle), "none");
-      await page.locator(".assistant-overview").evaluate((element) => { element.open = true; });
-      await page.waitForFunction(() => getComputedStyle(document.querySelector(".assistant-overview > summary > svg")).transform.startsWith("matrix(-1"));
-      await page.locator(".assistant-overview").evaluate((element) => { element.open = false; });
-      report.checks.push("Disclosure arrow rotates when open and has no persistent focus outline");
+      assert.equal(await page.locator(".assistant-overview").count(), 0);
+      assert.equal(await page.getByText("论文概览", { exact: true }).count(), 0);
+      report.checks.push("Whole-paper overview module and action are absent");
       await page.getByRole("tab", { name: "摘要与作用", exact: true }).click();
       await page.waitForSelector(".paragraph-progress");
       await emit(1, '{"summary":"这段介绍注意力');
@@ -239,6 +233,79 @@ if (process.versions.electron) {
       await page.locator(".assistant-chart-reading").getByText("RAG 44.5，Baseline 40.0", { exact: true }).waitFor();
       assert.equal(await page.locator(".assistant-chart-streaming").count(), 0);
       report.checks.push("Image chart request disables thinking, streams readable fields before completion and caches only validated final results");
+
+      const paragraph = page.locator("#pdf-block-fixture-b");
+      await paragraph.scrollIntoViewIfNeeded();
+      const paragraphPoint = await paragraph.boundingBox();
+      assert(paragraphPoint, "The second paragraph is visible for a real double-click");
+      await page.mouse.dblclick(paragraphPoint.x + paragraphPoint.width / 2, paragraphPoint.y + paragraphPoint.height / 2);
+      await page.waitForFunction(() => document.querySelector('[data-operation="translate"] .spin') &&
+        document.querySelector('[data-operation="explain"] .spin') &&
+        document.querySelector('[data-operation="insight"] .spin') &&
+        document.querySelector(".assistant-tabs button:nth-child(2) .spin"));
+      const bundle = [];
+      for (let index = 5; index < 9; index++) bundle.push({ index, ...await waitForRequest(index) });
+      assert.deepEqual(bundle.map((request) => request.operation).sort(), ["explain", "insight", "translate", "vocabulary"]);
+      for (const request of bundle) {
+        assert.equal(request.stream, true);
+        assert.deepEqual(request.thinking, { type: "disabled" });
+        assert(request.prompt.includes("The hypothesis supports inference and estimation."));
+      }
+      const job = (operation) => bundle.find((request) => request.operation === operation).index;
+      const vocabularyRequest = bundle.find((request) => request.operation === "vocabulary");
+      assert(!vocabularyRequest.prompt.includes("attention") && !vocabularyRequest.prompt.includes("RAG"), "Automatic vocabulary sends only the double-clicked paragraph");
+      await emit(job("translate"), "本段假设用于");
+      await emit(job("explain"), "## 推理与估计\n\n**假设**作为前提。");
+      await emit(job("insight"), '{"summary":"本段逐步说明假设');
+      await page.locator(".assistant-translation").getByText("本段假设用于", { exact: true }).waitFor();
+      await page.getByRole("tab", { name: "摘要与作用", exact: true }).click();
+      await page.locator(".assistant-insight").getByText("本段逐步说明假设", { exact: true }).waitFor();
+      assert.equal(await page.locator(".assistant-insight").getAttribute("aria-busy"), "true");
+      await page.screenshot({ path: path.join(output, "07-bundle-streaming-insight.png") });
+      await page.getByRole("tab", { name: /学术词汇/ }).click();
+      await page.getByText("正在挑选段落词汇…", { exact: true }).waitFor();
+      await page.screenshot({ path: path.join(output, "08-bundle-vocabulary-running.png") });
+      await emit(job("vocabulary"), '{"overview":"本段关注假设、推理与估计。","terms":[{"term":"hypothesis","translation":"假设","definition":"支撑推理的前提。"}]}', true);
+      await page.getByText("本段词汇已生成", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "将 hypothesis 加入单词表", exact: true }).waitFor();
+      assert(await page.locator(".vocabulary-panel").getByText("hypothesis", { exact: true }).isVisible());
+      const noAutomaticCollection = await page.evaluate(() => JSON.parse(localStorage.getItem("zhiyan-workbench.wordbook.v1") || "[]").map((entry) => entry.term));
+      assert.deepEqual(noAutomaticCollection, ["attention"], "AI selection never automatically adds a word to the wordbook");
+      await page.screenshot({ path: path.join(output, "09-bundle-vocabulary-complete.png") });
+      await emit(job("translate"), "推理与估计。", true);
+      await emit(job("explain"), "\n\n论证随后使用推理与估计。", true);
+      await emit(job("insight"), '。","role":"连接假设与方法。"}', true);
+      await page.getByRole("tab", { name: "读懂这段", exact: true }).click();
+      await page.getByRole("tab", { name: "解释", exact: true }).click();
+      await page.locator(".assistant-explanation h2").getByText("推理与估计", { exact: true }).waitFor();
+      await page.screenshot({ path: path.join(output, "10-bundle-explanation-complete.png") });
+      await page.getByRole("tab", { name: "摘要与作用", exact: true }).click();
+      await page.locator(".assistant-insight").getByText("连接假设与方法。", { exact: true }).waitFor();
+      assert.equal(await page.locator(".assistant-insight").getAttribute("aria-busy"), "false");
+      await paragraph.scrollIntoViewIfNeeded();
+      const repeatedPoint = await paragraph.boundingBox();
+      await page.mouse.dblclick(repeatedPoint.x + repeatedPoint.width / 2, repeatedPoint.y + repeatedPoint.height / 2);
+      await page.getByRole("tab", { name: "翻译", exact: true }).waitFor();
+      assert.equal(await electron.evaluate(() => globalThis.vocabularyE2e.requests.length), 9, "Repeated double-click reuses all four completed results");
+      await page.reload();
+      await page.getByRole("button", { name: "打开阅读", exact: true }).click();
+      await page.waitForSelector('.pdf-page-stage[data-rendered="true"]');
+      await paragraph.scrollIntoViewIfNeeded();
+      const restoredPoint = await paragraph.boundingBox();
+      await page.mouse.click(restoredPoint.x + restoredPoint.width / 2, restoredPoint.y + restoredPoint.height / 2);
+      await page.getByRole("tab", { name: "解释", exact: true }).click();
+      await page.locator(".assistant-explanation h2").getByText("推理与估计", { exact: true }).waitFor();
+      assert.equal(await electron.evaluate(() => globalThis.vocabularyE2e.requests.length), 9, "Individual explanation uses its persisted cache after reload");
+      await page.mouse.dblclick(restoredPoint.x + restoredPoint.width / 2, restoredPoint.y + restoredPoint.height / 2);
+      await page.locator(".assistant-translation").getByText("本段假设用于推理与估计。", { exact: true }).waitFor();
+      await page.getByRole("tab", { name: "摘要与作用", exact: true }).click();
+      await page.locator(".assistant-insight").getByText("连接假设与方法。", { exact: true }).waitFor();
+      await page.getByRole("tab", { name: "解释", exact: true }).click();
+      await page.locator(".assistant-explanation h2").getByText("推理与估计", { exact: true }).waitFor();
+      await page.getByRole("tab", { name: /学术词汇/ }).click();
+      await page.getByText("本段词汇已生成", { exact: true }).waitFor();
+      assert.equal(await electron.evaluate(() => globalThis.vocabularyE2e.requests.length), 9, "Reload restores all four caches without model calls");
+      report.checks.push("Real paragraph double-click starts four independent streams with thinking disabled, displays insight before completion, automatically selects paragraph vocabulary and reuses all results after reload");
 
       await page.getByRole("button", { name: "打开单词表", exact: true }).click();
       await page.getByRole("dialog", { name: "单词表", exact: true }).waitFor();
@@ -289,7 +356,7 @@ if (process.versions.electron) {
         unexpectedRequests: globalThis.vocabularyE2e.unexpectedRequests,
         requests: globalThis.vocabularyE2e.requests.map(({ operation, stream, thinking }) => ({ operation, stream, thinking })),
       }));
-      assert.equal(state.count, 5);
+      assert.equal(state.count, 9);
       assert.equal(state.unexpectedRequests, 0);
       assert.deepEqual(report.errors, []);
       report.transport = state;

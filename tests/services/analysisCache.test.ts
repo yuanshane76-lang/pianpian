@@ -6,6 +6,17 @@ afterEach(() => {
 });
 
 describe("analysis cache persistence", () => {
+  it("ignores retired whole-paper overview entries without removing paragraph results", () => {
+    const base = { paperId: "paper", scopeId: "block", sourceSignature: "source", value: "结果", createdAt: "2026-10-10T00:00:00.000Z" };
+    window.localStorage.setItem("zhiyan-workbench.analysis.v1", JSON.stringify([
+      { ...base, key: "overview-key", operation: "overview" },
+      { ...base, key: "translate-key", operation: "translate" },
+    ]));
+    const restored = loadAnalysisCache();
+    expect(restored.has("overview-key")).toBe(false);
+    expect(restored.get("translate-key")?.value).toBe("结果");
+  });
+
   it("round-trips cache entries through local storage", () => {
     const cache = new Map([
       [

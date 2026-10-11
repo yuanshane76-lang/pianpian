@@ -31,7 +31,7 @@ type Tasks = {
 
 const pdf = Uint8Array.from(Buffer.from("%PDF-1.7\n%%EOF\n"));
 const apiKey = "synthetic-key";
-const validResult = { layoutVersion: 1, blocks: [{ id: "b1", kind: "paragraph", text: "Body", pageNumber: 1, order: 0, bbox: [0.1, 0.2, 0.8, 0.4] }] };
+const validResult = { layoutVersion: 2, blocks: [{ id: "b1", kind: "paragraph", text: "Body", pageNumber: 1, order: 0, bbox: [0.1, 0.2, 0.8, 0.4] }] };
 const loadedModules = {
   store: require("../../electron/document-store.cjs") as { createDocumentStore(options: { rootDirectory: string }): Store },
   tasks: require("../../electron/document-tasks.cjs") as { createDocumentTasks(options: any): Tasks },
@@ -68,6 +68,98 @@ afterEach(async () => {
 });
 
 describe("document task orchestration", () => {
+  it("upgrades a version-one completed result from the same batch without uploading", async () => {
+    const upgraded = { ...validResult, layoutVersion: 2, blocks: [{ ...validResult.blocks[0],
+      id: "replacement-id", pageBounds: [
+        { pageNumber: 1, bbox: validResult.blocks[0].bbox },
+        { pageNumber: 2, bbox: [.1, .2, .8, .4] },
+      ],
+    }] };
+    const { id, tasks, documents, calls } = await fixture({
+      getBatch: vi.fn(async () => ({ state: "done", progress: 1, zipUrl: "https://cdn-mineru.openxlab.org.cn/cloud.zip" })),
+      extractResultZip: vi.fn(() => ({ result: upgraded, assets: [] })),
+    });
+    await documents.saveTask(id, { batchId: "completed", resultBatchId: "completed", state: "done", progress: 1 });
+    await documents.saveParse(id, { ...validResult, layoutVersion: 1 });
+    expect((await tasks.snapshot(id)).layoutRecoveryNeeded).toBe(true);
+    expect(await tasks.status(id)).toMatchObject({ state: "downloading", batchId: "completed" });
+    const status = await tasks.status(id);
+    expect(status.result.blocks[0]).toMatchObject({ id: validResult.blocks[0].id, pageBounds: upgraded.blocks[0].pageBounds });
+    expect(calls.requestUpload).not.toHaveBeenCalled();
+    expect(calls.uploadPdf).not.toHaveBeenCalled();
+    expect(calls.downloadResultZip).toHaveBeenCalledOnce();
+  });
+
+  it("does not let an older status response overwrite a newly accepted upload or its timestamp", async () => {
+    let releaseBatch!: (value: { state: string; progress: number }) => void;
+    const { id, tasks, documents, calls } = await fixture({
+      getBatch: vi.fn(() => new Promise((resolve) => { releaseBatch = resolve; })) as never,
+    });
+    await documents.saveTask(id, { batchId: "batch-1", state: "waiting-file", progress: 0 });
+    const status = tasks.status(id);
+    await vi.waitFor(() => expect(calls.getBatch).toHaveBeenCalledOnce());
+    const start = tasks.start(id);
+    expect(calls.uploadPdf).not.toHaveBeenCalled();
+    releaseBatch({ state: "waiting-file", progress: 0 });
+    await expect(status).resolves.toMatchObject({ state: "pending" });
+    await start;
+    expect(await documents.loadTask(id)).toMatchObject({ state: "pending", uploadCompletedAt: expect.any(Number) });
+    expect(calls.uploadPdf).toHaveBeenCalledOnce();
+  });
+
+  it("serializes a slow old write before committing a newly uploaded batch", async () => {
+    let releaseWrite!: () => void;
+    const { id, tasks, documents, calls } = await fixture({
+      getBatch: vi.fn(async () => ({ state: "waiting-file", progress: 0 })),
+    });
+    await documents.saveTask(id, { batchId: "old-batch", state: "waiting-file", progress: 0 });
+    const saveTask = documents.saveTask.bind(documents);
+    const save = vi.spyOn(documents, "saveTask").mockImplementation(async (documentId, task) => {
+      if (task.batchId === "old-batch") await new Promise<void>((resolve) => { releaseWrite = resolve; });
+      await saveTask(documentId, task);
+    });
+    const status = tasks.status(id);
+    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+    const start = tasks.start(id);
+    expect(calls.requestUpload).not.toHaveBeenCalled();
+    releaseWrite();
+    await expect(status).resolves.toMatchObject({ state: "pending" });
+    await start;
+    expect(await documents.loadTask(id)).toMatchObject({ batchId: "batch-1", state: "pending", uploadCompletedAt: expect.any(Number) });
+  });
+
+  it("continues polling when an older GET fails while a retry is queued", async () => {
+    let rejectBatch!: (error: Error) => void;
+    const { id, tasks, documents, calls } = await fixture({
+      getBatch: vi.fn(() => new Promise((_resolve, reject) => { rejectBatch = reject; })) as never,
+    });
+    await documents.saveTask(id, { batchId: "old-batch", state: "waiting-file", progress: 0 });
+    const status = tasks.status(id);
+    await vi.waitFor(() => expect(calls.getBatch).toHaveBeenCalledOnce());
+    const start = tasks.start(id);
+    rejectBatch(new Error("network"));
+    await expect(status).resolves.toMatchObject({ state: "pending" });
+    await start;
+    expect(await documents.loadTask(id)).toMatchObject({ batchId: "batch-1", state: "pending", uploadCompletedAt: expect.any(Number) });
+  });
+
+  it("waits for upload detection without creating another batch, then exposes an actionable timeout", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-11T00:00:00Z"));
+    const { id, tasks, documents, calls } = await fixture({
+      getBatch: vi.fn(async () => ({ state: "waiting-file", progress: 0 })),
+    });
+    await tasks.start(id);
+    expect(await tasks.status(id)).toMatchObject({ state: "pending", message: expect.stringContaining("确认") });
+    expect(await tasks.start(id)).toEqual({ batchId: "batch-1" });
+    expect(calls.uploadPdf).toHaveBeenCalledOnce();
+    vi.setSystemTime(new Date("2026-10-11T00:02:01Z"));
+    expect(await tasks.status(id)).toMatchObject({ state: "waiting-file", message: expect.stringContaining("重新上传") });
+    expect(await documents.loadTask(id)).toMatchObject({ state: "waiting-file" });
+    await tasks.start(id);
+    expect(calls.uploadPdf).toHaveBeenCalledTimes(2);
+  });
+
   it("exports the bounded factory and the three recovery methods", () => {
     expect(Object.keys(loadedModules.tasks)).toEqual(["createDocumentTasks"]);
   });
@@ -77,8 +169,9 @@ describe("document task orchestration", () => {
     expect(await tasks.start(id)).toEqual({ batchId: "batch-1" });
     expect(calls.requestUpload).toHaveBeenCalledTimes(1);
     expect(calls.uploadPdf).toHaveBeenCalledTimes(1);
-    expect(await documents.loadTask(id)).toEqual({ batchId: "batch-1", state: "pending", progress: 0 });
-    expect(await tasks.snapshot(id)).toEqual({ task: { batchId: "batch-1", state: "pending", progress: 0 }, result: null });
+    const task = { batchId: "batch-1", state: "pending", progress: 0, uploadCompletedAt: expect.any(Number) };
+    expect(await documents.loadTask(id)).toEqual(task);
+    expect(await tasks.snapshot(id)).toEqual({ task, result: null });
   });
 
   it("reuses active pending, running, converting, and cloud-done-download-pending batches", async () => {
@@ -102,7 +195,7 @@ describe("document task orchestration", () => {
   });
 
   it("recovers coordinates from an existing completed batch without uploading and preserves block identity", async () => {
-    const positioned = { ...validResult, layoutVersion: 1, blocks: [{ ...validResult.blocks[0], id: "new-id", bbox: [0.1, 0.2, 0.8, 0.4] }] };
+    const positioned = { ...validResult, layoutVersion: 2, blocks: [{ ...validResult.blocks[0], id: "new-id", bbox: [0.1, 0.2, 0.8, 0.4] }] };
     const { id, tasks, documents, calls } = await fixture({
       getBatch: vi.fn(async () => ({ state: "done", progress: 1, zipUrl: "https://cdn-mineru.openxlab.org.cn/result.zip" })),
       extractResultZip: vi.fn(() => ({ result: positioned, assets: [] })),
@@ -110,21 +203,27 @@ describe("document task orchestration", () => {
     await documents.saveParse(id, { ...validResult, layoutVersion: undefined });
     await documents.saveTask(id, { batchId: "existing", resultBatchId: "existing", state: "done", progress: 1 });
     expect((await tasks.snapshot(id)).layoutRecoveryNeeded).toBe(true);
+    expect(await tasks.status(id)).toMatchObject({ state: "downloading" });
     const status = await tasks.status(id);
     expect(status.result.blocks[0]).toMatchObject({ id: "b1", bbox: [0.1, 0.2, 0.8, 0.4] });
     expect(calls.requestUpload).not.toHaveBeenCalled();
     expect(calls.uploadPdf).not.toHaveBeenCalled();
     expect(calls.getBatch).toHaveBeenCalledOnce();
-    expect((await documents.loadParse(id)).layoutVersion).toBe(1);
+    expect((await documents.loadParse(id)).layoutVersion).toBe(2);
   });
 
-  it("lets an explicit restart replace a completed result that has no coordinates", async () => {
-    const { id, tasks, documents, calls } = await fixture();
-    await documents.saveParse(id, { layoutVersion: 1, layoutStatus: "unavailable", blocks: [{ ...validResult.blocks[0], bbox: undefined }] });
-    await documents.saveTask(id, { batchId: "no-layout", resultBatchId: "no-layout", state: "done", progress: 1 });
-    expect((await tasks.snapshot(id)).layoutRecoveryNeeded).toBeUndefined();
-    expect(await tasks.start(id)).toEqual({ batchId: "batch-1" });
-    expect(calls.requestUpload).toHaveBeenCalledOnce();
+  it("lets an explicit restart replace unavailable or partial coordinates", async () => {
+    for (const blocks of [
+      [{ ...validResult.blocks[0], bbox: undefined }],
+      [...validResult.blocks, { ...validResult.blocks[0], id: "missing", bbox: undefined }],
+    ]) {
+      const { id, tasks, documents, calls } = await fixture();
+      await documents.saveParse(id, { layoutVersion: 2, layoutStatus: "unavailable", blocks });
+      await documents.saveTask(id, { batchId: "no-layout", resultBatchId: "no-layout", state: "done", progress: 1 });
+      expect((await tasks.snapshot(id)).layoutRecoveryNeeded).toBeUndefined();
+      expect(await tasks.start(id)).toEqual({ batchId: "batch-1" });
+      expect(calls.requestUpload).toHaveBeenCalledOnce();
+    }
   });
 
   it("recovers a legacy completed batch without trusting or uploading its unbound parse data", async () => {
@@ -135,6 +234,7 @@ describe("document task orchestration", () => {
     await documents.saveTask(id, { batchId: "legacy", state: "done", progress: 1 });
     expect((await tasks.snapshot(id)).layoutRecoveryNeeded).toBe(true);
     expect(await tasks.start(id)).toEqual({ batchId: "legacy" });
+    expect(await tasks.status(id)).toMatchObject({ state: "downloading" });
     expect((await tasks.status(id)).result).toEqual(validResult);
     expect(calls.requestUpload).not.toHaveBeenCalled();
   });
@@ -164,6 +264,9 @@ describe("document task orchestration", () => {
     });
     await tasks.start(id);
     await documents.saveTask(id, { batchId: "batch-1", state: "done", progress: 1 });
+    expect(await tasks.status(id)).toMatchObject({ state: "downloading", progress: 1 });
+    expect(download).not.toHaveBeenCalled();
+    expect((await tasks.snapshot(id)).result).toBeNull();
     await expect(tasks.status(id)).rejects.toThrow(/解析|网络|结果/);
     expect(await documents.loadTask(id)).toMatchObject({ batchId: "batch-1", state: "downloading" });
     const status = tasks.status(id);

@@ -35,7 +35,7 @@ const report = { checks: [], errors: [], aiRequests: 0, content: "UI fixtures wi
       const parsed = JSON.parse(fs.readFileSync(path.join(documents, id, "parse.json"), "utf8"));
       return { id, title: parsed.title, authors: [], year: null, sourcePath: `local://assistant-layout-check/${id}`,
         originalId: id, pageCount: parsed.pageCount, importedAt: "2026-10-09", tags: [], favorite: false,
-        overview: null, blocks: parsed.blocks.length, blockData: parsed.blocks, parseVersion: 2, parseStatus: "ready" };
+        blocks: parsed.blocks.length, blockData: parsed.blocks, parseVersion: 2, parseStatus: "ready" };
     });
     const paper = papers.find((item) => item.title.includes("Retrieval-Augmented")) || papers[0];
     assert(paper, "A real parsed local PDF is required");
@@ -76,8 +76,7 @@ const report = { checks: [], errors: [], aiRequests: 0, content: "UI fixtures wi
       const noop = () => {};
       const base = {
         originalId: paper.id, selectedBlock: paragraph, chartReading: null,
-        overview: "本文提出检索增强生成（RAG），将预训练模型的参数知识与外部文档知识结合。",
-        answer: null, isBusy: false, onOverview: noop, onTranslate: noop, onExplain: noop, onReadChart: noop,
+        answer: null, isBusy: false, onTranslate: noop, onExplain: noop, onReadChart: noop,
         explanation: null, translation: "我们在广泛的知识密集型 NLP 任务上微调并评估了模型，并在三个开放域问答任务上达到了当时的最新技术水平，超越了仅依赖参数的 seq2seq 模型，以及针对特定任务的检索与提取架构。\n\n对于语言生成任务，RAG 模型生成的文本比仅依赖参数的 seq2seq 基线更具体、更多样，并且更符合事实。",
         selectionText: "", serviceLabel: "DeepSeek", serviceModel: "deepseek-flash", aiAvailable: true,
         onOpenSettings: noop, actionError: null, pendingAction: null, insight: null, streamingOutput: null,
