@@ -441,6 +441,71 @@ function normalizeContentList(bytes, sourcePath, files) {
   return { blocks, ...(title ? { title } : {}), ...(pageCount ? { pageCount } : {}) };
 }
 
+// content_list merges paragraphs across pages but keeps only the first box.
+// layout.json retains the explicit cross_page lines and their physical source
+// in preproc_blocks. Match those exact lines; never infer a page from text order.
+function addCrossPageBounds(result, bytes) {
+  let layout;
+  try { layout = JSON.parse(bytes.toString("utf8").replace(/^\uFEFF/, "")); }
+  catch { fail("Invalid MinerU layout JSON."); }
+  if (!Array.isArray(layout?.pdf_info)) fail("Invalid MinerU layout pages.");
+  const unitBox = (box, page) => {
+    const bbox = normalizeBbox(box);
+    const [width, height] = Array.isArray(page.page_size) ? page.page_size : [];
+    if (!bbox || !Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0
+      || bbox[2] > width || bbox[3] > height) return undefined;
+    return bbox.map((value, index) => value / (index % 2 === 0 ? width : height));
+  };
+  const gridKey = (pageNumber, bbox) => JSON.stringify([pageNumber, ...bbox.map((value) => Math.floor(value * 1000 + 1e-7))]);
+  const lineKey = (line) => JSON.stringify([line.bbox, line.spans?.map((span) => [span.type, span.content])]);
+  const sources = new Map();
+  for (const page of layout.pdf_info) {
+    if (!Number.isInteger(page?.page_idx) || page.page_idx < 0 || page.page_idx >= 100000) fail("Invalid MinerU layout page index.");
+    for (const block of page.preproc_blocks || []) {
+      if (block.type !== "text") continue;
+      for (const line of block.lines || []) {
+        const bbox = unitBox(line.bbox, page);
+        const key = lineKey(line);
+        const entries = sources.get(key) || [];
+        entries.push({ pageNumber: page.page_idx + 1, bbox });
+        sources.set(key, entries);
+      }
+    }
+  }
+  const paragraphs = new Map();
+  for (const block of result.blocks) {
+    if (block.kind !== "paragraph" || !block.bbox) continue;
+    const key = gridKey(block.pageNumber, block.bbox);
+    const entries = paragraphs.get(key) || [];
+    entries.push(block);
+    paragraphs.set(key, entries);
+  }
+  for (const page of layout.pdf_info) {
+    for (const paragraph of page.para_blocks || []) {
+      if (paragraph.type !== "text") continue;
+      const lines = (paragraph.lines || []).filter((line) => line.spans?.some((span) => span.cross_page === true));
+      if (!lines.length) continue;
+      const primary = unitBox(paragraph.bbox, page);
+      const matches = primary ? paragraphs.get(gridKey(page.page_idx + 1, primary)) : undefined;
+      if (matches?.length !== 1) fail("Invalid MinerU cross-page layout paragraph.");
+      const block = matches[0];
+      const bounds = new Map([[block.pageNumber, [...block.bbox]]]);
+      for (const line of lines) {
+        const candidates = (sources.get(lineKey(line)) || []).filter((source) => source.pageNumber > block.pageNumber);
+        if (candidates.length !== 1 || !candidates[0].bbox) fail("Invalid MinerU cross-page layout source.");
+        const source = candidates[0];
+        const prior = bounds.get(source.pageNumber);
+        bounds.set(source.pageNumber, prior
+          ? [Math.min(prior[0], source.bbox[0]), Math.min(prior[1], source.bbox[1]), Math.max(prior[2], source.bbox[2]), Math.max(prior[3], source.bbox[3])]
+          : source.bbox);
+      }
+      block.pageBounds = [...bounds].sort(([left], [right]) => left - right).map(([pageNumber, bbox]) => ({ pageNumber, bbox }));
+      result.pageCount = Math.max(result.pageCount || 0, ...bounds.keys());
+    }
+  }
+  return result;
+}
+
 function normalizeMarkdown(bytes, sourcePath, files) {
   const lines = bytes.toString("utf8").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
   const blocks = [];
@@ -515,6 +580,9 @@ function extractResultZip(buffer) {
   let result;
   if (contentLists.length) {
     result = normalizeContentList(files.get(contentLists[0]), contentLists[0], files);
+    const layouts = [...files.keys()].filter((name) => /(?:^|\/)(?:layout|[^/]+_middle)\.json$/i.test(name));
+    if (layouts.length > 1) fail("Ambiguous MinerU layout JSON.");
+    if (layouts.length) result = addCrossPageBounds(result, files.get(layouts[0]));
   } else {
     const markdown = [...files.keys()].filter((name) => /\.md$/i.test(name)).sort((a, b) => {
       const priority = (name) => /(?:^|\/)full\.md$/i.test(name) ? 0 : /(?:^|\/)markdown\.md$/i.test(name) ? 1 : 2;
@@ -526,7 +594,7 @@ function extractResultZip(buffer) {
   const assets = [...files].filter(([name]) => IMAGE_EXTENSION.test(name)).map(([name, data]) => ({ path: name, data }));
   const positionedCount = result.blocks.filter((block) => block.bbox).length;
   const layoutStatus = positionedCount === 0 ? "unavailable" : positionedCount === result.blocks.length ? "available" : "partial";
-  return { result: { ...result, layoutVersion: 1, layoutStatus }, assets };
+  return { result: { ...result, layoutVersion: 2, layoutStatus }, assets };
 }
 
 module.exports = { requestUpload, uploadPdf, getBatch, downloadResultZip, extractResultZip };

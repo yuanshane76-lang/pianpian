@@ -306,7 +306,7 @@ describe("bounded MinerU ZIP extraction", () => {
       { ...content, bbox: [169, 126, 825, 156] },
     ]) }])).result;
     expect(enriched.blocks[0].id).toBe(previous.blocks[0].id);
-    expect(enriched).toHaveProperty("layoutVersion", 1);
+    expect(enriched).toHaveProperty("layoutVersion", 2);
     expect(previous).toHaveProperty("layoutStatus", "unavailable");
     expect(enriched).toHaveProperty("layoutStatus", "available");
   });
@@ -319,6 +319,62 @@ describe("bounded MinerU ZIP extraction", () => {
     ]));
     expect(result.blocks[1].assetPath).toBe("images/a.png");
     expect(assets.map((asset) => asset.path)).toEqual(["images/a.png"]);
+  });
+
+  it("retains both page regions of one merged paragraph without changing its text or id", () => {
+    const content = [{ type: "text", text: "Beginning of a paragraph. Continued on another page.", page_idx: 0, bbox: [100, 800, 900, 900] }];
+    const first = { bbox: [60, 640, 540, 720], spans: [{ type: "text", content: "Beginning of a paragraph." }] };
+    const continued = { bbox: [60, 160, 540, 320], spans: [{ type: "text", content: "Continued on another page.", cross_page: true }] };
+    const layout = { pdf_info: [
+      { page_idx: 0, page_size: [600, 800], para_blocks: [{ type: "text", bbox: first.bbox, lines: [first, continued] }] },
+      { page_idx: 1, page_size: [600, 800], para_blocks: [], preproc_blocks: [
+        { type: "text", bbox: continued.bbox, lines: [{ ...continued, spans: [{ type: "text", content: "Continued on another page." }] }] },
+      ] },
+    ] };
+    const baseline = mineru().extractResultZip(zip([{ name: "paper_content_list.json", data: JSON.stringify(content) }])).result.blocks[0];
+    const result = mineru().extractResultZip(zip([
+      { name: "paper_content_list.json", data: JSON.stringify(content) },
+      { name: "layout.json", data: JSON.stringify(layout) },
+    ])).result;
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0]).toMatchObject({ id: baseline.id, text: baseline.text, pageNumber: 1,
+      pageBounds: [
+        { pageNumber: 1, bbox: [0.1, 0.8, 0.9, 0.9] },
+        { pageNumber: 2, bbox: [0.1, 0.2, 0.9, 0.4] },
+      ],
+    });
+    expect(result).toHaveProperty("layoutVersion", 2);
+  });
+
+  it("rejects unresolved cross-page coordinates rather than publishing a falsely complete result", () => {
+    const content = [{ type: "text", text: "Beginning. Continuation.", page_idx: 0, bbox: [100, 800, 900, 900] }];
+    const layout = { pdf_info: [{ page_idx: 0, page_size: [600, 800], para_blocks: [
+      { type: "text", bbox: [60, 640, 540, 720], lines: [
+        { bbox: [60, 640, 540, 720], spans: [{ type: "text", content: "Beginning." }] },
+        { bbox: [60, 160, 540, 320], spans: [{ type: "text", content: "Continuation.", cross_page: true }] },
+      ] },
+    ] }] };
+    expect(() => mineru().extractResultZip(zip([
+      { name: "content_list.json", data: JSON.stringify(content) },
+      { name: "layout.json", data: JSON.stringify(layout) },
+    ]))).toThrow(/cross.page|layout/i);
+  });
+
+  it("keeps invalid repeated sources ambiguous instead of relocating a continuation to another page", () => {
+    const continued = { bbox: [60, 160, 540, 320], spans: [{ type: "text", content: "Repeated continuation." }] };
+    const content = [{ type: "text", text: "Beginning. Repeated continuation.", page_idx: 0, bbox: [100, 800, 900, 900] }];
+    const layout = { pdf_info: [
+      { page_idx: 0, page_size: [600, 800], para_blocks: [{ type: "text", bbox: [60, 640, 540, 720], lines: [
+        { bbox: [60, 640, 540, 720], spans: [{ type: "text", content: "Beginning." }] },
+        { ...continued, spans: [{ ...continued.spans[0], cross_page: true }] },
+      ] }] },
+      { page_idx: 1, page_size: [0, 800], preproc_blocks: [{ type: "text", lines: [continued] }] },
+      { page_idx: 2, page_size: [1200, 400], preproc_blocks: [{ type: "text", lines: [continued] }] },
+    ] };
+    expect(() => mineru().extractResultZip(zip([
+      { name: "content_list.json", data: JSON.stringify(content) },
+      { name: "layout.json", data: JSON.stringify(layout) },
+    ]))).toThrow(/cross.page|layout/i);
   });
 
   it("falls back to Markdown headings, paragraphs, tables, equations, and local images without inventing a page count", () => {

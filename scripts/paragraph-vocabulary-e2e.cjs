@@ -12,7 +12,7 @@ if (process.versions.electron) {
   const { createDocumentStore } = require("../electron/document-store.cjs");
   const fixtureDocuments = createDocumentStore({ rootDirectory: path.join(app.getPath("userData"), "documents") });
   globalThis.publishVocabularyFixture = async (paper) => {
-    await fixtureDocuments.saveParse(paper.originalId, { resultBatchId: "synthetic-batch", layoutVersion: 1,
+    await fixtureDocuments.saveParse(paper.originalId, { resultBatchId: "synthetic-batch", layoutVersion: 2,
       title: paper.title, blocks: paper.blockData, pageCount: 1 });
     await fixtureDocuments.saveTask(paper.originalId, { state: "done", batchId: "synthetic-batch", resultBatchId: "synthetic-batch" });
   };

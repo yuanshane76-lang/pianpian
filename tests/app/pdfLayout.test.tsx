@@ -45,6 +45,30 @@ async function mount(blocks: DocumentBlock[], options: Partial<Parameters<typeof
 }
 
 describe("continuous PDF page geometry", () => {
+  it("selects and analyzes the canonical complete paragraph from its continuation page", async () => {
+    const merged = { ...paragraph, text: "First page starts the paragraph. The next page continues it.", pageBounds: [
+      { pageNumber: 1, bbox: paragraph.bbox! },
+      { pageNumber: 2, bbox: [.169, .2, .825, .4] as [number, number, number, number] },
+    ] };
+    const onAnalyzeParagraph = vi.fn();
+    const { container, onSelect } = await mount([merged], { onAnalyzeParagraph });
+    const target = container.querySelector<HTMLButtonElement>('.pdf-page-stage[data-page-number="2"] .pdf-block-hit-area');
+    expect(target).not.toBeNull();
+    expect(new Set([...container.querySelectorAll(".pdf-block-hit-area")].map((element) => element.id)).size).toBe(2);
+    await act(async () => target!.click());
+    expect(onSelect).toHaveBeenCalledWith(merged, 2);
+    await act(async () => target!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+    expect(onAnalyzeParagraph).toHaveBeenCalledWith(merged, 2);
+  });
+  it("restores a saved continuation position on its actual page", async () => {
+    const merged = { ...paragraph, pageBounds: [
+      { pageNumber: 1, bbox: paragraph.bbox! },
+      { pageNumber: 2, bbox: [.169, .2, .825, .4] as [number, number, number, number] },
+    ] };
+    const { container } = await mount([merged], { page: 2, focusTarget: { id: merged.id, requestId: 1, pageNumber: 2 } });
+    expect(scrollIntoView).toHaveBeenCalledOnce();
+    expect((scrollIntoView.mock.instances[0] as HTMLElement).closest(".pdf-page-stage")?.getAttribute("data-page-number")).toBe("2");
+  });
   it("keeps both adjacent page canvases and overlays mounted in the same scrolling stack", async () => {
     const { container } = await mount([paragraph, nextParagraph]);
     expect(container.querySelectorAll(".pdf-page-slot")).toHaveLength(2);

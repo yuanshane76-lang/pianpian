@@ -16,7 +16,7 @@ if (process.versions.electron) {
   const documents = createDocumentStore({ rootDirectory: path.join(app.getPath("userData"), "documents") });
   globalThis.publishLayoutFixture = async (paper) => {
     await documents.saveParse(paper.originalId, {
-      resultBatchId: "synthetic-layout", layoutVersion: 1,
+      resultBatchId: "synthetic-layout", layoutVersion: 2,
       title: paper.title, blocks: paper.blockData, pageCount: 2,
     });
     await documents.saveTask(paper.originalId, { state: "done", batchId: "synthetic-layout", resultBatchId: "synthetic-layout" });

@@ -97,7 +97,7 @@ export function ReaderView(props: ReaderViewProps) {
   const readerLayoutRef = useRef<HTMLDivElement>(null);
   const assistantToggleRef = useRef<HTMLButtonElement>(null);
   const focusSequence = useRef(0);
-  const [focusTarget, setFocusTarget] = useState<{ id: string; requestId: number }>();
+  const [focusTarget, setFocusTarget] = useState<{ id: string; requestId: number; pageNumber?: number }>();
   const [navigationTarget, setNavigationTarget] = useState<{ page: number; requestId: number }>();
   const outline = useMemo(() => getDocumentOutline(blocks), [blocks]);
   const resizeRef = useRef<{ side: "outline" | "assistant"; startX: number; startWidth: number; pointerId: number }>();
@@ -173,7 +173,7 @@ export function ReaderView(props: ReaderViewProps) {
     setSearchOpen(false);
     setSearchQuery("");
     const target = paper.readingPosition?.blockId;
-    setFocusTarget(target ? { id: target, requestId: ++focusSequence.current } : undefined);
+    setFocusTarget(target ? { id: target, requestId: ++focusSequence.current, pageNumber: paper.readingPosition?.page } : undefined);
   }, [paper.id]);
 
   function original(targetPage: number) {
@@ -195,10 +195,10 @@ export function ReaderView(props: ReaderViewProps) {
     props.onSourceNavigationConsumed?.(props.sourceNavigation.requestId);
   }, [props.sourceNavigation, paper.id]);
 
-  function select(block: DocumentBlock) {
+  function select(block: DocumentBlock, pageNumber = block.pageNumber) {
     onSelectBlock(block);
-    setPage(block.pageNumber);
-    props.onPosition({ mode: "pdf", page: block.pageNumber, blockId: block.id });
+    setPage(pageNumber);
+    props.onPosition({ mode: "pdf", page: pageNumber, blockId: block.id });
   }
 
   function navigate(block: DocumentBlock) {
@@ -314,15 +314,15 @@ export function ReaderView(props: ReaderViewProps) {
         {leftOpen ? <div className="reader-resizer reader-resizer-left" role="separator" aria-label="调整目录宽度" title="拖动调整目录宽度" aria-orientation="vertical" aria-valuemin={panelLimits.outline.min} aria-valuemax={clampWidth("outline", panelLimits.outline.max)} aria-valuenow={outlineWidth} tabIndex={0} onKeyDown={(event) => handleResizeKeyDown("outline", event)} onPointerDown={(event) => startResize("outline", event)} /> : null}
         <main className="reader-document is-pdf">
           <PdfPreview paperId={paper.id} originalId={paper.originalId} page={page} onPage={original} navigationTarget={navigationTarget}
-            onAnalyzeParagraph={(block) => {
-              setPage(block.pageNumber);
+            onAnalyzeParagraph={(block, pageNumber = block.pageNumber) => {
+              setPage(pageNumber);
               setRightOpen(true);
-              props.onPosition({ mode: "pdf", page: block.pageNumber, blockId: block.id });
+              props.onPosition({ mode: "pdf", page: pageNumber, blockId: block.id });
               if (props.aiAvailable) props.onAnalyzeParagraph(block);
-              else { select(block); onOpenSettings(); }
+              else { select(block, pageNumber); onOpenSettings(); }
             }}
             onVisiblePage={(visiblePage) => { setPage(visiblePage); props.onPosition({ mode: "pdf", page: visiblePage }); }}
-            onReimport={props.onReimport} blocks={visibleBlocks} activeBlockId={selectedBlock?.id ?? null} onSelect={select} onSelectText={(block, text) => { select(block); props.onSelectText(block, text); }} focusTarget={focusTarget} onVisibleBlock={(block) => props.onPosition({ mode: "pdf", page: block.pageNumber, blockId: block.id })} />
+            onReimport={props.onReimport} blocks={visibleBlocks} activeBlockId={selectedBlock?.id ?? null} onSelect={select} onSelectText={(block, text, pageNumber) => { select(block, pageNumber); props.onSelectText(block, text); }} focusTarget={focusTarget} onVisibleBlock={(block, pageNumber = block.pageNumber) => props.onPosition({ mode: "pdf", page: pageNumber, blockId: block.id })} />
         </main>
         {rightOpen ? <div className="reader-resizer reader-resizer-right" role="separator" aria-label="调整研究助手宽度" title="拖动调整研究助手宽度" aria-orientation="vertical" aria-valuemin={panelLimits.assistant.min} aria-valuemax={clampWidth("assistant", panelLimits.assistant.max)} aria-valuenow={assistantWidth} tabIndex={0} onKeyDown={(event) => handleResizeKeyDown("assistant", event)} onPointerDown={(event) => startResize("assistant", event)} /> : null}
         {rightOpen ? <ReaderAssistant vocabularyBlock={props.vocabularyBlock} onSaveTerm={props.onSaveTerm} isTermSaved={props.isTermSaved} originalId={paper.originalId} selectedBlock={selectedBlock} overview={props.streamingOutput?.operation === "overview" ? props.streamingOutput.text : paper.overview} answer={props.streamingOutput?.operation === "qa" ? props.streamingOutput.text : answer} isBusy={isBusy} onOverview={props.aiAvailable ? onOverview : onOpenSettings} onTranslate={onTranslate} onReadChart={props.onReadChart} chartReading={props.chartReading} onExplain={props.onExplain} explanation={props.streamingOutput?.operation === "explain" ? props.streamingOutput.text : props.explanation} onAsk={props.aiAvailable ? onAsk : onOpenSettings} translation={props.streamingOutput?.operation === "translate" ? props.streamingOutput.text : props.translation} selectionText={props.selectionText} serviceLabel={props.serviceLabel} serviceModel={props.serviceModel} aiAvailable={props.aiAvailable} onOpenSettings={onOpenSettings} actionError={actionError} pendingAction={props.pendingAction} pendingParagraphActions={props.pendingParagraphActions} paragraphAnalysisRequestId={props.paragraphAnalysisRequestId} streamingOutput={props.streamingOutput} insight={props.insight} onInsight={props.aiAvailable ? props.onInsight : onOpenSettings} guide={props.guide} onGuide={props.aiAvailable ? props.onGuide : onOpenSettings} vocabulary={props.vocabulary} onJump={(id) => { const block = blocks.find((item) => item.id === id); if (block) navigate(block); }} /> : null}

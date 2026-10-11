@@ -31,7 +31,7 @@ type Tasks = {
 
 const pdf = Uint8Array.from(Buffer.from("%PDF-1.7\n%%EOF\n"));
 const apiKey = "synthetic-key";
-const validResult = { layoutVersion: 1, blocks: [{ id: "b1", kind: "paragraph", text: "Body", pageNumber: 1, order: 0, bbox: [0.1, 0.2, 0.8, 0.4] }] };
+const validResult = { layoutVersion: 2, blocks: [{ id: "b1", kind: "paragraph", text: "Body", pageNumber: 1, order: 0, bbox: [0.1, 0.2, 0.8, 0.4] }] };
 const loadedModules = {
   store: require("../../electron/document-store.cjs") as { createDocumentStore(options: { rootDirectory: string }): Store },
   tasks: require("../../electron/document-tasks.cjs") as { createDocumentTasks(options: any): Tasks },
@@ -68,6 +68,26 @@ afterEach(async () => {
 });
 
 describe("document task orchestration", () => {
+  it("upgrades a version-one completed result from the same batch without uploading", async () => {
+    const upgraded = { ...validResult, layoutVersion: 2, blocks: [{ ...validResult.blocks[0],
+      id: "replacement-id", pageBounds: [
+        { pageNumber: 1, bbox: validResult.blocks[0].bbox },
+        { pageNumber: 2, bbox: [.1, .2, .8, .4] },
+      ],
+    }] };
+    const { id, tasks, documents, calls } = await fixture({
+      getBatch: vi.fn(async () => ({ state: "done", progress: 1, zipUrl: "https://cdn-mineru.openxlab.org.cn/cloud.zip" })),
+      extractResultZip: vi.fn(() => ({ result: upgraded, assets: [] })),
+    });
+    await documents.saveTask(id, { batchId: "completed", resultBatchId: "completed", state: "done", progress: 1 });
+    await documents.saveParse(id, { ...validResult, layoutVersion: 1 });
+    expect((await tasks.snapshot(id)).layoutRecoveryNeeded).toBe(true);
+    const status = await tasks.status(id);
+    expect(status.result.blocks[0]).toMatchObject({ id: validResult.blocks[0].id, pageBounds: upgraded.blocks[0].pageBounds });
+    expect(calls.requestUpload).not.toHaveBeenCalled();
+    expect(calls.uploadPdf).not.toHaveBeenCalled();
+    expect(calls.downloadResultZip).toHaveBeenCalledOnce();
+  });
   it("exports the bounded factory and the three recovery methods", () => {
     expect(Object.keys(loadedModules.tasks)).toEqual(["createDocumentTasks"]);
   });
@@ -102,7 +122,7 @@ describe("document task orchestration", () => {
   });
 
   it("recovers coordinates from an existing completed batch without uploading and preserves block identity", async () => {
-    const positioned = { ...validResult, layoutVersion: 1, blocks: [{ ...validResult.blocks[0], id: "new-id", bbox: [0.1, 0.2, 0.8, 0.4] }] };
+    const positioned = { ...validResult, layoutVersion: 2, blocks: [{ ...validResult.blocks[0], id: "new-id", bbox: [0.1, 0.2, 0.8, 0.4] }] };
     const { id, tasks, documents, calls } = await fixture({
       getBatch: vi.fn(async () => ({ state: "done", progress: 1, zipUrl: "https://cdn-mineru.openxlab.org.cn/result.zip" })),
       extractResultZip: vi.fn(() => ({ result: positioned, assets: [] })),
@@ -115,12 +135,12 @@ describe("document task orchestration", () => {
     expect(calls.requestUpload).not.toHaveBeenCalled();
     expect(calls.uploadPdf).not.toHaveBeenCalled();
     expect(calls.getBatch).toHaveBeenCalledOnce();
-    expect((await documents.loadParse(id)).layoutVersion).toBe(1);
+    expect((await documents.loadParse(id)).layoutVersion).toBe(2);
   });
 
   it("lets an explicit restart replace a completed result that has no coordinates", async () => {
     const { id, tasks, documents, calls } = await fixture();
-    await documents.saveParse(id, { layoutVersion: 1, layoutStatus: "unavailable", blocks: [{ ...validResult.blocks[0], bbox: undefined }] });
+    await documents.saveParse(id, { layoutVersion: 2, layoutStatus: "unavailable", blocks: [{ ...validResult.blocks[0], bbox: undefined }] });
     await documents.saveTask(id, { batchId: "no-layout", resultBatchId: "no-layout", state: "done", progress: 1 });
     expect((await tasks.snapshot(id)).layoutRecoveryNeeded).toBeUndefined();
     expect(await tasks.start(id)).toEqual({ batchId: "batch-1" });
