@@ -22,6 +22,10 @@ describe("portable package contents", () => {
     expect(ignored("electron/document-store.cjs")).toBe(false);
     expect(ignored("electron/document-tasks.cjs")).toBe(false);
     expect(ignored("electron/mineru.cjs")).toBe(false);
+    expect(ignored("electron/pi-agent.cjs")).toBe(false);
+    expect(ignored("electron/research-agent-runtime.cjs")).toBe(false);
+    expect(ignored("node_modules/@earendil-works/pi-coding-agent/dist/index.js")).toBe(false);
+    expect(ignored("node_modules/vitest/vitest.mjs")).toBe(true);
     expect(ignored("dist/index.html")).toBe(false);
     expect(ignored("dist/pdf.worker.min.mjs")).toBe(false);
     expect(ignored("dist/assets/index-123.js")).toBe(false);

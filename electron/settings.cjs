@@ -2,8 +2,8 @@ const { randomUUID } = require("node:crypto");
 
 const DEFAULT = {
   version: 1,
-  revision: "local-v1",
-  aiProvider: "local",
+  revision: "service-v1",
+  aiProvider: "deepseek",
   aliyun: { apiKey: "", model: "qwen-plus", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
   deepseek: { apiKey: "", model: "deepseek-flash", baseUrl: "https://api.deepseek.com" },
   mineru: { apiKey: "", endpoint: "https://mineru.net" },
@@ -14,7 +14,7 @@ function normalize(value) {
   return {
     version: 1,
     revision: typeof source.revision === "string" ? source.revision : DEFAULT.revision,
-    aiProvider: ["local", "aliyun", "deepseek"].includes(source.aiProvider) ? source.aiProvider : "local",
+    aiProvider: ["aliyun", "deepseek"].includes(source.aiProvider) ? source.aiProvider : DEFAULT.aiProvider,
     aliyun: { ...DEFAULT.aliyun, ...source.aliyun },
     deepseek: { ...DEFAULT.deepseek, ...source.deepseek },
     mineru: { ...DEFAULT.mineru, ...source.mineru },
@@ -41,7 +41,7 @@ function summary(value) {
 }
 
 function update(current, input) {
-  if (!input || !["local", "aliyun", "deepseek"].includes(input.aiProvider)) {
+  if (!input || !["aliyun", "deepseek"].includes(input.aiProvider)) {
     throw new Error("请选择有效的模型服务");
   }
   const settings = normalize(current);

@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowUpRight, BookMarked, FilePlus2, FolderOpen, Pencil, Sparkles, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, BookMarked, Bot, FilePlus2, FolderOpen, Pencil, Sparkles, Trash2 } from "lucide-react";
 import { useState } from "react";
 import type { PaperMetadataPatch, PaperRecord } from "../../domain/library";
 import { canOpenPaper, getLibraryPreparation, getPaperPipelineState, type PaperPipelineState } from "../../domain/pipeline";
@@ -8,6 +8,7 @@ import { PaperEditDialog } from "./PaperEditDialog";
 import { PaperList } from "./PaperList";
 
 interface LibraryViewProps {
+  onOpenResearch?: () => void;
   onOpenWordbook?: () => void;
   wordbookCount?: number;
   papers: PaperRecord[];
@@ -54,6 +55,7 @@ export function LibraryView({
   mineruConfigured,
   importing,
   onOpenWordbook, wordbookCount,
+  onOpenResearch,
 }: LibraryViewProps) {
   const [editing, setEditing] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -87,7 +89,7 @@ export function LibraryView({
   return (
     <>
       <div className="workspace-shell">
-        <button type="button" className="wordbook-button library-wordbook-button" aria-label="打开单词表" title="单词表" onClick={onOpenWordbook}><BookMarked size={17} /><span>单词表</span><small>{wordbookCount ?? 0}</small></button>
+        <div className="library-global-tools">{onOpenResearch ? <button type="button" className="wordbook-button" aria-label="打开研究助手" onClick={onOpenResearch}><Bot size={17} /><span>研究助手</span></button> : null}<button type="button" className="wordbook-button" aria-label="打开单词表" title="单词表" onClick={onOpenWordbook}><BookMarked size={17} /><span>单词表</span><small>{wordbookCount ?? 0}</small></button></div>
         <LibrarySidebar activeFilter={filter} tags={tags} onFilterChange={onFilterChange} onOpenSettings={onOpenSettings} />
         <PaperList
           papers={papers}
@@ -129,7 +131,7 @@ export function LibraryView({
                   </div>
                   <div>
                     <span>状态</span>
-                    <strong>{selectedReady ? "可阅读" : selectedPipeline?.stage === "failed" ? "解析失败" : selectedActive ? "处理中" : "等待 MinerU"}</strong>
+                    <strong>{selectedPaper.recordType === "reference" ? "文献条目" : selectedReady ? "可阅读" : selectedPipeline?.stage === "failed" ? "解析失败" : selectedActive ? "处理中" : "等待 MinerU"}</strong>
                   </div>
                 </div>
                 <div className="tag-row">
@@ -139,12 +141,12 @@ export function LibraryView({
                     </span>
                   ))}
                 </div>
-                {!selectedReady && <PaperPreparation paper={selectedPaper} pipeline={selectedPipeline!}
+                {selectedPaper.recordType === "reference" ? <div className="reference-detail-note"><strong>已收藏文献信息，全文待导入</strong><p>{selectedPaper.abstract || "这条记录来自公开学术检索。导入原始 PDF 并完成解析后即可阅读。"}</p>{selectedPaper.doi ? <span>DOI：{selectedPaper.doi}</span> : null}</div> : !selectedReady && <PaperPreparation paper={selectedPaper} pipeline={selectedPipeline!}
                   configured={mineruConfigured} onStart={() => onStartMineru(selectedPaper.id)} />}
                 <div className="detail-actions">
                   <button className="primary-button" aria-label="打开阅读" disabled={!selectedReady} onClick={onOpenReader} type="button" title={selectedReady ? "打开阅读" : "MinerU 解析与坐标定位完成后才能阅读"}>
                     <ArrowUpRight size={17} />
-                    {selectedReady ? "打开阅读" : "等待解析完成"}
+                    {selectedPaper.recordType === "reference" ? "全文待导入" : selectedReady ? "打开阅读" : "等待解析完成"}
                   </button>
                   <label className="secondary-button">
                     <FolderOpen size={17} />
@@ -172,7 +174,7 @@ export function LibraryView({
                 </div>
                 <div className="detail-note">
                   <Sparkles size={16} />
-                  <span>{selectedReady ? "AI 分析按需生成，结果会按内容签名缓存在本地。" : "导入后自动上传到 MinerU 解析，会使用你的账号额度；原始 PDF 保存在本机。"}</span>
+                  <span>{selectedPaper.recordType === "reference" ? "文献条目保存在本机，当前未下载或上传全文。" : selectedReady ? "AI 分析按需生成，结果会按内容签名缓存在本地。" : "导入后自动上传到 MinerU 解析，会使用你的账号额度；原始 PDF 保存在本机。"}</span>
                 </div>
               </div>
             </>

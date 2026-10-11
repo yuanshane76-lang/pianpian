@@ -31,12 +31,12 @@ describe("desktop settings IPC boundary", () => {
 
   it("clears only the key selected by the user", () => {
     const first = update(DEFAULT, {
-      aiProvider: "local",
+      aiProvider: "deepseek",
       aliyun: { apiKey: "aliyun-test", model: "qwen-plus" },
       deepseek: { apiKey: "deepseek-test", model: "deepseek-flash" },
     });
     const next = update(first, {
-      aiProvider: "local",
+      aiProvider: "deepseek",
       aliyun: { clearApiKey: true, model: "qwen-plus" },
     });
     expect(next.aliyun.apiKey).toBe("");
@@ -44,8 +44,8 @@ describe("desktop settings IPC boundary", () => {
   });
 
   it("rotates a non-secret cache revision whenever settings change", () => {
-    const first = update(DEFAULT, { aiProvider: "local" });
-    const second = update(first, { aiProvider: "local" });
+    const first = update(DEFAULT, { aiProvider: "deepseek" });
+    const second = update(first, { aiProvider: "deepseek" });
     expect(first.revision).not.toBe(second.revision);
     expect((summary(second) as { revision: string }).revision).toBe(second.revision);
     expect(second.revision).not.toContain("test");

@@ -1,4 +1,5 @@
-const { app, BrowserWindow, ipcMain, net, protocol, safeStorage, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, net, protocol, safeStorage, shell, dialog } = require("electron");
+const fs = require("node:fs/promises");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { resolveAppAsset } = require("./resource.cjs");
@@ -9,6 +10,7 @@ const { streamModel } = require("./ai.cjs");
 const { registerAiStreamHandlers } = require("./ai-stream-ipc.cjs");
 const { createDocumentStore } = require("./document-store.cjs");
 const { createDocumentTasks } = require("./document-tasks.cjs");
+const { registerResearchAgentHandlers } = require("./research-agent-ipc.cjs");
 
 const isDev = !app.isPackaged;
 const distDirectory = path.join(__dirname, "..", "dist");
@@ -64,13 +66,31 @@ app.whenReady().then(() => {
     return handler(...args);
   });
   secureHandle("zhiyan:ping", () => ({ ok: true, at: new Date().toISOString() }));
+  secureHandle("zhiyan:agent:save-document", async (input) => {
+    if (typeof input?.title !== "string" || input.title.length > 200 ||
+        typeof input?.markdown !== "string" || !input.markdown || input.markdown.length > 60000) {
+      throw new Error("文档内容无效");
+    }
+    const result = await dialog.showSaveDialog({
+      title: "保存研究笔记",
+      defaultPath: `${input.title.replace(/[\\/:*?"<>|]/g, "_")}.md`,
+      filters: [{ name: "Markdown 文档", extensions: ["md"] }],
+    });
+    if (result.canceled || !result.filePath) return { saved: false };
+    await fs.writeFile(result.filePath, input.markdown, "utf8");
+    return { saved: true };
+  });
   const store = createEncryptedSecretStore({
     filePath: path.join(app.getPath("userData"), "service-settings.enc.json"),
     safeStorage,
   });
   const readSettings = () => normalize(store.read());
   const disposeAiStreams = registerAiStreamHandlers({ ipcMain, isDev, readSettings, streamModel });
-  app.once("before-quit", disposeAiStreams);
+  const disposeResearchAgent = registerResearchAgentHandlers({ ipcMain, isDev, readSettings });
+  app.once("before-quit", () => {
+    disposeAiStreams();
+    disposeResearchAgent();
+  });
   const documents = createDocumentStore({ rootDirectory: path.join(app.getPath("userData"), "documents") });
   const documentTasks = createDocumentTasks({ documents, readSettings });
   secureHandle("zhiyan:documents:save", (input) => documents.save(input));

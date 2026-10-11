@@ -1,4 +1,4 @@
-export type AiProvider = "local" | "aliyun" | "deepseek";
+export type AiProvider = "aliyun" | "deepseek";
 
 export interface StoredServiceSettings {
   version: 1;
@@ -63,8 +63,8 @@ export interface PublicServiceSettings {
 
 export const DEFAULT_SERVICE_SETTINGS: StoredServiceSettings = {
   version: 1,
-  revision: "local-v1",
-  aiProvider: "local",
+  revision: "service-v1",
+  aiProvider: "deepseek",
   aliyun: {
     apiKey: "",
     model: "qwen-plus",
@@ -140,7 +140,7 @@ export function normalizeStoredServiceSettings(value: unknown): StoredServiceSet
   const mineru: Partial<StoredServiceSettings["mineru"]> = source.mineru ?? {};
   const aiProvider = source.aiProvider === "aliyun" || source.aiProvider === "deepseek"
     ? source.aiProvider
-    : "local";
+    : DEFAULT_SERVICE_SETTINGS.aiProvider;
 
   return {
     version: 1,

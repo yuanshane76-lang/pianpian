@@ -81,7 +81,7 @@ if (process.versions.electron) {
       }
       await page.waitForSelector(".workspace-shell");
       await page.evaluate(async () => window.zhiyan.invoke("zhiyan:settings:save", {
-        aiProvider: "local",
+        aiProvider: "deepseek",
         mineru: { apiKey: "synthetic-gate-token" },
       }));
       await page.reload();

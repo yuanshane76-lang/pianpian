@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, BookOpen, Settings2, X } from "lucide-react";
 import {
   getDocumentBlockSignature,
   getDocumentContentSignature,
@@ -40,8 +40,14 @@ import { ReaderView } from "../features/reader/ReaderView";
 import { ServiceSettingsDialog } from "../features/settings/ServiceSettingsDialog";
 import { DEFAULT_SERVICE_SETTINGS, toPublicServiceSettings, type PublicServiceSettings } from "../domain/serviceSettings";
 import { getDesktopBridge } from "../platform/electron";
+import { ResearchAssistant } from "../features/reader/ResearchAssistant";
+import { addLiteraturePaper, type LiteraturePaper } from "../domain/literature";
 
-type AppView = "library" | "reader";
+type AppView = "library" | "reader" | "research";
+const WORKSPACE_CONTEXT: PaperRecord = {
+  id: "research-workspace", title: "研究工作区", authors: [], year: null, sourcePath: "",
+  importedAt: "", tags: [], favorite: false, blocks: 0, blockData: [],
+};
 const PARAGRAPH_OPERATIONS: ParagraphOperation[] = ["translate", "explain", "insight", "vocabulary"];
 const PARAGRAPH_LABELS: Record<ParagraphOperation, string> = {
   translate: "翻译", explain: "解释", insight: "摘要与作用", vocabulary: "精选词汇",
@@ -262,7 +268,7 @@ export default function App() {
     () => [...new Set(papers.flatMap((paper) => paper.tags))].sort((left, right) => left.localeCompare(right)),
     [papers],
   );
-  const serviceIdentity = `${serviceSettings.revision}:${serviceSettings.aiProvider}:${serviceSettings.aiProvider === "local" ? "demo" : serviceSettings[serviceSettings.aiProvider].model}`;
+  const serviceIdentity = `${serviceSettings.revision}:${serviceSettings.aiProvider}:${serviceSettings[serviceSettings.aiProvider].model}`;
   const serviceIdentityRef = useRef(serviceIdentity);
   serviceIdentityRef.current = serviceIdentity;
   const errorContextRef = useRef("");
@@ -345,7 +351,6 @@ export default function App() {
     options: AnalysisRequestOptions = {},
   ): Promise<string> {
     if (!settingsReady) throw new Error("服务配置尚未就绪");
-    if (serviceSettings.aiProvider === "local") throw new Error("请配置百炼或 DeepSeek 后使用 AI 服务");
     if (!serviceSettings[serviceSettings.aiProvider].configured) {
       throw new Error("当前模型服务未配置密钥，请先打开服务配置。");
     }
@@ -636,6 +641,16 @@ export default function App() {
         paper.id === paperId ? { ...paper, favorite: !paper.favorite } : paper,
       ),
     );
+  }
+
+  function handleAddLiterature(item: LiteraturePaper) {
+    const next = addLiteraturePaper(papersRef.current, item);
+    if (!next.duplicate) {
+      if (!savePapers(next.papers)) throw new Error("文献库保存失败，请检查本机存储空间");
+      papersRef.current = next.papers;
+      setPapers(next.papers);
+    }
+    return { id: next.id, duplicate: next.duplicate };
   }
 
   function handleUpdateMetadata(paperId: string, patch: PaperMetadataPatch) {
@@ -1002,7 +1017,7 @@ export default function App() {
     <ServiceSettingsDialog
       onClose={() => setSettingsOpen(false)}
       onSaved={(settings) => {
-        serviceIdentityRef.current = `${settings.revision}:${settings.aiProvider}:${settings.aiProvider === "local" ? "demo" : settings[settings.aiProvider].model}`;
+        serviceIdentityRef.current = `${settings.revision}:${settings.aiProvider}:${settings[settings.aiProvider].model}`;
         invalidateAnalysisRequests();
         serviceSettingsRef.current = settings;
         setServiceSettings(settings);
@@ -1020,6 +1035,14 @@ export default function App() {
     canJump={(source) => Boolean(findWordbookSource(source))} onJump={handleWordbookJump}
     onRetry={() => { const next = loadWordbook(); wordbookRef.current = next; setWordbook(next); setWordbookWriteError(null); }} /> : null;
 
+  if (view === "research") {
+    const contextPaper = selectedPaper && canOpenPaper(selectedPaper, pipelineStates[selectedPaper.id]) ? selectedPaper : WORKSPACE_CONTEXT;
+    return <>{storageWarning}{settingsDialog}{wordbookDialog}<main className="research-workspace">
+      <header className="research-workspace-header"><button type="button" className="back-button" onClick={() => setView("library")}><ArrowLeft size={17} />返回文献库</button><div><BookOpen size={18} /><strong>纸研 · 研究工作区</strong></div><button type="button" className="icon-button" aria-label="服务配置" onClick={() => setSettingsOpen(true)}><Settings2 size={17} /></button></header>
+      <div className="research-workspace-body"><aside className="research-workspace-context"><span className="eyebrow">研究上下文</span><h1>{contextPaper === WORKSPACE_CONTEXT ? "开始一次研究对话" : contextPaper.title}</h1><p>{contextPaper === WORKSPACE_CONTEXT ? "从一个问题或检索主题开始，收集文献，再整理成阅读笔记。" : "助手可以读取这篇论文的解析文本，并继续查找相关文献。"}</p><div className="research-context-stat"><strong>{papers.length}</strong><span>本地文献</span><strong>{contextPaper.blocks}</strong><span>当前阅读块</span></div><div className="research-workspace-tip"><strong>可用工具</strong><p>论文阅读 · 文献检索<br />文献库搜索 · 文献收藏<br />Markdown 文档草稿</p></div></aside><div className="research-workspace-chat"><ResearchAssistant paper={contextPaper} library={papers} onAddPaper={handleAddLiterature} available={availability.available} configurationRevision={serviceSettings.revision} onOpenSettings={() => setSettingsOpen(true)} onJump={(blockId) => { if (contextPaper === WORKSPACE_CONTEXT) return; setSourceNavigation({ paperId: contextPaper.id, blockId, requestId: ++sourceNavigationSequence.current }); setView("reader"); }} /></div></div>
+    </main></>;
+  }
+
   if (view === "reader" && selectedPaper && canOpenPaper(selectedPaper, pipelineStates[selectedPaper.id])) {
     const currentParagraphAnalysis = paragraphAnalysis?.paperId === selectedPaper.id &&
       paragraphAnalysis.signature === targetSignature ? paragraphAnalysis : null;
@@ -1030,6 +1053,9 @@ export default function App() {
         {settingsDialog}
         {wordbookDialog}
         <ReaderView
+          researchPanel={getDesktopBridge()?.on ? <ResearchAssistant paper={selectedPaper} library={papers} onAddPaper={handleAddLiterature}
+            onJump={(blockId) => setSourceNavigation({ paperId: selectedPaper.id, blockId, requestId: ++sourceNavigationSequence.current })}
+            available={availability.available} configurationRevision={serviceSettings.revision} onOpenSettings={() => setSettingsOpen(true)} /> : undefined}
           paper={selectedPaper}
           sourceNavigation={sourceNavigation}
           onSourceNavigationConsumed={(requestId) => setSourceNavigation((current) =>
@@ -1096,6 +1122,7 @@ export default function App() {
       {settingsDialog}
       {wordbookDialog}
       <LibraryView
+        onOpenResearch={() => setView("research")}
         papers={visiblePapers}
         onOpenWordbook={() => setWordbookOpen(true)}
         wordbookCount={wordbook.entries.length}

@@ -18,7 +18,7 @@ const defaultView = toPublicServiceSettings(DEFAULT_SERVICE_SETTINGS);
 
 export function ServiceSettingsDialog({ onClose, onSaved }: Props) {
   const [current, setCurrent] = useState<PublicServiceSettings>(defaultView);
-  const [provider, setProvider] = useState<AiProvider>("local");
+  const [provider, setProvider] = useState<AiProvider>("deepseek");
   const [model, setModel] = useState({ aliyun: "qwen-plus", deepseek: "deepseek-flash" });
   const [keys, setKeys] = useState({ aliyun: "", deepseek: "", mineru: "" });
   const [clearKeys, setClearKeys] = useState({ aliyun: false, deepseek: false, mineru: false });
@@ -134,12 +134,12 @@ export function ServiceSettingsDialog({ onClose, onSaved }: Props) {
           <div className="settings-section">
             <h3>论文分析服务</h3>
             <div className="settings-segments" role="group" aria-label="选择模型服务">
-              {([["local", "本地演示"], ["aliyun", "阿里云百炼"], ["deepseek", "DeepSeek 官方"]] as const).map(([id, label]) => (
+              {([["aliyun", "阿里云百炼"], ["deepseek", "DeepSeek 官方"]] as const).map(([id, label]) => (
                 <button key={id} type="button" className={provider === id ? "is-selected" : ""} onClick={() => setProvider(id)}>{label}</button>
               ))}
             </div>
             <p className="settings-description">
-              {provider === "local" ? "可以离线阅读论文。启用翻译、解释和问答，请选择百炼或 DeepSeek 并保存密钥。" : "真实分析会将所需论文正文发送给你选择的服务商，可能产生调用费用。"}
+              {"真实分析会将所需论文正文发送给你选择的服务商，可能产生调用费用。"}
             </p>
             {provider === "aliyun" ? (
               <>
@@ -162,7 +162,7 @@ export function ServiceSettingsDialog({ onClose, onSaved }: Props) {
           </div>
           <div className="settings-section">
             <h3>MinerU 论文解析 <span className="settings-optional">独立配置</span></h3>
-            <p className="settings-description">MinerU 用于整理论文段落、图表、表格和公式。导入时先在本地打开原文，点击“MinerU 增强解析”后将完整 PDF 发送到 MinerU。解析失败不影响原文阅读。</p>
+            <p className="settings-description">MinerU 用于整理论文段落、图表、表格和公式。配置后导入 PDF 会自动上传解析；原件保存在本机，解析和坐标准备完成后才能打开阅读。</p>
             {keyField("mineru", "MinerU API Token")}
             <div className="mineru-guide">
               <strong>如何获取 MinerU Token</strong>

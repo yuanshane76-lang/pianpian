@@ -1,6 +1,10 @@
 import type { DocumentBlock } from "./documentBlocks";
 
 export interface PaperRecord {
+  recordType?: "reference";
+  doi?: string;
+  landingUrl?: string;
+  abstract?: string;
   id: string;
   title: string;
   authors: string[];

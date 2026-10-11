@@ -18,10 +18,13 @@
     "test": "vitest",
     "test:watch": "vitest",
     "test:paragraph-vocabulary:e2e": "npm run build && node scripts/paragraph-vocabulary-e2e.cjs",
+    "test:research-agent:e2e": "npm run build && node scripts/research-agent-e2e.cjs",
+    "test:pi-agent:smoke": "node scripts/pi-agent-smoke.cjs",
     "check:credentials": "node scripts/check-credentials.cjs",
     "check": "npm run check:credentials && npm run prepare:pdf-worker && npm test -- --run && npm run build"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.1.0",
     "katex": "^0.19.0",
     "lucide-react": "^0.468.0",
     "partial-json": "^0.1.7",

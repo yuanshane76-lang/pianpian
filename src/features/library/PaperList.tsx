@@ -114,9 +114,9 @@ export function PaperList({
                 <p>{paper.authors.length ? paper.authors.join(", ") : "作者待补充"}</p>
                 <div className="paper-meta">
                   <span>{paper.year ?? "未标注年份"}</span>
-                  <span>{paper.blocks} 个阅读块</span>
+                  <span>{paper.recordType === "reference" ? "文献条目 · 全文待导入" : `${paper.blocks} 个阅读块`}</span>
                 </div>
-                {!ready ? (
+                {!ready && paper.recordType !== "reference" ? (
                   <PaperPreparation compact paper={paper} pipeline={pipelineStates[paper.id]}
                     configured={mineruConfigured} onStart={() => onStartMineru(paper.id)} />
                 ) : null}
