@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="228" viewBox="0 0 1200 228" role="img" aria-labelledby="title desc">
+  <title id="title">From local PDF to contextual reading</title>
+  <desc id="desc">Save the PDF locally. Parse it with MinerU and persist every region. Read the original PDF. Request AI analysis when needed.</desc>
+  <rect x="1" y="1" width="1198" height="226" rx="18" fill="#f6f9f7" stroke="#dce7e1"/>
+  <g font-family="'Segoe UI',Arial,sans-serif">
+    <g fill="#ffffff" stroke="#d5e3dc">
+      <rect x="27" y="28" width="258" height="126" rx="12"/>
+      <rect x="323" y="28" width="258" height="126" rx="12"/>
+      <rect x="619" y="28" width="258" height="126" rx="12"/>
+      <rect x="915" y="28" width="258" height="126" rx="12"/>
+    </g>
+    <g fill="#13776a" font-size="12" font-weight="700" letter-spacing="1">
+      <text x="48" y="55">01 / IMPORT</text>
+      <text x="344" y="55">02 / PREPARE</text>
+      <text x="640" y="55">03 / READ</text>
+      <text x="936" y="55">04 / UNDERSTAND</text>
+    </g>
+    <g fill="#193d37" font-size="18" font-weight="600">
+      <text x="48" y="85">Save the original PDF</text>
+      <text x="344" y="85">MinerU layout parsing</text>
+      <text x="640" y="85">Read the original page</text>
+      <text x="936" y="85">Ask for AI analysis</text>
+    </g>
+    <g fill="#637c71" font-size="13">
+      <text x="48" y="112">Local file + library metadata</text>
+      <text x="344" y="112">Assets + all page coordinates</text>
+      <text x="640" y="112">Paragraphs, figures, equations</text>
+      <text x="936" y="112">Chinese explanations + terms</text>
+      <text x="344" y="132">Reading unlocks only when ready</text>
+      <text x="936" y="132">Only on user action</text>
+    </g>
+    <g stroke="#5b9e8a" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M295 91h17m-5-5 6 5-6 5"/>
+      <path d="M591 91h17m-5-5 6 5-6 5"/>
+      <path d="M887 91h17m-5-5 6 5-6 5"/>
+    </g>
+    <circle cx="37" cy="193" r="4" fill="#13776a"/>
+    <text x="51" y="197" fill="#516d60" font-size="13">Stored locally: originals, parsed assets, reading position, vocabulary and analysis cache.</text>
+    <text x="1168" y="197" text-anchor="end" fill="#73897e" font-size="12">External services: MinerU + selected model provider</text>
+  </g>
+</svg>
