@@ -155,12 +155,15 @@ if (process.versions.electron) {
       assert.equal(await electron.evaluate(() => globalThis.vocabularyE2e.requests.length), 0, "Restoring parsed results does not call a model");
       assert.equal(await page.getByText(/中文预览|后台翻译|导入与翻译/).count(), 0);
       report.checks.push("Completed MinerU restore leaves original readable without translation counters or automatic model calls");
-      assert.equal(await page.locator(".pipeline-step").count(), 2);
+      assert.equal(await page.getByRole("region", { name: "论文准备进度", exact: true }).count(), 0);
       assert.equal(await page.locator(".reader-processing").count(), 0);
       const beforeToast = await page.locator(".reader-layout").boundingBox();
       await page.locator(".reader-ready-toast").waitFor({ state: "hidden", timeout: 6000 });
       assert.deepEqual(await page.locator(".reader-layout").boundingBox(), beforeToast);
-      report.checks.push("Original and positioning statuses stay independent; readiness toast auto-dismisses without moving the PDF");
+      const topbar = await page.locator(".reader-topbar").boundingBox();
+      assert(topbar && beforeToast && Math.abs(topbar.y + topbar.height - beforeToast.y) < 1,
+        "The PDF layout starts immediately below the toolbar without a permanent preparation row");
+      report.checks.push("No permanent preparation row; readiness toast auto-dismisses without moving the PDF");
       await page.locator("#pdf-block-fixture-a").focus();
       await page.keyboard.press("Enter");
       await page.getByRole("tab", { name: /学术词汇/ }).click();
@@ -375,14 +378,6 @@ if (process.versions.electron) {
             controlsFit: controls.every((item) => { const rect = item.getBoundingClientRect(); return rect.x >= 0 && rect.right <= innerWidth + 1; }) };
         });
         assert(bounds.fits && bounds.horizontalOverflow <= 1 && bounds.controlsFit, `${name}: modal and controls fit`);
-        const progressFits = await page.locator(".pipeline-status-bar").evaluate((bar) => {
-          const rect = bar.getBoundingClientRect();
-          return [...bar.querySelectorAll(".pipeline-step, .pipeline-control")].every((element) => {
-            const child = element.getBoundingClientRect();
-            return child.left >= rect.left && child.right <= rect.right + 1 && child.top >= rect.top && child.bottom <= rect.bottom + 1;
-          });
-        });
-        assert(progressFits, `${name}: reading status fits`);
         await page.screenshot({ path: path.join(output, `04-wordbook-${name}.png`) });
         report.checks.push({ name: `wordbook-${name}`, width, height, bounds });
       }

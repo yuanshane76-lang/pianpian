@@ -2,8 +2,6 @@ import { ArrowLeft, BookMarked, Check, FileText, PanelLeftClose, PanelRightClose
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { getDocumentOutline, type DocumentBlock } from "../../domain/documentBlocks";
 import type { PaperRecord } from "../../domain/library";
-import type { PaperPipelineState } from "../../domain/pipeline";
-import { PipelineStatusBar } from "./PipelineStatusBar";
 import { PdfPreview } from "./PdfPreview";
 import { ReaderAssistant } from "./ReaderAssistant";
 import { hasPageBounds } from "../../domain/pdfLayout";
@@ -41,14 +39,11 @@ interface ReaderViewProps {
   onOpenSettings: () => void;
   actionError: string | null;
   processingStatus: string;
-  onEnhance: () => void;
-  onRetryBasic: () => void;
   onReimport: (file: File) => void;
   onPosition: (position: NonNullable<PaperRecord["readingPosition"]>) => void;
   aiAvailable: boolean;
   serviceLabel: string;
   serviceModel: string;
-  mineruConfigured: boolean;
   pendingAction: string | null;
   streamingOutput: { operation: import("../../services/ai").AiRequest["operation"]; text: string } | null;
   insight: { summary: string; role: string } | null;
@@ -56,7 +51,6 @@ interface ReaderViewProps {
   guide: { overview: string; terms: Array<{ term: string; translation: string; definition: string }> } | null;
   onGuide: () => void;
   vocabulary: import("../../domain/vocabulary").AcademicTerm[];
-  pipeline: PaperPipelineState;
 }
 
 function getDefaultReaderPanelWidths() {
@@ -298,11 +292,6 @@ export function ReaderView(props: ReaderViewProps) {
           <button className="icon-button" aria-label="搜索正文" aria-pressed={searchOpen} onClick={() => setSearchOpen(!searchOpen)}><Search size={17} /></button>
         </div>
       </header>
-      <PipelineStatusBar state={props.pipeline} context={{
-        originalAvailable: Boolean(paper.originalId), layoutReady,
-        mineruConfigured: props.mineruConfigured,
-        mineruPending: Boolean(paper.mineruBatchId), localParseFailed: paper.parseStatus === "fallback",
-      }} onEnhance={props.onEnhance} onRetryBasic={props.onRetryBasic} onOpenSettings={onOpenSettings} />
       {toastPaperId === paper.id ? <div className="reader-ready-toast" role="status">
         <span className="reader-ready-toast-icon"><Check size={17} aria-hidden="true" /></span>
         <div><strong>段落定位已就绪</strong><span>点击原文或划选句子开始理解</span></div>

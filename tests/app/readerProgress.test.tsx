@@ -24,12 +24,11 @@ function props(): ComponentProps<typeof ReaderView> {
       blocks: 1, blockData: [paragraph], parseStatus: "ready" },
     selectedBlock: null, selectionText: "", translation: null, answer: null,
     isBusy: false, chartReading: null, explanation: null, actionError: null, processingStatus: "",
-    aiAvailable: true, serviceLabel: "模型", serviceModel: "model", mineruConfigured: true,
+    aiAvailable: true, serviceLabel: "模型", serviceModel: "model",
     pendingAction: null, streamingOutput: null, insight: null, guide: null, vocabulary: [],
-    pipeline: { paperId: "paper", source: "mineru", stage: "ready" },
     onBack: vi.fn(), onSelectBlock: vi.fn(), onSelectText: vi.fn(), onAnalyzeParagraph: vi.fn(),
     onTranslate: vi.fn(), onReadChart: vi.fn(), onExplain: vi.fn(), onAsk: vi.fn(),
-    onOpenSettings: vi.fn(), onEnhance: vi.fn(), onRetryBasic: vi.fn(), onReimport: vi.fn(),
+    onOpenSettings: vi.fn(), onReimport: vi.fn(),
     onPosition: vi.fn(), onInsight: vi.fn(), onGuide: vi.fn(),
   };
 }
@@ -152,9 +151,11 @@ describe("reader progress feedback", () => {
     vi.useFakeTimers();
     const p = await mount();
     expect(container.querySelector(".reader-processing")).toBeNull();
+    expect(container.querySelector('[aria-label="论文准备进度"]')).toBeNull();
     expect(container.querySelector(".reader-ready-toast")?.textContent).toContain("段落定位已就绪");
     await act(async () => vi.advanceTimersByTime(4100));
     expect(container.querySelector(".reader-ready-toast")).toBeNull();
+    expect(container.querySelector(".reader-topbar")?.nextElementSibling).toBe(container.querySelector(".reader-layout"));
     await act(async () => root.render(<ReaderView {...p} translation="注意力" />));
     expect(container.querySelector(".reader-ready-toast")).toBeNull();
   });
@@ -182,33 +183,12 @@ describe("reader progress feedback", () => {
     expect(container.querySelector(".reader-ready-toast")).toBeNull();
   });
 
-  it("keeps the MinerU configuration action in the status bar when no layout is available", async () => {
+  it("keeps service configuration available from the reader toolbar", async () => {
     const p = props();
-    await mount({ ...p, mineruConfigured: false, paper: { ...p.paper, blockData: [] } });
-    const button = container.querySelector<HTMLButtonElement>('[aria-label="配置 MinerU"]')!;
+    await mount(p);
+    const button = container.querySelector<HTMLButtonElement>('.reader-toolbar [aria-label="服务配置"]')!;
     expect(button).not.toBeNull();
     await act(async () => button.click());
     expect(p.onOpenSettings).toHaveBeenCalledOnce();
-  });
-
-  it("shows real parsing progress alongside readable original without translation preparation", async () => {
-    const p = props();
-    await mount({ ...p, paper: { ...p.paper, blockData: [] },
-      pipeline: { ...p.pipeline, stage: "mineru-processing", mineruProgress: 0.6 } });
-    const bars = container.querySelectorAll('[role="progressbar"]');
-    expect([...bars].map((bar) => bar.getAttribute("aria-valuenow"))).toEqual(["60"]);
-    expect(container.querySelector(".pipeline-status-bar")?.textContent).toContain("原文阅读");
-    expect(container.querySelector(".pipeline-status-bar")?.textContent).not.toContain("中文预览");
-    expect(container.querySelectorAll(".pipeline-step")).toHaveLength(2);
-    expect(container.querySelector('[aria-label="暂停自动翻译"]')).toBeNull();
-  });
-
-  it("offers parsing retry even when previous coordinates remain readable", async () => {
-    const p = props();
-    await mount({ ...p, pipeline: { ...p.pipeline, stage: "failed", error: "下载失败" } });
-    const retry = container.querySelector<HTMLButtonElement>('[aria-label="重试论文处理"]')!;
-    expect(retry).not.toBeNull();
-    await act(async () => retry.click());
-    expect(p.onEnhance).toHaveBeenCalledOnce();
   });
 });
