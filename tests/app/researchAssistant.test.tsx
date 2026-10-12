@@ -12,16 +12,16 @@ const paper = { id: "p1", title: "Paper", authors: [], year: 2024, sourcePath: "
     { id: "b1", pageNumber: 1, order: 0, kind: "paragraph" as const, text: "Evidence." },
   ] };
 
-async function mount() {
-  const invoke = vi.fn(async (channel: string): Promise<any> => channel === "zhiyan:agent:start" ? { sessionId: "s1" } : channel === "zhiyan:agent:approve" ? true : undefined);
+async function mount(available = true) {
+  const invoke = vi.fn(async (channel: string): Promise<any> => channel === "zhiyan:agent:start" ? { sessionId: "s1" } : channel === "zhiyan:agent:skills" ? [] : channel === "zhiyan:agent:approve" ? true : undefined);
   window.zhiyan = { invoke: invoke as any, on: (_channel, handler) => { emit = handler as any; return () => {}; } };
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
   const onAddPaper = vi.fn(() => ({ id: "added", duplicate: false }));
-  await act(async () => root.render(<ResearchAssistant paper={paper} library={[paper]} onAddPaper={onAddPaper} onJump={vi.fn()} available={false} onOpenSettings={vi.fn()} />));
+  await act(async () => root.render(<ResearchAssistant paper={paper} library={[paper]} onAddPaper={onAddPaper} onJump={vi.fn()} available={available} onOpenSettings={vi.fn()} />));
   return { invoke, onAddPaper, rerender: async (id: string) => {
-    await act(async () => root.render(<ResearchAssistant paper={{ ...paper, id }} library={[paper]} onAddPaper={onAddPaper} onJump={vi.fn()} available={false} onOpenSettings={vi.fn()} />));
+    await act(async () => root.render(<ResearchAssistant paper={{ ...paper, id }} library={[paper]} onAddPaper={onAddPaper} onJump={vi.fn()} available={available} onOpenSettings={vi.fn()} />));
   } };
 }
 
@@ -29,9 +29,18 @@ afterEach(async () => {
   if (root) await act(async () => root.unmount());
   container?.remove();
   delete window.zhiyan;
+  vi.unstubAllGlobals();
 });
 
 describe("research assistant", () => {
+  it("loads the skill catalogue without starting a model session when credentials are missing", async () => {
+    const { invoke } = await mount(false);
+    expect(invoke).toHaveBeenCalledWith("zhiyan:agent:skills");
+    expect(invoke).not.toHaveBeenCalledWith("zhiyan:agent:start", expect.anything());
+    expect(container.querySelector(".research-agent-error")).toBeNull();
+    expect(container.textContent).toContain("请先配置模型服务");
+  });
+
   it("renders interleaved tool execution and working approval buttons", async () => {
     const { invoke, onAddPaper } = await mount();
     await act(async () => {
@@ -92,5 +101,78 @@ describe("research assistant", () => {
     expect(container.textContent).toContain("工具结果无法显示");
     expect(invoke).toHaveBeenCalledWith("zhiyan:agent:abort");
     expect(container.querySelector(".research-tool-card.is-failed")).not.toBeNull();
+  });
+
+  it("follows streamed content once per frame and respects the user's reading position", async () => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.set(++nextFrame, callback);
+      return nextFrame;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+    await mount();
+    const scroller = container.querySelector(".research-agent-scroll") as HTMLDivElement;
+    let height = 1000;
+    let top = 0;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, get: () => height },
+      clientHeight: { configurable: true, value: 200 },
+      scrollTop: {
+        configurable: true, get: () => top,
+        set: (value: number) => { top = Math.max(0, Math.min(value, height - 200)); },
+      },
+    });
+    // Model the old scrollTo behavior too, so it cannot silently pass in jsdom.
+    scroller.scrollTo = (options?: ScrollToOptions | number, y?: number) => {
+      scroller.scrollTop = typeof options === "number" ? y ?? options : options?.top ?? 0;
+    };
+    const flush = () => {
+      const pending = [...frames.values()];
+      frames.clear();
+      pending.forEach((callback) => callback(0));
+    };
+    await act(async () => emit({ type: "message_delta", messageId: "long", delta: "开始回答\n" }));
+    await act(async () => emit({ type: "message_delta", messageId: "long", delta: "继续回答\n" }));
+    expect(frames.size).toBe(1);
+    flush();
+    expect(top).toBe(800);
+
+    scroller.scrollTop = 760;
+    await act(async () => scroller.dispatchEvent(new Event("scroll", { bubbles: true })));
+    height = 1020;
+    await act(async () => emit({ type: "message_delta", messageId: "long", delta: "小幅上滚后仍有输出\n" }));
+    flush();
+    expect(top).toBe(760);
+    scroller.scrollTop = 820;
+    await act(async () => scroller.dispatchEvent(new Event("scroll", { bubbles: true })));
+
+    scroller.scrollTop = 250;
+    await act(async () => scroller.dispatchEvent(new Event("scroll", { bubbles: true })));
+    height = 1200;
+    await act(async () => emit({ type: "message_delta", messageId: "long", delta: "新的内容\n" }));
+    flush();
+    expect(top).toBe(250);
+
+    scroller.scrollTop = 1000;
+    await act(async () => scroller.dispatchEvent(new Event("scroll", { bubbles: true })));
+    height = 1400;
+    await act(async () => emit({ type: "message_delta", messageId: "long", delta: "末尾内容\n" }));
+    flush();
+    expect(top).toBe(1200);
+  });
+
+  it("shows the bundled skill catalogue and uses its prompt without copying skill instructions into the UI", async () => {
+    await mount();
+    await act(async () => emit({ type: "session_started", sessionId: "skills-session", skills: [
+      { name: "paper-deep-reading", title: "论文精读", prompt: "精读当前论文，给出原文依据" },
+      { name: "literature-search-review", title: "文献检索与筛选", prompt: "查找并筛选相关文献" },
+      { name: "literature-comparison-notes", title: "文献对比与笔记", prompt: "对比证据并整理笔记" },
+    ] }));
+    expect(container.textContent).toContain("预置研究技能");
+    const button = [...container.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === "论文精读");
+    expect(button).toBeTruthy();
+    await act(async () => button!.click());
+    expect(container.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe("精读当前论文，给出原文依据");
   });
 });

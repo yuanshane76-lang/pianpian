@@ -94,4 +94,18 @@ describe("research agent protocol", () => {
       tool,
     });
   });
+
+  it("preserves the bundled skill catalogue and bounds its fields", () => {
+    const skills = [{ name: "paper-deep-reading", title: "论文精读", prompt: "精读这篇论文" }];
+    expect(normalizeResearchAgentEvent({ type: "session_started", sessionId: "s1", skills }))
+      .toEqual({ type: "session_started", sessionId: "s1", skills });
+    for (const invalid of [
+      new Array(21).fill(skills[0]),
+      [{ ...skills[0], name: "../../private" }],
+      [{ ...skills[0], prompt: "x".repeat(2001) }],
+    ]) {
+      expect(() => normalizeResearchAgentEvent({ type: "session_started", sessionId: "s1", skills: invalid }))
+        .toThrow(/技能/);
+    }
+  });
 });

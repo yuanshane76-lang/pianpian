@@ -53,4 +53,15 @@ describe("portable package contents", () => {
       expect(ignored(file), file).toBe(true);
     }
   });
+
+  it("includes the shipped research workflows but excludes unregistered skill files", () => {
+    expect(ignored("electron/research-skills.cjs")).toBe(false);
+    expect(ignored("skills/research/manifest.json")).toBe(false);
+    for (const name of ["paper-deep-reading", "literature-search-review", "literature-comparison-notes"]) {
+      expect(ignored(`skills/research/${name}/SKILL.md`)).toBe(false);
+      expect(ignored(`skills/research/${name}/private.pdf`)).toBe(true);
+    }
+    expect(ignored("skills/research/private-skill/SKILL.md")).toBe(true);
+    expect(ignored("skills/personal/SKILL.md")).toBe(true);
+  });
 });

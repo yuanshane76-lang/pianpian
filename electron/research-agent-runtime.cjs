@@ -1,6 +1,7 @@
 const { randomUUID } = require("node:crypto");
 const { createToolDefinitions, normalizeContext } = require("./research-agent-tools.cjs");
 const { createPiSession, safeError } = require("./pi-agent.cjs");
+const { listBundledResearchSkills } = require("./research-skills.cjs");
 
 function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSessionFactory = createPiSession } = {}) {
   if (typeof emit !== "function") throw new Error("Agent 事件发送器无效");
@@ -122,7 +123,7 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
     }
     piSession = nextSession;
     piSession.setGeneration?.(startGeneration);
-    publish({ type: "session_started", sessionId });
+    publish({ type: "session_started", sessionId, skills: listBundledResearchSkills() });
     return { sessionId };
   }
 

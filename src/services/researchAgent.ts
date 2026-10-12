@@ -1,6 +1,6 @@
 import type { PaperRecord } from "../domain/library";
 import { getDesktopBridge } from "../platform/electron";
-import { normalizeResearchAgentEvent, type ResearchAgentEvent, type ResearchAgentMessage, type ResearchAgentPaperSummary } from "./researchAgentProtocol";
+import { normalizeResearchAgentEvent, normalizeResearchAgentSkills, type ResearchAgentEvent, type ResearchAgentMessage, type ResearchAgentPaperSummary, type ResearchAgentSkill } from "./researchAgentProtocol";
 
 export interface ResearchAgentContext {
   paper: {
@@ -68,6 +68,12 @@ export async function startResearchAgent(context: ResearchAgentContext): Promise
   const bridge = getDesktopBridge();
   if (!bridge?.on) throw new Error("研究 Agent 需要在纸研桌面端中使用");
   return bridge.invoke("zhiyan:agent:start", context);
+}
+
+export async function getResearchAgentSkills(): Promise<ResearchAgentSkill[]> {
+  const bridge = getDesktopBridge();
+  if (!bridge) return [];
+  return normalizeResearchAgentSkills(await bridge.invoke("zhiyan:agent:skills"));
 }
 
 export async function promptResearchAgent(prompt: string): Promise<void> {

@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld("zhiyan", {
       "zhiyan:mineru:start",
       "zhiyan:mineru:status",
       "zhiyan:agent:start",
+      "zhiyan:agent:skills",
       "zhiyan:agent:update-context",
       "zhiyan:agent:prompt",
       "zhiyan:agent:abort",

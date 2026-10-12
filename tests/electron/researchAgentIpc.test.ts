@@ -23,6 +23,23 @@ function createIpcMain() {
 }
 
 describe("research Agent IPC", () => {
+  it("lists shipped skills before any model is configured and rejects an untrusted sender", async () => {
+    const ipcMain = createIpcMain();
+    const readSettings = vi.fn();
+    const createRuntime = vi.fn();
+    registerResearchAgentHandlers({ ipcMain, isDev: true, readSettings, createRuntime });
+    const handler = ipcMain.handlers.get("zhiyan:agent:skills");
+    expect(handler).toBeTruthy();
+    const skills: any = await handler!(createEvent());
+    expect(skills).toHaveLength(3);
+    expect(skills[0]).toMatchObject({ name: "paper-deep-reading", title: "论文精读" });
+    expect(readSettings).not.toHaveBeenCalled();
+    expect(createRuntime).not.toHaveBeenCalled();
+    const event = createEvent();
+    event.senderFrame = { url: "https://untrusted.example/" };
+    expect(() => handler!(event)).toThrow();
+  });
+
   it("keeps runtime events bound to the requesting renderer", async () => {
     const ipcMain = createIpcMain();
     const runtime: any = {

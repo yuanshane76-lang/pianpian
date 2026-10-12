@@ -44,7 +44,7 @@ if (process.versions.electron) {
         message.role === "tool" || message.role === "toolResult" || message.tool_call_id);
       const related = { title: "Synthetic attention paper", authors: ["Synthetic Team"], year: 2025,
         doi: "10.1234/attention", landingUrl: "https://doi.org/10.1234/attention", source: "Crossref" };
-      const calls = question.includes("加入")
+      const taskCalls = question.includes("滚动验收") ? [] : question.includes("加入")
         ? [{ name: "add_paper_to_library", arguments: JSON.stringify(related) }]
         : question.includes("文档")
           ? [{ name: "read_current_paper", arguments: "{}" },
@@ -52,6 +52,10 @@ if (process.versions.electron) {
           : question.includes("查找")
             ? [{ name: "read_current_paper", arguments: "{}" }, { name: "search_literature", arguments: '{"query":"attention","limit":2}' }]
             : [{ name: "read_current_paper", arguments: "{}" }];
+      const skillName = question.includes("文档") ? "literature-comparison-notes"
+        : question.includes("查找") ? "literature-search-review" : "paper-deep-reading";
+      const calls = question.includes("加入") || question.includes("滚动验收") ? taskCalls
+        : [{ name: "read_research_skill", arguments: JSON.stringify({ name: skillName }) }, ...taskCalls];
       response.writeHead(200, { "Content-Type": "text/event-stream" });
       const chunk = (delta, finish_reason = null) => response.write(`data: ${JSON.stringify({
         id: "synthetic-completion", object: "chat.completion.chunk",
@@ -62,7 +66,11 @@ if (process.versions.electron) {
         chunk({ role: "assistant", tool_calls: [{ index: 0, id: require("node:crypto").randomUUID(), type: "function", function: call }] });
         chunk({}, "tool_calls");
       } else {
-        for (const text of ["已完成", "论文读取与", "研究任务。", "\n\n依据：", "[第 1 页]"]) {
+        const fragments = question.includes("滚动验收")
+          ? Array.from({ length: 120 }, (_, index) => `第 ${index + 1} 段：这是用于验证流式阅读位置的合成文字，持续输出期间可以向上阅读。\n\n`)
+          : ["已完成", "论文读取与", "研究任务。", "\n\n依据：", "[第 1 页]"];
+        for (const text of fragments) {
+          if (response.destroyed) break;
           chunk({ content: text });
           await new Promise((resolve) => setTimeout(resolve, 60));
         }
@@ -116,7 +124,9 @@ if (process.versions.electron) {
   }
   (async () => {
     const electron = await _electron.launch({
-      executablePath: require("electron"), args: [__filename], cwd: root,
+      executablePath: require("electron"),
+      args: [__filename, "--force-device-scale-factor=1", "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding"],
+      cwd: root,
       env: { ...process.env, ZHIYAN_AGENT_USER_DATA: userData, ZHIYAN_AGENT_DOCUMENT_OUTPUT: savedDocument },
     });
     const page = await electron.firstWindow();
@@ -126,23 +136,34 @@ if (process.versions.electron) {
       await page.getByLabel("向研究 Agent 提问").fill(question);
       await page.getByRole("button", { name: "发送给研究 Agent", exact: true }).click();
     }
+    async function capture(name) {
+      const image = await electron.evaluate(async ({ BrowserWindow }) =>
+        (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString("base64"));
+      fs.writeFileSync(path.join(output, name), Buffer.from(image, "base64"));
+    }
     try {
       await page.waitForSelector(".workspace-shell");
       await page.getByRole("button", { name: "打开研究助手", exact: true }).click();
       await page.getByText("从这篇论文开始研究", { exact: true }).waitFor();
-      await page.screenshot({ path: path.join(output, "01-research-workspace.png") });
+      await page.locator(".research-skills summary").waitFor();
+      await page.locator(".research-skills summary").click();
+      assert.equal(await page.locator(".research-skills-list button").count(), 3);
+      await page.getByRole("button", { name: "论文精读", exact: true }).click();
+      assert((await page.getByLabel("向研究 Agent 提问").inputValue()).includes("精读当前论文"));
+      await capture("01-research-workspace.png");
+      report.checks.push("Three bundled skills are discoverable and populate their Chinese workflow prompts");
       await send("查找相关论文");
       await page.locator(".research-result-item").first().waitFor();
       await page.getByRole("button", { name: "发送给研究 Agent" }).waitFor();
       assert.equal(await page.locator(".research-message.is-user").count(), 1);
       assert.equal(await page.locator(".research-result-item").count(), 2);
-      await page.screenshot({ path: path.join(output, "02-tool-chain.png") });
+      await capture("02-tool-chain.png");
       report.checks.push("Streaming-compatible multi-turn timeline renders read and search tool cards");
 
       await send("把第1篇加入文献库");
       await page.getByRole("button", { name: "确认加入", exact: true }).waitFor();
       await page.getByRole("button", { name: "确认加入", exact: true }).scrollIntoViewIfNeeded();
-      await page.screenshot({ path: path.join(output, "03-confirmation.png") });
+      await capture("03-confirmation.png");
       await page.getByRole("button", { name: "确认加入", exact: true }).click();
       await page.getByRole("button", { name: "发送给研究 Agent" }).waitFor();
       const entries = await page.evaluate(() => JSON.parse(localStorage.getItem("zhiyan-workbench.papers.v1")));
@@ -166,11 +187,47 @@ if (process.versions.electron) {
       await page.getByRole("button", { name: "保存 Markdown 文档", exact: true }).click();
       await page.waitForFunction(() => !document.querySelector('[aria-label="停止 Agent"]'));
       assert(fs.readFileSync(savedDocument, "utf8").includes("# 阅读笔记"));
-      await page.screenshot({ path: path.join(output, "04-document.png") });
+      await capture("04-document.png");
       report.checks.push("Generated Markdown is saved through Electron's native save boundary");
 
+      await send("滚动验收：持续输出长文");
+      await page.waitForFunction(() => {
+        const element = document.querySelector(".research-agent-scroll");
+        return element.scrollHeight - element.clientHeight > 800;
+      });
+      await page.waitForFunction(() => {
+        const element = document.querySelector(".research-agent-scroll");
+        return element.scrollHeight - element.clientHeight - element.scrollTop < 3;
+      });
+      const styles = await page.locator(".research-agent-scroll").evaluate((element) => ({
+        behavior: getComputedStyle(element).scrollBehavior, anchor: getComputedStyle(element).overflowAnchor,
+      }));
+      assert.deepEqual(styles, { behavior: "auto", anchor: "none" });
+      const paused = await page.locator(".research-agent-scroll").evaluate(async (element) => {
+        element.scrollTop -= 40;
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        return { top: element.scrollTop, height: element.scrollHeight };
+      });
+      await page.waitForFunction((height) => document.querySelector(".research-agent-scroll").scrollHeight > height + 300, paused.height);
+      assert(Math.abs(await page.locator(".research-agent-scroll").evaluate((element) => element.scrollTop) - paused.top) < 2);
+      await capture("07-stream-reading-position.png");
+      await page.locator(".research-agent-scroll").evaluate(async (element) => {
+        element.scrollTop = element.scrollHeight;
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      });
+      await page.getByRole("button", { name: "发送给研究 Agent" }).waitFor();
+      const tailGap = await page.locator(".research-agent-scroll").evaluate((element) =>
+        element.scrollHeight - element.clientHeight - element.scrollTop);
+      assert(tailGap < 3);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollTop), 0);
+      report.checks.push("120 streamed paragraphs keep the bottom visible, preserve an upward reading position, and resume following at the bottom");
+
       await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1000, 720));
-      await page.screenshot({ path: path.join(output, "05-compact.png") });
+      await page.waitForFunction(() => {
+        const element = document.querySelector(".research-agent-scroll");
+        return element.scrollHeight - element.clientHeight - element.scrollTop < 3;
+      });
+      await capture("05-compact.png");
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
       assert.equal(overflow, false);
       report.checks.push("1000px desktop layout has no horizontal overflow");
@@ -195,6 +252,7 @@ if (process.versions.electron) {
       await electron.evaluate(async (_electron, paper) => globalThis.publishAgentFixture(paper), fixture);
       await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 950));
       await page.reload();
+      await page.locator(".paper-row").filter({ hasText: "Research Agent Fixture" }).click();
       await page.getByRole("button", { name: "打开阅读", exact: true }).click();
       await page.waitForSelector('.pdf-page-stage[data-rendered="true"]');
       await page.getByRole("tab", { name: "研究对话", exact: true }).click();
@@ -207,7 +265,7 @@ if (process.versions.electron) {
       await page.locator(".research-citations button").last().click();
       await page.waitForSelector('#pdf-block-agent-fixture-paragraph');
       assert(await page.locator('.pdf-page-stage[data-rendered="true"]').isVisible());
-      await page.screenshot({ path: path.join(output, "06-reader-agent.png") });
+      await capture("06-reader-agent.png");
       report.checks.push("Reader supports two-turn paper conversation and stable block citation navigation with the original PDF visible");
       assert.deepEqual(report.errors, []);
       assert.equal(await electron.evaluate(() => globalThis.agentRemoteRequests), 0);
@@ -217,7 +275,7 @@ if (process.versions.electron) {
       report.status = "failed";
       report.error = error.message;
       report.requests = await electron.evaluate(() => globalThis.agentTestRequests);
-      await page.screenshot({ path: path.join(output, "failure.png") });
+      await capture("failure.png");
       console.error(error.message);
       process.exitCode = 1;
     } finally {

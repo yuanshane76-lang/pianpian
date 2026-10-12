@@ -1,5 +1,6 @@
 const { randomUUID } = require("node:crypto");
 const { searchLiterature } = require("./literature-search.cjs");
+const { readBundledResearchSkill } = require("./research-skills.cjs");
 
 const LIMITS = { blocks: 800, blockText: 6000, library: 500, query: 300 };
 
@@ -66,6 +67,10 @@ function toolResult(textContent, structuredContent) {
 function createToolDefinitions({ getContext, emitApproval, fetchImpl }) {
   const tool = (name, label, description, execute) => ({ name, label, description, parameters: { type: "object", properties: {}, additionalProperties: false }, execute });
   return [
+    tool("read_research_skill", "读取预置研究技能", "按名称读取随纸研安装的研究流程说明；不接受文件路径。", async (_id, params) => {
+      const skill = readBundledResearchSkill(params?.name);
+      return toolResult(`已读取预置研究技能「${skill.title}」。`, skill);
+    }),
     tool("read_current_paper", "读取当前论文", "按关键词或页码读取当前论文；空参数返回前 60 个块，可按关键词查找其他段落。", async (_id, params) => {
       const context = getContext();
       let remaining = 24000;
