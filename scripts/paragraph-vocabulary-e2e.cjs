@@ -195,14 +195,48 @@ if (process.versions.electron) {
       await page.locator(".assistant-insight").getByText("连接方法与评价。", { exact: true }).waitFor();
       await page.getByRole("tab", { name: "解释", exact: true }).click();
       await page.waitForSelector(".assistant-explanation .spin");
-      await emit(2, "## 核心术语\n\n**注意力**：根据相关性选择信息。\n\n- 方法：分配权重。\n- 评价：消融实验。\n\n| 术语 | 含义 |\n| --- | --- |\n| ablation | 消融 |\n\n<img src=\"https://example.com/track.png\">\n\n[引用](javascript:alert(1))", true);
+      await emit(2, "## 核心术语\n\n**注意力**：根据相关性选择信息。\n\n循环模型按序列位置计算：时间步 $t$ 的隐藏状态 $h_t$ 依赖上一状态 $h_{t");
+      await page.locator(".assistant-explanation .katex").first().waitFor();
+      assert.equal(await page.locator(".assistant-explanation .katex").count(), 2);
+      assert.equal(await page.locator(".assistant-explanation").getAttribute("aria-busy"), "true");
+      assert((await page.locator(".assistant-explanation").textContent()).includes("$h_{t"));
+      await emit(2, "-1}$ 和当前输入。\n\n$$\nh_t = f(h_{t-1}, x_t) + \\frac{a}{b}\n$$\n\n- 方法：分配权重。\n- 评价：消融实验。\n\n| 术语 | 含义 |\n| --- | --- |\n| ablation | 消融 |\n\n长公式：\n\n$$\n" +
+        Array(6).fill("\\sum_{i=1}^{n} x_i^2 + \\frac{a_i}{b_i}").join(" + ") +
+        "\n$$\n\n<img src=\"https://example.com/track.png\">\n\n[引用](javascript:alert(1))", true);
       await page.locator(".assistant-explanation h2").getByText("核心术语", { exact: true }).waitFor();
       assert.equal(await page.locator(".assistant-explanation strong").first().textContent(), "注意力");
       assert.equal(await page.locator(".assistant-explanation li").count(), 2);
       assert.equal(await page.locator(".assistant-explanation table").count(), 1);
       assert.equal(await page.locator(".assistant-explanation img, .assistant-explanation a").count(), 0);
+      assert.equal(await page.locator(".assistant-explanation .katex").count(), 5);
+      assert.equal(await page.locator(".assistant-explanation .katex-display").count(), 2);
+      assert.equal(await page.locator(".assistant-explanation").getAttribute("aria-busy"), "false");
       await page.screenshot({ path: path.join(output, "03-markdown-explanation.png") });
-      report.checks.push("Summary visible before completion; Markdown headings, emphasis, lists, GFM table and HTML safety");
+      const explanationBounds = await page.locator(".assistant-explanation").evaluate((element) => ({
+        width: element.clientWidth, scrollWidth: element.scrollWidth,
+        math: [...element.querySelectorAll(".markdown-math")].map((math) => ({
+          width: math.clientWidth, scrollWidth: math.scrollWidth,
+          font: getComputedStyle(math.querySelector(".katex")).fontSize,
+        })),
+      }));
+      assert(explanationBounds.scrollWidth <= explanationBounds.width + 1, "Explanation formulas must not widen the assistant");
+      report.checks.push({ name: "Streaming Markdown and math; headings, emphasis, lists, GFM table, HTML safety and contained formula layout", explanationBounds });
+      for (const [name, width, height] of [["laptop", 1024, 768], ["narrow", 390, 844]]) {
+        await page.setViewportSize({ width, height });
+        const layout = await page.locator(".assistant-explanation").evaluate((element) => {
+          const inline = [...element.querySelectorAll(".markdown-math:not(.markdown-math-display)")];
+          const long = [...element.querySelectorAll(".markdown-math-display")].at(-1);
+          return { width: element.clientWidth, scrollWidth: element.scrollWidth,
+            shortMathFits: inline.every((math) => math.scrollWidth <= math.clientWidth + 1),
+            longMathScrolls: long.scrollWidth > long.clientWidth + 1 };
+        });
+        assert(layout.scrollWidth <= layout.width + 1, `${name}: formulas stay inside the explanation`);
+        assert(layout.shortMathFits, `${name}: short variables have no spurious scrollbar`);
+        assert(layout.longMathScrolls, `${name}: long formula scrolls within its own area`);
+        await page.locator(".reader-assistant").screenshot({ path: path.join(output, `03-explanation-${name}.png`) });
+        report.checks.push({ name: `explanation-math-${name}`, width, height, layout });
+      }
+      await page.setViewportSize({ width: 1440, height: 920 });
 
       await page.getByRole("tab", { name: "翻译", exact: true }).click();
       await page.waitForSelector('.assistant-translation[aria-busy="true"]');

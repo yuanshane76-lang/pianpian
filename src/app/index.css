@@ -37,6 +37,12 @@
 .markdown-content th, .markdown-content td { padding: 7px 9px; border: 1px solid var(--line); }
 .markdown-content th { background: var(--surface-soft); text-align: left; }
 .markdown-content .markdown-link { color: var(--teal-dark); }
+.markdown-math { display: inline-flex; align-items: baseline; max-width: 100%; padding: 0.2em 0.3em; box-sizing: border-box; vertical-align: baseline; overflow-x: auto; overflow-y: hidden; }
+.markdown-math > .katex { flex: 0 0 auto; }
+.markdown-math .katex { font-size: 1.05em; white-space: nowrap; overflow-wrap: normal; }
+.markdown-math-display { display: block; width: 100%; box-sizing: border-box; overflow-x: auto; overflow-y: hidden; }
+.markdown-math .katex-display { margin: 0.8em 0; text-align: left; }
+.markdown-math .katex-display > .katex { text-align: left; }
 .assistant-insight > .markdown-content + h3 { margin-top: 18px; }
 .wordbook-button { display: inline-flex; align-items: center; flex-shrink: 0; gap: 7px; min-height: 36px; padding: 0 10px; color: var(--teal-dark); background: transparent; border: 1px solid var(--line); border-radius: 5px; font-size: 12px; }
 .wordbook-button:hover { background: var(--teal-soft); }

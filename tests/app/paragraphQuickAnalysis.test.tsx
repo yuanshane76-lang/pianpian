@@ -346,6 +346,23 @@ describe("paragraph quick analysis", () => {
     await act(async () => finishJobs(jobs));
   });
 
+  it("renders streamed and cached explanation formulas in the explanation tab", async () => {
+    const { container, blocks, jobs, stream } = await mount();
+    await doubleClick(blocks[0]);
+    const explain = jobs.find((job) => job.request.operation === "explain")!;
+    await act(async () => explain.emit("## 段落含义\n\n隐藏状态 $h_t$ 依赖 $h_{t"));
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="explain"]')!.click());
+    expect(container.querySelectorAll(".assistant-explanation .katex")).toHaveLength(1);
+    await act(async () => explain.emit("-1}$。"));
+    expect(container.querySelectorAll(".assistant-explanation .katex")).toHaveLength(2);
+    await act(async () => explain.finish("## 段落含义\n\n隐藏状态 $h_t$ 依赖 $h_{t-1}$。"));
+    await act(async () => finishJobs(jobs.filter((job) => job !== explain)));
+    await act(async () => { blocks[1].click(); blocks[0].click(); });
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="explain"]')!.click());
+    expect(container.querySelectorAll(".assistant-explanation .katex")).toHaveLength(2);
+    expect(stream).toHaveBeenCalledTimes(4);
+  });
+
   it("shows readable insight fields before the structured response is complete", async () => {
     const { container, blocks, jobs } = await mount();
     await act(async () => blocks[0].click());
