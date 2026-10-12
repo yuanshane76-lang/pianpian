@@ -346,46 +346,121 @@ textarea:focus-visible {
   padding: 18px 22px;
 }
 
-.settings-section + .settings-section {
-  margin-top: 25px;
-  padding-top: 23px;
-  border-top: 1px solid var(--line);
+.settings-service-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
 }
 
-.settings-section h3 {
-  margin: 0 0 13px;
-  font-size: 13px;
+.settings-service-tabs button {
+  display: grid;
+  gap: 4px;
+  min-height: 66px;
+  padding: 13px 15px;
+  color: var(--muted-strong);
+  text-align: left;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
 }
 
-.settings-optional {
-  margin-left: 8px;
+.settings-service-tabs button:hover {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+}
+
+.settings-service-tabs button.is-selected {
+  color: var(--teal-dark);
+  background: #f0faf8;
+  border-color: var(--teal);
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.1);
+}
+
+.settings-service-tabs strong {
+  font-size: 14px;
+}
+
+.settings-service-tabs span {
   color: var(--muted);
   font-size: 11px;
   font-weight: 400;
 }
 
-.settings-segments {
-  display: inline-flex;
-  max-width: 100%;
-  padding: 3px;
-  background: #eaf0ee;
+.settings-service-panel {
+  min-height: 420px;
+}
+
+.settings-panel-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 13px;
+}
+
+.settings-panel-heading h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.settings-panel-heading span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.settings-panel-status {
+  flex-shrink: 0;
+  color: var(--teal-dark) !important;
+  font-size: 12px !important;
+}
+
+.settings-provider-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0 10px;
+}
+
+.settings-provider-option {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 13px 14px;
+  color: var(--muted-strong);
+  text-align: left;
+  background: #fff;
+  border: 1px solid var(--line);
   border-radius: 7px;
 }
 
-.settings-segments button {
-  min-height: 33px;
-  padding: 0 12px;
-  color: var(--muted-strong);
-  background: transparent;
-  border: 0;
-  border-radius: 5px;
-  font-size: 12px;
+.settings-provider-option:hover {
+  border-color: var(--teal);
 }
 
-.settings-segments button.is-selected {
+.settings-provider-option.is-selected {
   color: var(--teal-dark);
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(21, 45, 45, 0.12);
+  border-color: var(--teal);
+  background: #f4fbfa;
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.1);
+}
+
+.settings-provider-option-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settings-provider-option-top strong {
+  font-size: 13px;
+}
+
+.settings-provider-option-top span,
+.settings-provider-option small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
 }
 
 .settings-description,
@@ -1868,15 +1943,9 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
     padding: 15px;
   }
 
-  .settings-segments {
-    display: grid;
-    width: 100%;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .settings-segments button {
-    padding: 0 4px;
-    font-size: 11px;
+  .settings-service-tabs,
+  .settings-provider-options {
+    grid-template-columns: 1fr;
   }
 
   .workspace-shell {
