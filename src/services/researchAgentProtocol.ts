@@ -57,8 +57,14 @@ export interface ResearchAgentApproval {
   paper: ResearchAgentPaperSummary;
 }
 
+export interface ResearchAgentSkill {
+  name: string;
+  title: string;
+  prompt: string;
+}
+
 export type ResearchAgentEvent =
-  | { type: "session_started"; sessionId: string }
+  | { type: "session_started"; sessionId: string; skills?: ResearchAgentSkill[] }
   | { type: "message_start"; message: ResearchAgentMessage }
   | { type: "message_delta"; messageId: string; delta: string }
   | { type: "message_end"; message: ResearchAgentMessage }
@@ -199,6 +205,16 @@ function normalizeMessage(value: unknown): ResearchAgentMessage {
   };
 }
 
+export function normalizeResearchAgentSkills(value: unknown): ResearchAgentSkill[] {
+  if (!Array.isArray(value) || value.length > 20) throw new Error("研究技能列表无效");
+  return value.map((entry) => {
+    const source = record(entry, "研究技能无效");
+    const name = requiredText(source.name, "技能名称", 64);
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) throw new Error("技能名称无效");
+    return { name, title: requiredText(source.title, "技能标题", 100), prompt: requiredText(source.prompt, "技能问题", 2000) };
+  });
+}
+
 export function normalizeResearchAgentEvent(value: unknown): ResearchAgentEvent {
   const source = record(value, "Agent 事件无效");
   const type = requiredText(source.type, "Agent 事件类型", 100);
@@ -208,6 +224,7 @@ export function normalizeResearchAgentEvent(value: unknown): ResearchAgentEvent 
       return {
         type,
         sessionId: requiredText(source.sessionId, "会话 ID", 200),
+        ...(source.skills === undefined ? {} : { skills: normalizeResearchAgentSkills(source.skills) }),
       };
     }
     case "message_start":

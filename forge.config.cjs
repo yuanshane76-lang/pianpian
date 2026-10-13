@@ -1,4 +1,6 @@
 const lockfile = require("./package-lock.json");
+const skillManifest = require("./skills/research/manifest.json");
+const skillFiles = ["skills/research/manifest.json", ...skillManifest.skills.map((skill) => `skills/research/${skill.name}/SKILL.md`)];
 const runtimePackages = Object.entries(lockfile.packages || {}).filter(([root, item]) => root.startsWith("node_modules/") && item.dev !== true)
   .map(([root]) => root);
 
@@ -8,13 +10,16 @@ function ignorePackageFile(file) {
 
   const parts = relative.split("/");
   if (relative === "package.json") return false;
+  if (parts[0] === "skills") {
+    return !skillFiles.some((file) => file === relative || file.startsWith(`${relative}/`));
+  }
   if (parts[0] === "node_modules") {
     if (parts.some((part) => [".cache", ".vite", ".bin", ".git"].includes(part))) return true;
     return !runtimePackages.some((root) => relative === root || relative.startsWith(`${root}/`) || root.startsWith(`${relative}/`));
   }
   if (parts[0] === "electron") {
     if (parts.length === 1) return false;
-    return parts.length !== 2 || !["main.cjs", "preload.cjs", "resource.cjs", "secret-store.cjs", "settings.cjs", "ipc-security.cjs", "ai.cjs", "ai-stream-ipc.cjs", "document-store.cjs", "document-tasks.cjs", "mineru.cjs", "research-agent-runtime.cjs", "research-agent-tools.cjs", "research-agent-ipc.cjs", "literature-search.cjs", "pi-agent.cjs"].includes(parts[1]);
+    return parts.length !== 2 || !["main.cjs", "preload.cjs", "resource.cjs", "secret-store.cjs", "settings.cjs", "ipc-security.cjs", "ai.cjs", "ai-stream-ipc.cjs", "document-store.cjs", "document-tasks.cjs", "mineru.cjs", "research-agent-runtime.cjs", "research-agent-tools.cjs", "research-agent-ipc.cjs", "literature-search.cjs", "pi-agent.cjs", "research-skills.cjs"].includes(parts[1]);
   }
   if (parts[0] === "dist") {
     if (parts.length === 1 || relative === "dist/index.html") return false;

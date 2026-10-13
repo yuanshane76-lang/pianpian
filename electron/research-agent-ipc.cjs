@@ -1,10 +1,15 @@
 const { assertAppSender } = require("./ipc-security.cjs");
 const { createResearchAgentRuntime } = require("./research-agent-runtime.cjs");
+const { listBundledResearchSkills } = require("./research-skills.cjs");
 
 const EVENT_CHANNEL = "zhiyan:agent:event";
 
 function registerResearchAgentHandlers({ ipcMain, isDev, readSettings, createRuntime = createResearchAgentRuntime, runtimeStore = new Map() }) {
   const secure = (event) => assertAppSender(event, isDev);
+  ipcMain.handle("zhiyan:agent:skills", (event) => {
+    secure(event);
+    return listBundledResearchSkills();
+  });
   const getRuntime = (event) => {
     const id = event.sender.id;
     const runtime = runtimeStore.get(id);

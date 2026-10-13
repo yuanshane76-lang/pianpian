@@ -28,7 +28,7 @@ import { loadAnalysisCache, saveAnalysisCache } from "../services/analysisCache"
 import { preparePdfFile, loadPapers, savePapers } from "../services/library";
 import { deleteOriginalPdf } from "../services/originalPdf";
 import { getAnalysisAvailability, getTranslationTarget, isVisualBlock } from "../domain/readingFlow";
-import { canOpenPaper, getPaperPipelineState, hasCompletePageBounds, type PaperPipelineState } from "../domain/pipeline";
+import { canOpenPaper, hasCompletePageBounds, type PaperPipelineState } from "../domain/pipeline";
 import { parseChartReading, parseParagraphInsight, parseReadingGuide } from "../domain/learning";
 import { loadChartImage } from "../services/chartImage";
 import { extractAcademicVocabulary, type AcademicTerm } from "../domain/vocabulary";
@@ -1065,7 +1065,6 @@ export default function App() {
   if (view === "reader" && selectedPaper && canOpenPaper(selectedPaper, pipelineStates[selectedPaper.id])) {
     const currentParagraphAnalysis = paragraphAnalysis?.paperId === selectedPaper.id &&
       paragraphAnalysis.signature === targetSignature ? paragraphAnalysis : null;
-    const pipeline = getPaperPipelineState(selectedPaper, pipelineStates[selectedPaper.id]);
     return (
       <>
         {storageWarning}
@@ -1110,14 +1109,11 @@ export default function App() {
           onOpenSettings={() => setSettingsOpen(true)}
           actionError={actionError}
           processingStatus={processing[selectedPaper.id] ?? ""}
-          onEnhance={() => void handleEnhance()}
-          onRetryBasic={() => void handleEnhance(selectedPaper)}
           onReimport={(file) => void handleImport(file)}
           onPosition={(readingPosition) => setPapers((current) => current.map((paper) => paper.id === selectedPaper.id ? { ...paper, readingPosition } : paper))}
           aiAvailable={availability.available}
           serviceLabel={availability.label}
           serviceModel={availability.model}
-          mineruConfigured={serviceSettings.mineru.configured}
           pendingAction={pendingAction}
           pendingParagraphActions={currentParagraphAnalysis?.pending}
           paragraphAnalysisRequestId={currentParagraphAnalysis?.requestId}
@@ -1125,7 +1121,6 @@ export default function App() {
           streamingOutput={streamingOutput?.paperId === selectedPaper.id
             ? { operation: streamingOutput.operation, text: streamingOutput.text }
             : null}
-          pipeline={pipeline}
           insight={paragraphInsight}
           onInsight={() => void withAnalysisError(() => handleLearning("insight"))}
           guide={readingGuide}

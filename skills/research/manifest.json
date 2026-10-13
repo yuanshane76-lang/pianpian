@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "skills": [
+    {
+      "name": "paper-deep-reading",
+      "title": "论文精读",
+      "prompt": "精读当前论文：说明研究问题、核心方法、实验依据和局限，引用相关页码，并区分作者结论与分析推断。"
+    },
+    {
+      "name": "literature-search-review",
+      "title": "文献检索与筛选",
+      "prompt": "基于当前论文或我的研究主题，设计检索关键词，查找并筛选相关文献，说明每篇的相关性、证据来源和后续阅读建议。"
+    },
+    {
+      "name": "literature-comparison-notes",
+      "title": "文献对比与笔记",
+      "prompt": "对比当前论文和本轮已取得的相关文献资料，区分全文、摘要和元数据证据，整理对比表和中文阅读笔记草稿。"
+    }
+  ]
+}

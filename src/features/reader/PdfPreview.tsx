@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { PDFPageProxy } from "pdfjs-dist";
 import { openPdf } from "../../services/document";
 import { readOriginalPdf } from "../../services/originalPdf";
+import { createPdfPageLoader } from "../../services/pdfPageLoader";
 import type { DocumentBlock } from "../../domain/documentBlocks";
 import { getPageBlockRegionId, getPageBlocks, hasPageBounds } from "../../domain/pdfLayout";
 import { buildPdfPageLayout, getPdfViewportPages, PDF_SCROLL_PADDING, type PdfPageLayout } from "../../domain/pdfScroll";
@@ -25,7 +26,17 @@ interface Props {
   focusTarget?: { id: string; requestId: number; pageNumber?: number; regionId?: string };
   onVisibleBlock?: (block: DocumentBlock, pageNumber?: number, regionId?: string) => void;
 }
-const EMPTY_PAGES: PDFPageProxy[] = [];
+type PdfDocument = Awaited<ReturnType<typeof openPdf>>;
+interface PdfSource {
+  id: string;
+  generation: number;
+  document: PdfDocument;
+  pages: Array<PDFPageProxy | undefined>;
+  sizes: Array<{ width: number; height: number }>;
+  pageCount: number;
+  loader: ReturnType<typeof createPdfPageLoader>;
+}
+const EMPTY_PAGES: Array<PDFPageProxy | undefined> = [];
 
 export function PdfPreview(props: Props) {
   const { originalId, page, onPage, onReimport, blocks, activeBlockId, onSelect, onSelectText, navigationTarget, focusTarget } = props;
@@ -38,8 +49,10 @@ export function PdfPreview(props: Props) {
   const reportedPage = useRef(page);
   const handledNavigation = useRef<number>();
   const handledFocus = useRef<number>();
-  const pendingFocus = useRef<number>();
-  const [source, setSource] = useState<{ id: string; pages: PDFPageProxy[] } | null>(null);
+  const sourceRef = useRef<PdfSource | null>(null);
+  const sourceGeneration = useRef(0);
+  const [source, setSource] = useState<PdfSource | null>(null);
+  sourceRef.current = source;
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const [zoom, setZoom] = useState(1.1);
@@ -48,13 +61,23 @@ export function PdfPreview(props: Props) {
   const [renderRange, setRenderRange] = useState({ start: 1, end: 3 });
   const [readyPages, setReadyPages] = useState<Record<number, boolean>>({});
   const pages = source && source.id === originalId ? source.pages : EMPTY_PAGES;
-  const sizes = useMemo(() => pages.map((pdfPage) => pdfPage.getViewport({ scale: 1 })), [pages]);
+  const sizes = source && source.id === originalId ? source.sizes : [];
   const layout = useMemo(() => buildPdfPageLayout(sizes, zoom, availableWidth, fitWidth), [sizes, zoom, availableWidth, fitWidth]);
   // Capture before React commits smaller slots and the browser clamps scrollTop.
   const scrollTopBeforeLayout = scrollRef.current?.scrollTop ?? 0;
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
-  const pageCount = pages.length;
+  const pageCount = source && source.id === originalId ? source.pageCount : 0;
+  // ReaderView assigns both kinds of navigation from one increasing sequence.
+  const focusIsLatest = Boolean(focusTarget && (!navigationTarget || focusTarget.requestId >= navigationTarget.requestId));
+  const navigationIsLatest = Boolean(navigationTarget && (!focusTarget || navigationTarget.requestId > focusTarget.requestId));
+  const focusBlock = focusTarget ? blocks.find((block) => block.id === focusTarget.id) : undefined;
+  const pendingFocusPage = focusIsLatest && focusTarget && focusBlock && hasPageBounds(focusBlock) && handledFocus.current !== focusTarget.requestId
+    ? focusTarget.pageNumber ?? focusBlock.pageNumber
+    : undefined;
+  const pendingNavigationPage = navigationIsLatest && navigationTarget && handledNavigation.current !== navigationTarget.requestId
+    ? Math.min(Math.max(navigationTarget.page, 1), pageCount || 1) : undefined;
+  const pendingPage = pendingFocusPage ?? pendingNavigationPage;
   const renderedZoom = layout[Math.min(Math.max(page - 1, 0), layout.length - 1)]?.scale ?? zoom;
   const canonicalBlocks = useMemo(() => new Map(blocks.map((block) => [block.id, block])), [blocks]);
   const pageBlocks = useMemo(() => {
@@ -131,30 +154,59 @@ export function PdfPreview(props: Props) {
 
   useEffect(() => {
     let active = true;
-    let document: Awaited<ReturnType<typeof openPdf>> | undefined;
+    const generation = sourceGeneration.current + 1;
+    sourceGeneration.current = generation;
+    let document: PdfDocument | undefined;
+    let loader: ReturnType<typeof createPdfPageLoader> | undefined;
     setSource(null); setReadyPages({}); setError(""); setBusy(true);
     loadedId.current = undefined;
     previousLayout.current = [];
     handledNavigation.current = undefined;
     handledFocus.current = undefined;
-    pendingFocus.current = undefined;
     clearTimeout(scrollTimer.current);
     if (!originalId) { setBusy(false); return; }
     void (async () => {
       document = await openPdf(await readOriginalPdf(originalId));
       if (!active) { await document.destroy(); return; }
-      const pdfPages: PDFPageProxy[] = new Array(document.numPages);
-      let next = 1;
-      await Promise.all(Array.from({ length: Math.min(4, document.numPages) }, async () => {
-        while (active && next <= document!.numPages) {
-          const number = next++;
-          pdfPages[number - 1] = await document!.getPage(number);
-        }
-      }));
-      if (active) { setSource({ id: originalId, pages: pdfPages }); setBusy(false); }
+      const firstPage = await document.getPage(1);
+      if (!active) { await document.destroy(); return; }
+      const viewport = firstPage.getViewport({ scale: 1 });
+      loader = createPdfPageLoader(document, (number, pdfPage) => {
+        setSource((previous) => {
+          if (!previous || previous.id !== originalId || previous.generation !== generation) return previous;
+          const pages = [...previous.pages];
+          const sizes = [...previous.sizes];
+          pages[number - 1] = pdfPage;
+          const size = pdfPage.getViewport({ scale: 1 });
+          sizes[number - 1] = { width: size.width, height: size.height };
+          return { ...previous, pages, sizes };
+        });
+      }, (cause) => {
+        if (active) setError(String(cause instanceof Error ? cause.message : cause));
+      });
+      setSource({
+        id: originalId,
+        generation,
+        document,
+        pages: [firstPage, ...new Array(document.numPages - 1)],
+        sizes: Array.from({ length: document.numPages }, () => ({ width: viewport.width, height: viewport.height })),
+        pageCount: document.numPages,
+        loader,
+      });
+      setBusy(false);
     })().catch((cause) => { if (active) { setError(String(cause?.message ?? cause)); setBusy(false); } });
-    return () => { active = false; clearTimeout(scrollTimer.current); void document?.destroy(); };
+    return () => { active = false; loader?.dispose(); clearTimeout(scrollTimer.current); void document?.destroy(); };
   }, [originalId]);
+
+  useEffect(() => {
+    const current = sourceRef.current;
+    if (!current || current.id !== originalId) return;
+    const targets = [pendingPage ?? Math.min(Math.max(page, 1), current.pageCount)];
+    for (let number = renderRange.start; number <= renderRange.end; number += 1) {
+      if (number >= 1 && number <= current.pageCount) targets.push(number);
+    }
+    current.loader.request(targets);
+  }, [originalId, page, pendingPage, renderRange.start, renderRange.end, source?.generation]);
 
   useLayoutEffect(() => {
     const scroll = scrollRef.current;
@@ -178,17 +230,17 @@ export function PdfPreview(props: Props) {
   }, [layout, originalId]);
 
   useLayoutEffect(() => {
-    if (!navigationTarget || !layout.length || handledNavigation.current === navigationTarget.requestId) return;
+    if (!navigationIsLatest || !navigationTarget || !layout.length || handledNavigation.current === navigationTarget.requestId) return;
     const destination = layout[Math.min(Math.max(navigationTarget.page - 1, 0), layout.length - 1)];
     if (!scrollRef.current || !destination) return;
-    handledNavigation.current = navigationTarget.requestId;
     scrollRef.current.scrollTop = PDF_SCROLL_PADDING + destination.top;
     reportedPage.current = destination.pageNumber;
     updateViewportRef.current(false);
-  }, [navigationTarget, layout]);
+    if (readyPages[destination.pageNumber]) handledNavigation.current = navigationTarget.requestId;
+  }, [navigationIsLatest, navigationTarget, layout, readyPages]);
 
   useLayoutEffect(() => {
-    if (!focusTarget || !layout.length || handledFocus.current === focusTarget.requestId) return;
+    if (!focusIsLatest || !focusTarget || !layout.length || handledFocus.current === focusTarget.requestId) return;
     const canonical = blocks.find((item) => item.id === focusTarget.id);
     if (!canonical || !hasPageBounds(canonical)) return;
     const regions = getPageBlocks([canonical], focusTarget.pageNumber ?? propsRef.current.page);
@@ -196,20 +248,16 @@ export function PdfPreview(props: Props) {
     const target = layout[block.pageNumber - 1];
     const scroll = scrollRef.current;
     if (!target || !scroll) return;
-    if (pendingFocus.current !== focusTarget.requestId) {
-      pendingFocus.current = focusTarget.requestId;
-      scroll.scrollTop = Math.max(0, PDF_SCROLL_PADDING + target.top + (block.bbox![1] + block.bbox![3]) / 2 * target.height - (scroll.clientHeight || 800) / 2);
-      updateViewportRef.current(false);
-    }
+    scroll.scrollTop = Math.max(0, PDF_SCROLL_PADDING + target.top + (block.bbox![1] + block.bbox![3]) / 2 * target.height - (scroll.clientHeight || 800) / 2);
+    updateViewportRef.current(false);
     if (!readyPages[block.pageNumber]) return;
     const element = [...scroll.querySelectorAll<HTMLElement>(`.pdf-page-stage[data-page-number="${block.pageNumber}"] [data-block-id]`)]
       .find((region) => region.id === `pdf-block-${getPageBlockRegionId(block)}`);
     if (!element) return;
     handledFocus.current = focusTarget.requestId;
-    pendingFocus.current = undefined;
     element.scrollIntoView?.({ behavior: "auto", block: "center" });
     updateViewportRef.current(false);
-  }, [focusTarget, layout, blocks, readyPages]);
+  }, [focusIsLatest, focusTarget, layout, blocks, readyPages]);
 
   if (!originalId) return <div className="pdf-missing">
     <h3>这篇旧记录没有保存原始 PDF</h3>
@@ -242,7 +290,7 @@ export function PdfPreview(props: Props) {
       <div className="pdf-page-stack">
         {layout.map((item) => <div className="pdf-page-slot" key={`${originalId}:${item.pageNumber}`} data-page-number={item.pageNumber}
           style={{ width: item.width, height: item.height }}>
-          {item.pageNumber >= renderRange.start && item.pageNumber <= renderRange.end
+          {item.pageNumber === pendingPage || (item.pageNumber >= renderRange.start && item.pageNumber <= renderRange.end)
             ? <PdfPageCanvas pdfPage={pages[item.pageNumber - 1]} layout={item} blocks={pageBlocks.get(item.pageNumber) ?? []}
               activeBlockId={activeBlockId} onSelect={(block) => {
                 const canonical = canonicalBlocks.get(block.id)!;

@@ -5,14 +5,17 @@ import {
   abortResearchAgent,
   approveResearchAgent,
   createResearchAgentContext,
+  getResearchAgentSkills,
   promptResearchAgent,
   startResearchAgent,
   subscribeToResearchAgent,
   updateResearchAgentContext,
 } from "../../services/researchAgent";
-import type { ResearchAgentEvent, ResearchAgentMessage, ResearchAgentPaperSummary, ResearchAgentToolCall } from "../../services/researchAgentProtocol";
+import type { ResearchAgentEvent, ResearchAgentMessage, ResearchAgentPaperSummary, ResearchAgentSkill, ResearchAgentToolCall } from "../../services/researchAgentProtocol";
 import { getDesktopBridge } from "../../platform/electron";
 import { MarkdownContent } from "./MarkdownContent";
+import { useConversationScroll } from "./useConversationScroll";
+import "./ResearchAssistant.css";
 
 interface ResearchDocument {
   title: string;
@@ -35,6 +38,7 @@ type TimelineItem =
   | { type: "tool"; tool: ResearchAgentToolCall };
 
 const toolLabels: Record<string, string> = {
+  read_research_skill: "读取预置研究技能",
   read_current_paper: "读取当前论文",
   search_library: "搜索本地文献库",
   search_literature: "检索公开文献",
@@ -128,7 +132,8 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
   const [approvalByToolId, setApprovalByToolId] = useState<Record<string, { approvalId: string; paper: ResearchAgentPaperSummary }>>({});
   const [streaming, setStreaming] = useState<Record<string, string>>({});
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [skills, setSkills] = useState<ResearchAgentSkill[]>([]);
+  const { scrollRef, contentRef, onScroll, followLatest } = useConversationScroll([timeline, streaming, error]);
   const lastQuestion = useRef("");
   const paperContext = useMemo(() => createResearchAgentContext(paper, library), [
     paper.id, paper.title, paper.authors, paper.year, paper.blockData,
@@ -154,8 +159,15 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
     setSavedNotice(null);
     setApprovalByToolId({});
     setStreaming({});
+    followLatest();
+    void getResearchAgentSkills().then((catalogue) => {
+      if (!disposed) setSkills(catalogue);
+    }).catch(() => {
+      if (!disposed) setError("预置研究技能无法加载，请重新打开研究助手");
+    });
     const unsubscribe = subscribeToResearchAgent((event: ResearchAgentEvent) => {
       if (disposed) return;
+      if (event.type === "session_started" && event.skills) setSkills(event.skills);
       if (event.type === "message_start") setTimeline((current) => updateTimeline(current, { type: "message", message: event.message }));
       if (event.type === "message_delta") {
         setStreaming((current) => ({ ...current, [event.messageId]: `${current[event.messageId] ?? ""}${event.delta}` }));
@@ -204,7 +216,7 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
           ? { ...item, tool: { ...item.tool, status: "rejected", error: "执行已结束" } } : item));
       }
     });
-    void startResearchAgent(paperContext).then(() => {
+    if (available) void startResearchAgent(paperContext).then(() => {
       if (!disposed) {
         startedRef.current = true;
         setReady(true);
@@ -223,7 +235,7 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
       unsubscribe();
       void abortResearchAgent().catch(() => undefined);
     };
-  }, [paper.id, paper.blockData, configurationRevision]);
+  }, [paper.id, paper.blockData, configurationRevision, available]);
 
   useEffect(() => {
     if (!startedRef.current) return;
@@ -232,17 +244,13 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
     });
   }, [paperContext]);
 
-  useEffect(() => {
-    const element = scrollRef.current;
-    if (element && typeof element.scrollTo === "function") element.scrollTo({ top: element.scrollHeight });
-  }, [timeline, streaming, error]);
-
   async function submit(retryQuestion?: string) {
     const value = (retryQuestion ?? question).trim();
     if (!value || busy || !ready || !available) return;
     setQuestion("");
     setError(null);
     setBusy(true);
+    followLatest();
     lastQuestion.current = value;
     try {
       await promptResearchAgent(value);
@@ -330,7 +338,10 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
         <div className="research-agent-title"><span className="research-agent-mark"><Wrench size={15} /></span><div><strong>研究 Agent</strong><span>Pi · 受控工具模式</span></div></div>
         <span className={`research-agent-state ${busy ? "is-busy" : ""}`}><span className="status-dot" />{busy ? "工作中" : ready ? "就绪" : available ? "连接中" : "待配置"}</span>
       </div>
-      <div ref={scrollRef} className="research-agent-scroll">
+      {skills.length ? <details className="research-skills"><summary>预置研究技能 · {skills.length} 项</summary><div className="research-skills-list">{skills.map((skill) =>
+        <button key={skill.name} type="button" onClick={() => setQuestion(skill.prompt)}>{skill.title}</button>)}</div></details> : null}
+      <div ref={scrollRef} onScroll={onScroll} className="research-agent-scroll">
+        <div ref={contentRef} className="research-agent-content">
         {!hasConversation ? <div className="research-agent-empty"><div className="research-agent-empty-icon"><FileText size={22} /></div><strong>从这篇论文开始研究</strong><p>你可以让我读懂论文、检索相关文献，或者生成一份阅读笔记。</p><div className="research-agent-prompts"><button type="button" onClick={() => setQuestion("概括这篇论文的研究问题、方法和主要结论")}>概括论文</button><button type="button" onClick={() => setQuestion("查找与这篇论文相关的文献")}>查找文献</button><button type="button" onClick={() => setQuestion("生成一份阅读笔记文档")}>生成笔记</button></div></div> : null}
         {timeline.map((item) => {
           if (item.type === "tool") {
@@ -342,6 +353,7 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
           return <article className={`research-message is-${item.message.role}`} key={`message-${item.message.id}`}><div className="research-message-label">{item.message.role === "user" ? "你" : "研究 Agent"}</div><div className="research-message-content">{content ? <MarkdownContent text={content} /> : <span className="research-placeholder">正在组织回答…</span>}</div></article>;
         })}
         {error ? <div className="research-agent-error" role="alert"><span>{error}</span>{lastQuestion.current ? <button type="button" disabled={busy} onClick={() => void submit(lastQuestion.current)}><RotateCcw size={14} />重试问题</button> : null}</div> : null}
+        </div>
       </div>
       <div className="research-agent-composer">
         {savedNotice ? <div className="research-save-notice" role="status">{savedNotice}</div> : null}

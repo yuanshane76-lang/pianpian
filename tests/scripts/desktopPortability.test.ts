@@ -8,7 +8,13 @@ describe("desktop verification portability", () => {
   it.each(scripts)("uses project-owned runtime dependencies: %s", (file) => {
     const source = readFileSync(path.resolve("scripts", file), "utf8");
     expect(source).toContain('require("playwright")');
-    expect(source).toContain('executablePath: require("electron")');
+    if (file === "packaged-research-skills-e2e.cjs") {
+      expect(source).toContain('const executable = path.resolve(process.argv[2]');
+      expect(source).toContain('path.basename(executable) === "Zhiyan.exe"');
+      expect(source).toContain("executablePath: executable");
+    } else {
+      expect(source).toContain('executablePath: require("electron")');
+    }
     expect(source).not.toMatch(/require\(["'][A-Z]:[\\/]/i);
   });
 
