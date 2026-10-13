@@ -292,7 +292,9 @@ export default function App() {
     const entry = analysisCache.get(insightKey);
     try { return entry ? parseParagraphInsight(entry.value) : null; } catch { return null; }
   }, [analysisCache, insightKey]);
-  const vocabulary = useMemo(() => extractAcademicVocabulary(vocabularyBlock ? [vocabularyBlock] : [], readingGuide?.terms), [vocabularyBlock, readingGuide]);
+  const vocabulary = useMemo(() => readingGuide
+    ? extractAcademicVocabulary(vocabularyBlock ? [vocabularyBlock] : [], readingGuide.terms).filter((term) => term.source === "ai")
+    : [], [vocabularyBlock, readingGuide]);
 
   function updateWordbook(entries: WordbookEntry[]) {
     if (wordbookRef.current.error) return;

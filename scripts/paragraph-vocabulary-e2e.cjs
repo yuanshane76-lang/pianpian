@@ -167,7 +167,7 @@ if (process.versions.electron) {
       await page.locator("#pdf-block-fixture-a").focus();
       await page.keyboard.press("Enter");
       await page.getByRole("tab", { name: /学术词汇/ }).click();
-      assert(await page.locator(".vocabulary-panel").getByText("attention", { exact: true }).isVisible());
+      assert.equal(await page.locator(".vocabulary-card").count(), 0, "Vocabulary remains empty before AI selection");
       assert.equal(await page.locator(".vocabulary-panel").getByText("hypothesis", { exact: true }).count(), 0);
       assert.equal(await electron.evaluate(() => globalThis.vocabularyE2e.requests.length), 0);
       await page.getByRole("button", { name: "AI 精选本段词汇", exact: true }).click();

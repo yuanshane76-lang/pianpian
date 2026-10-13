@@ -1,6 +1,7 @@
-import { Check, ChevronDown, FileText, LoaderCircle, RotateCcw, Send, Square, Wrench, X } from "lucide-react";
+import { BookOpen, Check, ChevronDown, FileText, LoaderCircle, RotateCcw, Search, Send, Sparkles, Square, Wrench, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { PaperRecord } from "../../domain/library";
+import { currentPaperCitations } from "../../domain/paperCitations";
 import {
   abortResearchAgent,
   approveResearchAgent,
@@ -74,12 +75,21 @@ function ToolCard({ tool, approvalPaper, onApprove, onReject, onSaveDocument }: 
   const document = isRecord(output?.document) && typeof output.document.markdown === "string"
     ? output.document as ResearchDocument
     : undefined;
+  const Icon = tool.name === "read_current_paper" ? BookOpen : tool.name.includes("search") ? Search
+    : tool.name === "read_research_skill" ? Sparkles : tool.name === "create_document" ? FileText : Wrench;
+  const summary = tool.name === "read_current_paper" ? output?.paper?.blocks
+    ? `已读取 ${output.paper.blocks.length} 个原文块${tool.input.query ? ` · ${tool.input.query}` : ""}` : tool.input.page ? `第 ${tool.input.page} 页` : "读取论文原文"
+    : tool.name === "read_research_skill" ? output?.title ?? "选择研究流程"
+    : tool.name.includes("search") ? `${tool.input.query ?? ""}${papers.length ? ` · ${papers.length} 篇结果` : ""}`
+    : document?.title ?? tool.input.title ?? "";
 
   return (
     <article className={`research-tool-card is-${tool.status}`} aria-label={`工具：${tool.label}`}>
       <button className="research-tool-heading" type="button" onClick={() => setExpanded((current) => !current)} aria-expanded={expanded}>
-        <span className="research-tool-icon">{tool.status === "running" ? <LoaderCircle className="spin" size={15} /> : <Wrench size={15} />}</span>
-        <span className="research-tool-name">{toolLabels[tool.name] ?? tool.label}</span>
+        <span className="research-tool-icon">{tool.status === "running" ? <LoaderCircle className="spin" size={14} />
+          : tool.status === "completed" ? <Check size={14} /> : tool.status === "failed" ? <X size={14} /> : <Icon size={14} />}</span>
+        <span className="research-tool-copy"><span className="research-tool-name">{toolLabels[tool.name] ?? tool.label}</span>
+          {summary ? <span className="research-tool-summary">{String(summary)}</span> : null}</span>
         <span className="research-tool-status">{toolStatus(tool.status)}</span>
         <ChevronDown size={14} className={expanded ? "is-open" : ""} />
       </button>
@@ -96,7 +106,7 @@ function ToolCard({ tool, approvalPaper, onApprove, onReject, onSaveDocument }: 
           </div>
         </div>
       ) : null}
-      {tool.status === "completed" && papers.length ? (
+      {expanded && tool.status === "completed" && papers.length ? (
         <div className="research-result-list">
           {papers.slice(0, 5).map((paper: any, index: number) => (
             <div className="research-result-item" key={`${paper.doi ?? paper.title}-${index}`}>
@@ -112,7 +122,10 @@ function ToolCard({ tool, approvalPaper, onApprove, onReject, onSaveDocument }: 
           <button type="button" className="secondary-button compact" aria-label="保存 Markdown 文档" onClick={() => onSaveDocument?.(document)}>保存草稿</button>
         </div>
       ) : null}
-      {expanded ? <pre className="research-tool-output">{JSON.stringify(tool.output ?? tool.input, null, 2)}</pre> : null}
+      {expanded ? <div className="research-tool-details">
+        <span><Icon size={13} />{toolLabels[tool.name] ?? tool.label} · {toolStatus(tool.status)}</span>
+        <details><summary>查看调用详情</summary><pre className="research-tool-output">{JSON.stringify(tool.output ?? tool.input, null, 2)}</pre></details>
+      </div> : null}
     </article>
   );
 }
@@ -207,6 +220,10 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
         setApprovalByToolId({});
         setError(event.message);
         setBusy(false);
+        if (!event.recoverable) {
+          startedRef.current = false;
+          setReady(false);
+        }
       }
       if (event.type === "agent_end") {
         activeApprovals.current = {};
@@ -244,9 +261,23 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
     });
   }, [paperContext]);
 
+  async function reconnect() {
+    try {
+      await startResearchAgent(latestContext.current);
+      startedRef.current = true;
+      setReady(true);
+      await updateResearchAgentContext(latestContext.current);
+      return true;
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "研究助手重新连接失败，请重试");
+      return false;
+    }
+  }
+
   async function submit(retryQuestion?: string) {
     const value = (retryQuestion ?? question).trim();
-    if (!value || busy || !ready || !available) return;
+    if (!value || busy || !available) return;
+    if (!ready && !(await reconnect())) return;
     setQuestion("");
     setError(null);
     setBusy(true);
@@ -332,10 +363,16 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
   }
 
   const hasConversation = timeline.length > 0;
+  const readSources = useMemo(() => currentPaperCitations(paper, timeline.flatMap((item) => {
+    if (item.type !== "tool" || item.tool.name !== "read_current_paper" || item.tool.status !== "completed") return [];
+    const output = isRecord(item.tool.output) ? item.tool.output : undefined;
+    if (output?.paper?.id !== paper.id || !Array.isArray(output.paper.blocks)) return [];
+    return output.paper.blocks.map((block: { id: string }) => ({ paperId: paper.id, blockId: block.id }));
+  })), [timeline, paper.id, paper.blockData]);
   return (
     <section className="research-assistant-panel" aria-label="研究 Agent">
       <div className="research-agent-banner">
-        <div className="research-agent-title"><span className="research-agent-mark"><Wrench size={15} /></span><div><strong>研究 Agent</strong><span>Pi · 受控工具模式</span></div></div>
+        <div className="research-agent-title"><span className="research-agent-mark"><Sparkles size={15} /></span><div><strong>研究助手</strong><span>阅读原文 · 检索文献 · 整理笔记</span></div></div>
         <span className={`research-agent-state ${busy ? "is-busy" : ""}`}><span className="status-dot" />{busy ? "工作中" : ready ? "就绪" : available ? "连接中" : "待配置"}</span>
       </div>
       {skills.length ? <details className="research-skills"><summary>预置研究技能 · {skills.length} 项</summary><div className="research-skills-list">{skills.map((skill) =>
@@ -347,10 +384,21 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
           if (item.type === "tool") {
             const approval = approvalByToolId[item.tool.id];
             const output = isRecord(item.tool.output) ? item.tool.output : undefined;
-            return <div key={`tool-${item.tool.id}`}><ToolCard tool={item.tool} approvalPaper={approval?.paper} onApprove={() => void approve(item.tool.id, true)} onReject={() => void approve(item.tool.id, false)} onSaveDocument={(draft) => void saveDocument(draft)} />{Array.isArray(output?.citations) ? <div className="research-citations">{output.citations.slice(0, 4).map((citation: any) => <button key={citation.blockId} type="button" onClick={() => onJump(citation.blockId)}>{citation.label}</button>)}</div> : null}</div>;
+            const references = currentPaperCitations(paper, output?.citations);
+            return <div key={`tool-${item.tool.id}`}><ToolCard tool={item.tool} approvalPaper={approval?.paper} onApprove={() => void approve(item.tool.id, true)} onReject={() => void approve(item.tool.id, false)} onSaveDocument={(draft) => void saveDocument(draft)} />{references.length ? <div className="research-citations">{references.slice(0, 4).map((citation) => <button key={citation.blockId} type="button" title={citation.excerpt} onClick={() => onJump(citation.blockId)}>{citation.label}</button>)}</div> : null}</div>;
           }
           const content = streaming[item.message.id] ?? item.message.content;
-          return <article className={`research-message is-${item.message.role}`} key={`message-${item.message.id}`}><div className="research-message-label">{item.message.role === "user" ? "你" : "研究 Agent"}</div><div className="research-message-content">{content ? <MarkdownContent text={content} /> : <span className="research-placeholder">正在组织回答…</span>}</div></article>;
+          const references = item.message.role === "assistant" ? currentPaperCitations(paper, item.message.citations) : [];
+          return <article className={`research-message is-${item.message.role}`} key={`message-${item.message.id}`}>
+            <div className="research-message-label">{item.message.role === "user" ? "你" : "研究 Agent"}</div>
+            <div className="research-message-content">{content ? <MarkdownContent text={content}
+              citations={item.message.role === "assistant" ? streaming[item.message.id] !== undefined ? readSources : references : []}
+              onCitation={onJump} /> : <span className="research-placeholder">正在组织回答…</span>}</div>
+            {references.length ? <div className="research-message-citations" aria-label="回答引用">
+              {references.slice(0, 8).map((citation) =>
+                <button key={citation.blockId} type="button" title={citation.excerpt} onClick={() => onJump(citation.blockId)}>{citation.label}</button>)}
+            </div> : null}
+          </article>;
         })}
         {error ? <div className="research-agent-error" role="alert"><span>{error}</span>{lastQuestion.current ? <button type="button" disabled={busy} onClick={() => void submit(lastQuestion.current)}><RotateCcw size={14} />重试问题</button> : null}</div> : null}
         </div>

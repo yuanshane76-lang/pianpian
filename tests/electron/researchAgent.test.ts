@@ -12,6 +12,71 @@ const context = {
 };
 
 describe("research Agent", () => {
+  it("binds final answer references to actually returned blocks and clears evidence after changing context", async () => {
+    const events: any[] = [];
+    let read = false;
+    const runtime = createResearchAgentRuntime({
+      emit: (event: any) => events.push(event),
+      piSessionFactory: async ({ tools, emit }: any) => ({
+        prompt: async () => {
+          if (read) await tools.find((tool: any) => tool.name === "read_current_paper").execute("read", {});
+          emit({ type: "message_end", message: { id: "answer", role: "assistant",
+            content: "来源[引用:block-1]，猜测[引用:missing]。" } });
+        }, abort: async () => {}, dispose: () => {},
+      }),
+    });
+    await runtime.start(context, { aiProvider: "deepseek", deepseek: { apiKey: "synthetic-placeholder" } });
+    await runtime.prompt("没有读取");
+    expect(events.at(-2).message.citations).toEqual([]);
+    read = true;
+    await runtime.prompt("读取原文");
+    expect(events.at(-2).message.citations).toEqual([{ paperId: "paper-1", blockId: "block-1", pageNumber: 1, label: "第 1 页" }]);
+    runtime.updateContext({ ...context, paper: { ...context.paper, blocks: [] } });
+    read = false;
+    await runtime.prompt("已更换解析");
+    expect(events.at(-2).message.citations).toEqual([]);
+    runtime.dispose();
+  });
+
+  it("invalidates approvals and the session when its worker reports a failure", async () => {
+    const events: any[] = [];
+    let failWorker: (reason: string) => void = () => {};
+    const runtime = createResearchAgentRuntime({
+      emit: (event: any) => events.push(event),
+      piSessionFactory: async ({ onFailure, tools }: any) => {
+        failWorker = onFailure;
+        const add = tools.find((tool: any) => tool.name === "add_paper_to_library");
+        return { prompt: async () => add.execute("approval", { title: "Pending", authors: [], year: 2026 }),
+          abort: async () => {}, dispose: () => {} };
+      },
+    });
+    await runtime.start(context, { aiProvider: "deepseek", deepseek: { apiKey: "synthetic-placeholder" } });
+    const pending = runtime.prompt("加入论文");
+    await vi.waitFor(() => expect(events.some((event) => event.type === "approval_required")).toBe(true));
+    failWorker("worker crashed");
+    await pending;
+    expect(events.at(-1)).toMatchObject({ type: "agent_error", recoverable: false });
+    expect(runtime.approve({ approvalId: events.find((event) => event.type === "approval_required").approvalId, approved: true })).toBe(false);
+    await expect(runtime.prompt("重试")).rejects.toThrow("Agent 尚未启动");
+    runtime.dispose();
+  });
+
+  it("cancels a Pi worker initialization when the runtime is disposed", async () => {
+    let started = false, aborted = false;
+    const runtime = createResearchAgentRuntime({
+      emit: () => {},
+      piSessionFactory: ({ signal }: any) => new Promise((_resolve, reject) => {
+        started = true;
+        signal.addEventListener("abort", () => { aborted = true; reject(new Error("启动已取消")); }, { once: true });
+      }),
+    });
+    const starting = runtime.start(context, { aiProvider: "deepseek", deepseek: { apiKey: "synthetic-placeholder" } });
+    await vi.waitFor(() => expect(started).toBe(true));
+    runtime.dispose();
+    await expect(starting).rejects.toThrow("启动已取消");
+    expect(aborted).toBe(true);
+  });
+
   it("runs a multi-turn Pi session through tools, confirmation and document generation", async () => {
     const events: any[] = [];
     let tools: any[] = [];

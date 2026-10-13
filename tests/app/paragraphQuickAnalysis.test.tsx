@@ -300,7 +300,7 @@ describe("paragraph quick analysis", () => {
     expect(container.querySelector(".selected-context h2")?.textContent).toBe("选中句子");
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>(".assistant-tabs button")]
       .find((button) => button.textContent?.includes("学术词汇"))!.click());
-    expect(container.querySelector(".vocabulary-panel")?.textContent).toContain("attention");
+    expect(container.querySelector(".vocabulary-card")).toBeNull();
     await act(async () => container.querySelector<HTMLButtonElement>(".vocabulary-intro button")!.click());
     expect(jobs[0].request.block?.text).toBe(paper.blockData[0].text);
     await act(async () => jobs[0].finish('{"overview":"重点","terms":[]}'));
@@ -313,6 +313,8 @@ describe("paragraph quick analysis", () => {
       await act(async () => container.querySelector<HTMLButtonElement>(".pdf-block-hit-area")!.click());
       await act(async () => [...container.querySelectorAll<HTMLButtonElement>(".assistant-tabs button")]
         .find((button) => button.textContent?.includes("学术词汇"))!.click());
+      await act(async () => container.querySelector<HTMLButtonElement>(".vocabulary-intro button")!.click());
+      await act(async () => finishJobs([jobs.at(-1)!]));
       await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="将 attention 加入单词表"]')!.click());
     }
     await collect();
@@ -328,7 +330,7 @@ describe("paragraph quick analysis", () => {
       question.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="发送问题"]')!.click());
-    await act(async () => jobs[0].finish("另一篇论文的问答结果"));
+    await act(async () => jobs.at(-1)!.finish("另一篇论文的问答结果"));
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="打开单词表"]')!.click());
     expect(container.querySelectorAll(".wordbook-entry")).toHaveLength(1);
     expect(container.querySelectorAll(".wordbook-source")).toHaveLength(2);
@@ -343,7 +345,7 @@ describe("paragraph quick analysis", () => {
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")]
       .find((button) => button.textContent?.includes("打开阅读"))!.click());
     expect(container.querySelector(".reader-assistant")).not.toBeNull();
-    expect(stream).toHaveBeenCalledTimes(1);
+    expect(stream).toHaveBeenCalledTimes(3);
   });
   it("does not execute HTML, load remote images or enable model-generated links in explanations", async () => {
     const { container, blocks, jobs } = await mount();
@@ -379,10 +381,12 @@ describe("paragraph quick analysis", () => {
   });
 
   it("reports a failed wordbook save without falsely marking a word collected", async () => {
-    const { container, blocks } = await mount();
+    const { container, blocks, jobs } = await mount();
     await act(async () => blocks[0].click());
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.assistant-tabs button')]
       .find((button) => button.textContent?.includes("学术词汇"))!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>(".vocabulary-intro button")!.click());
+    await act(async () => finishJobs(jobs));
     const original = Storage.prototype.setItem;
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
       if (key === "zhiyan-workbench.wordbook.v1") throw new Error("quota");
@@ -449,9 +453,9 @@ describe("paragraph quick analysis", () => {
     await act(async () => blocks[0].click());
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.assistant-tabs button')]
       .find((button) => button.textContent?.includes("学术词汇"))!.click());
-    expect(container.querySelector(".vocabulary-panel")?.textContent).toContain("attention");
+    expect(container.querySelector(".vocabulary-card")).toBeNull();
     expect(container.querySelector(".vocabulary-panel")?.textContent).not.toContain("hypothesis");
-    expect(container.querySelector(".vocabulary-panel")?.textContent).toContain("当前段落");
+    expect(container.querySelector(".vocabulary-panel")?.textContent).toContain("本段");
     const generate = container.querySelector<HTMLButtonElement>(".vocabulary-intro button")!;
     await act(async () => generate.click());
     expect(jobs[0].request.operation).toBe("vocabulary");
@@ -459,12 +463,12 @@ describe("paragraph quick analysis", () => {
     await act(async () => jobs[0].finish('{"overview":"重点术语","terms":[{"term":"attention","translation":"注意力","definition":"按相关性分配权重。"},{"term":"hypothesis","translation":"假设"}]}'));
     expect(container.querySelector(".vocabulary-panel")?.textContent).not.toContain("hypothesis");
     await act(async () => blocks[1].click());
-    expect(container.querySelector(".vocabulary-panel")?.textContent).toContain("hypothesis");
+    expect(container.querySelector(".vocabulary-card")).toBeNull();
     expect(container.querySelector(".vocabulary-panel")?.textContent).not.toContain("attention");
   });
 
   it("collects words only on explicit clicks and restores the personal wordbook after reload", async () => {
-    const { container, blocks, stream } = await mount();
+    const { container, blocks, stream, jobs } = await mount();
     await act(async () => blocks[0].click());
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.assistant-tabs button')]
       .find((button) => button.textContent?.includes("学术词汇"))!.click());
@@ -472,8 +476,10 @@ describe("paragraph quick analysis", () => {
     await act(async () => openBook());
     expect(container.querySelector('[role="dialog"][aria-label="单词表"]')?.textContent).toContain("暂无收藏");
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="关闭单词表"]')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>(".vocabulary-intro button")!.click());
+    await act(async () => finishJobs(jobs));
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="将 attention 加入单词表"]')!.click());
-    expect(stream).not.toHaveBeenCalled();
+    expect(stream).toHaveBeenCalledOnce();
     await act(async () => openBook());
     expect(container.querySelector(".wordbook-entry")?.textContent).toContain("attention");
     expect(container.querySelector(".wordbook-entry")?.textContent).toContain(paper.title);

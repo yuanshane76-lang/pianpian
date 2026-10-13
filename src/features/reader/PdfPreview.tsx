@@ -166,7 +166,9 @@ export function PdfPreview(props: Props) {
     clearTimeout(scrollTimer.current);
     if (!originalId) { setBusy(false); return; }
     void (async () => {
-      document = await openPdf(await readOriginalPdf(originalId));
+      const data = await readOriginalPdf(originalId);
+      if (!active) return;
+      document = await openPdf(data);
       if (!active) { await document.destroy(); return; }
       const firstPage = await document.getPage(1);
       if (!active) { await document.destroy(); return; }

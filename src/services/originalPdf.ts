@@ -1,6 +1,7 @@
 import { getDesktopBridge } from "../platform/electron";
 
 const DB_NAME = "zhiyan-original-files";
+const pendingDesktopReads = new Map<string, Promise<ArrayBuffer>>();
 
 async function database(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -33,8 +34,13 @@ export async function saveOriginalPdf(name: string, data: ArrayBuffer): Promise<
 export async function readOriginalPdf(id: string): Promise<ArrayBuffer> {
   const desktop = getDesktopBridge();
   if (desktop) {
-    const bytes = await desktop.invoke<Uint8Array>("zhiyan:documents:read", id);
-    return new Uint8Array(bytes).buffer;
+    const pending = pendingDesktopReads.get(id);
+    if (pending) return pending;
+    const request = desktop.invoke<Uint8Array>("zhiyan:documents:read", id)
+      .then((bytes) => new Uint8Array(bytes).buffer)
+      .finally(() => pendingDesktopReads.delete(id));
+    pendingDesktopReads.set(id, request);
+    return request;
   }
   const db = await database();
   try {

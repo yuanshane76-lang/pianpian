@@ -1,4 +1,4 @@
-import { act, type ComponentProps } from "react";
+import { act, useEffect, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ReaderAssistant } from "../../src/features/reader/ReaderAssistant";
@@ -77,6 +77,27 @@ describe("reader assistant layout", () => {
     expect(container.querySelector(".paragraph-progress")?.textContent).toContain("正在生成摘要与作用");
     await act(async () => tabs[1].click());
     expect(container.querySelector(".vocabulary-intro")?.textContent).toContain("正在挑选段落词汇");
+  });
+
+  it("keeps AI vocabulary opt-in until the user asks for it", async () => {
+    await mount({ vocabulary: [{ term: "attention", translation: "注意力", definition: "重点", example: "attention", blockId: "p1-b1", pageNumber: 1, count: 1, source: "local" }] });
+    const vocabularyTab = container.querySelector<HTMLButtonElement>("#vocabulary-tab, [id$='-vocabulary-tab']")!;
+    await act(async () => vocabularyTab.click());
+    expect(container.querySelector(".vocabulary-card")).toBeNull();
+    expect(container.querySelector(".vocabulary-intro")?.textContent).toContain("双击段落后自动精选");
+    expect(container.querySelector(".vocabulary-intro button")?.textContent).toContain("AI 精选本段词汇");
+  });
+
+  it("mounts research only after its tab is visited and keeps it mounted across tab changes", async () => {
+    const mounted = vi.fn(), unmounted = vi.fn();
+    function Probe() { useEffect(() => { mounted(); return unmounted; }, []); return <div>研究内容</div>; }
+    await mount({ researchPanel: <Probe /> });
+    expect(mounted).not.toHaveBeenCalled();
+    const research = container.querySelector<HTMLButtonElement>('[id$="-research-tab"]')!;
+    await act(async () => research.click());
+    expect(mounted).toHaveBeenCalledOnce();
+    await act(async () => container.querySelector<HTMLButtonElement>('[id$="-assist-tab"]')!.click());
+    expect(unmounted).not.toHaveBeenCalled();
   });
 
   it("prioritizes the selected paragraph without duplicating the original text", async () => {

@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarkdownContent } from "../../src/features/reader/MarkdownContent";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -24,6 +24,18 @@ afterEach(async () => {
 });
 
 describe("assistant Markdown math", () => {
+  it("turns only verified citation text into buttons and keeps code and incomplete markers inert", async () => {
+    await render("");
+    const onCitation = vi.fn();
+    await act(async () => root!.render(<MarkdownContent
+      text={"原文[引用:block]、未知[引用:missing]、未完成[引用:b\n\n`[引用:block]`\n\n```\n[引用:block]\n```"}
+      citations={[{ blockId: "block", label: "第 3 页" }]} onCitation={onCitation} />));
+    expect(container.querySelectorAll(".research-inline-citation")).toHaveLength(1);
+    expect(container.querySelectorAll("code")).toHaveLength(2);
+    await act(async () => container.querySelector<HTMLButtonElement>(".research-inline-citation")!.click());
+    expect(onCitation).toHaveBeenCalledWith("block");
+  });
+
   it("renders the explanation's recurrent-state notation inside formatted paragraphs", async () => {
     const content = await render(String.raw`## 段落含义
 

@@ -1461,6 +1461,13 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
 .vocabulary-intro { padding: 14px; background: var(--accent-wash); border-radius: 7px; }
 .vocabulary-intro strong { font-size: 13px; }
 .vocabulary-intro p { margin: 7px 0 10px; color: var(--muted-strong); font-size: 12px; line-height: 1.7; }
+.vocabulary-opt-in-hint { margin-top: 4px !important; color: var(--muted) !important; font-size: 11px !important; }
+.vocabulary-heading { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; color: var(--teal); margin-bottom: 10px; }
+.vocabulary-heading > span { margin-left: auto; color: var(--muted); font-size: 11px; }
+.vocabulary-empty { display: grid; justify-items: center; gap: 10px; padding: 36px 12px; color: var(--muted-strong); text-align: center; }
+.vocabulary-empty p { margin: 0; font-size: 13px; }
+.vocabulary-empty > span { font-size: 11px; line-height: 1.8; }
+.vocabulary-empty > svg { color: var(--teal); }
 .vocabulary-enriched { color: var(--teal); font-size: 11px; }
 .vocabulary-search { display: flex; align-items: center; gap: 7px; margin: 16px 0 7px; padding: 9px 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 5px; background: var(--surface-raised); }
 .vocabulary-search input { width: 100%; border: 0; outline: 0; color: var(--ink); font-size: 12px; }
@@ -2315,6 +2322,10 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
 .research-document-card > button { justify-self: start; font-size: 10px; }
 .research-citations { display: flex; gap: 6px; flex-wrap: wrap; margin: -3px 0 14px; }
 .research-citations button { background: var(--surface-raised); color: var(--teal-dark); border: 1px solid var(--accent-line); border-radius: 5px; padding: 4px 7px; font-size: 10px; }
+.research-message-citations { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.research-message-citations button { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; color: var(--teal-dark); background: var(--accent-wash); border: 1px solid var(--accent-line); border-radius: 5px; font-size: 10px; }
+.research-message-citations button:hover { background: var(--teal-soft); }
+.research-inline-citation { display: inline-flex; align-items: center; margin: 0 2px; padding: 1px 5px; color: var(--teal-dark); background: var(--teal-soft); border: 1px solid var(--accent-line); border-radius: 4px; font: inherit; font-size: .9em; cursor: pointer; }
 .research-agent-composer { flex-shrink: 0; padding: 12px 14px 14px; border-top: 1px solid var(--line); background: var(--surface); }
 .research-save-notice { margin-bottom: 8px; color: var(--teal-dark); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 .research-config-hint { width: 100%; padding: 0; margin-bottom: 9px; border: 0; background: transparent; color: var(--muted); font-size: 10px; line-height: 1.6; text-align: left; }

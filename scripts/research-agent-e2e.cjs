@@ -68,7 +68,7 @@ if (process.versions.electron) {
       } else {
         const fragments = question.includes("滚动验收")
           ? Array.from({ length: 120 }, (_, index) => `第 ${index + 1} 段：这是用于验证流式阅读位置的合成文字，持续输出期间可以向上阅读。\n\n`)
-          : ["已完成", "论文读取与", "研究任务。", "\n\n依据：", "[第 1 页]"];
+          : ["已完成", "论文读取与", "研究任务。", "\n\n依据：", "[引用:agent-fixture-paragraph]"];
         for (const text of fragments) {
           if (response.destroyed) break;
           chunk({ content: text });
@@ -158,6 +158,7 @@ if (process.versions.electron) {
       await capture("01-research-workspace.png");
       report.checks.push("Three bundled skills are discoverable and populate their Chinese workflow prompts");
       await send("查找相关论文");
+      await page.locator('[aria-label="工具：检索公开文献"] .research-tool-heading').click();
       await page.locator(".research-result-item").first().waitFor();
       await page.getByRole("button", { name: "发送给研究 Agent" }).waitFor();
       assert.equal(await page.locator(".research-message.is-user").count(), 1);
@@ -261,13 +262,15 @@ if (process.versions.electron) {
       await page.getByRole("button", { name: "打开阅读", exact: true }).click();
       await page.waitForSelector('.pdf-page-stage[data-rendered="true"]');
       await page.getByRole("tab", { name: "研究对话", exact: true }).click();
+      await page.getByText("就绪", { exact: true }).waitFor();
       await send("概括这篇论文");
       await page.locator(".research-citations button").first().waitFor();
+      await page.waitForFunction(() => !document.querySelector('[aria-label="停止 Agent"]'));
       await send("这个实验方法有什么限制？");
       await page.getByRole("button", { name: "发送给研究 Agent" }).waitFor();
       assert.equal(await page.locator(".research-message.is-user").count(), 2);
       assert.equal(await page.locator(".research-message.is-assistant").count(), 2);
-      await page.locator(".research-citations button").last().click();
+      await page.locator(".research-message.is-assistant .research-inline-citation").last().click();
       await page.waitForSelector('#pdf-block-agent-fixture-paragraph');
       assert(await page.locator('.pdf-page-stage[data-rendered="true"]').isVisible());
       await capture("06-reader-agent.png");

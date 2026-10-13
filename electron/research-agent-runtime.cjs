@@ -2,6 +2,7 @@ const { randomUUID } = require("node:crypto");
 const { createToolDefinitions, normalizeContext } = require("./research-agent-tools.cjs");
 const { createPiSession, safeError } = require("./pi-agent.cjs");
 const { listBundledResearchSkills } = require("./research-skills.cjs");
+const { resolveMessageCitations } = require("./research-citations.cjs");
 
 function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSessionFactory = createPiSession } = {}) {
   if (typeof emit !== "function") throw new Error("Agent 事件发送器无效");
@@ -15,17 +16,53 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
   let serviceKey = "";
   let generation = 0;
   let lifecycle = 0;
+  let contextRevision = 0;
+  let startingController = null;
   const pendingApprovals = new Map();
+  const citationEvidence = new Map();
 
   function publish(event) {
     if (!disposed) emit(event);
   }
 
-  function approvalRequest(request) {
+  function approvalRequest(request, signal) {
     return new Promise((resolve) => {
-      pendingApprovals.set(request.approvalId, { resolve, reserved: false });
+      const pending = { resolve, reserved: false, cleanup: () => signal?.removeEventListener("abort", cancel) };
+      function cancel() {
+        if (pendingApprovals.get(request.approvalId) !== pending) return;
+        pendingApprovals.delete(request.approvalId);
+        pending.cleanup();
+        resolve({ approved: false, message: "用户已停止 Agent" });
+      }
+      if (signal?.aborted) {
+        resolve({ approved: false, message: "用户已停止 Agent" });
+        return;
+      }
+      pendingApprovals.set(request.approvalId, pending);
+      signal?.addEventListener("abort", cancel, { once: true });
       publish({ type: "approval_required", ...request });
     });
+  }
+
+  function clearPendingApprovals(message) {
+    for (const pending of pendingApprovals.values()) {
+      pending.cleanup();
+      pending.resolve({ approved: false, message });
+    }
+    pendingApprovals.clear();
+  }
+
+  function handleSessionFailure(reason, expectedLifecycle) {
+    if (disposed || lifecycle !== expectedLifecycle) return;
+    lifecycle += 1;
+    generation += 1;
+    aborted = true;
+    busy = false;
+    sessionId = null;
+    citationEvidence.clear();
+    clearPendingApprovals("研究助手已关闭");
+    piSession = null;
+    publish({ type: "agent_error", message: "研究助手工作线程已退出，请重新连接后重试", recoverable: false });
   }
 
   function approve(input) {
@@ -45,6 +82,7 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
     }
     if (input.approved && input.result === undefined) return false;
     pendingApprovals.delete(input.approvalId);
+    pending.cleanup();
     pending.resolve({ approved: input.approved, result: input.result, message: input.message });
     return true;
   }
@@ -55,9 +93,11 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
 
   async function runTool(name, input = {}, toolCallId, signal) {
     const toolGeneration = generation;
+    const toolContextRevision = contextRevision;
+    const toolPaperId = context?.paper.id;
     const definition = createToolDefinitions({
       getContext: () => context,
-      emitApproval: approvalRequest,
+      emitApproval: (request) => approvalRequest(request, signal),
       fetchImpl,
     }).find((candidate) => candidate.name === name);
     if (!definition) throw new Error(`未注册工具：${name}`);
@@ -67,8 +107,16 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
     toolEvent("tool_start", tool);
     try {
       const result = await definition.execute(id, input, signal, undefined, {});
-      if (toolGeneration !== generation || signal?.aborted || aborted) throw new Error("请求已停止");
+      if (toolGeneration !== generation || toolContextRevision !== contextRevision || signal?.aborted || aborted) throw new Error("请求已停止");
       const output = result?.structuredContent ?? result?.content?.map((item) => item.text).join("") ?? result;
+      if (name === "read_current_paper" && output?.paper?.id === toolPaperId && toolContextRevision === contextRevision) {
+        for (const block of output.paper.blocks) {
+          citationEvidence.set(block.id, {
+            paperId: toolPaperId, blockId: block.id, pageNumber: block.pageNumber,
+            label: `第 ${block.pageNumber} 页`,
+          });
+        }
+      }
       if (name === "add_paper_to_library" && output?.status === "added" && output.paper) {
         const added = output.paper;
         const exists = context.library.some((item) =>
@@ -96,6 +144,7 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
     piSession?.dispose();
     piSession = null;
     context = normalizeContext(nextContext);
+    citationEvidence.clear();
     const service = settings[settings.aiProvider];
     if (!service || typeof service.apiKey !== "string" || !service.apiKey.trim()) {
       throw new Error("请先在服务配置中设置当前模型密钥");
@@ -104,21 +153,35 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
     aborted = false;
     const startGeneration = generation;
     const startLifecycle = ++lifecycle;
+    const startController = new AbortController();
+    startingController = startController;
     serviceKey = service.apiKey;
     const tools = createToolDefinitions({ getContext: () => context, emitApproval: approvalRequest, fetchImpl });
-    const nextSession = await piSessionFactory({
-      service,
-      emit: (event) => {
-        if (lifecycle === startLifecycle && !aborted && busy) publish(event);
-      },
-      tools: tools.map((tool) => ({ ...tool, execute: async (id, params, signal) => {
-        const output = await runTool(tool.name, params, id, signal);
-        return { content: [{ type: "text", text: JSON.stringify(output) }], details: output };
-      } })),
-    });
-    if (disposed || generation !== startGeneration) {
-      await nextSession.abort?.();
-      nextSession.dispose?.();
+    let nextSession;
+    try {
+      nextSession = await piSessionFactory({
+        service,
+        signal: startController.signal,
+        onFailure: (reason) => handleSessionFailure(reason, startLifecycle),
+        emit: (event) => {
+          if (lifecycle === startLifecycle && !aborted && busy) {
+            if (event.type === "message_end" && event.message.role === "assistant") {
+              publish({ ...event, message: { ...event.message,
+                citations: resolveMessageCitations(event.message.content, citationEvidence) } });
+            } else publish(event);
+          }
+        },
+        tools: tools.map((tool) => ({ ...tool, execute: async (id, params, signal) => {
+          const output = await runTool(tool.name, params, id, signal);
+          return { content: [{ type: "text", text: JSON.stringify(output) }], details: output };
+        } })),
+      });
+    } finally {
+      if (startingController === startController) startingController = null;
+    }
+    if (disposed || generation !== startGeneration || startController.signal.aborted || !sessionId) {
+      await nextSession?.abort?.();
+      nextSession?.dispose?.();
       throw new Error("Agent 启动已取消");
     }
     piSession = nextSession;
@@ -157,16 +220,21 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
 
   function updateContext(nextContext) {
     if (disposed || !sessionId) throw new Error("Agent 会话不存在");
-    context = normalizeContext(nextContext);
+    const next = normalizeContext(nextContext);
+    if (next.paper.id !== context.paper.id || JSON.stringify(next.paper.blocks) !== JSON.stringify(context.paper.blocks)) {
+      contextRevision += 1;
+      citationEvidence.clear();
+    }
+    context = next;
     return true;
   }
 
   async function abort() {
     aborted = true;
     generation += 1;
+    startingController?.abort();
     piSession?.setGeneration?.(null);
-    for (const { resolve } of pendingApprovals.values()) resolve({ approved: false, message: "用户已停止 Agent" });
-    pendingApprovals.clear();
+    clearPendingApprovals("用户已停止 Agent");
     await piSession?.abort();
     if (busy) publish({ type: "agent_end" });
     busy = false;
@@ -176,11 +244,11 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
     disposed = true;
     lifecycle += 1;
     generation += 1;
+    startingController?.abort();
     piSession?.setGeneration?.(null);
-    void piSession?.abort();
+    void piSession?.abort().catch(() => undefined);
     piSession?.dispose();
-    for (const { resolve } of pendingApprovals.values()) resolve({ approved: false, message: "会话已关闭" });
-    pendingApprovals.clear();
+    clearPendingApprovals("会话已关闭");
   }
 
   return { start, updateContext, prompt, abort, approve, dispose, get messageCount() { return messageCount; } };

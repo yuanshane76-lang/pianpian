@@ -20,6 +20,7 @@
     "test:paragraph-vocabulary:e2e": "npm run build && node scripts/paragraph-vocabulary-e2e.cjs",
     "test:research-agent:e2e": "npm run build && node scripts/research-agent-e2e.cjs",
     "test:pi-agent:smoke": "node scripts/pi-agent-smoke.cjs",
+    "test:reader-performance:e2e": "npm run build && node scripts/reader-performance-e2e.cjs",
     "test:library-viewport:e2e": "npm run build && node scripts/library-viewport-e2e.cjs",
     "check:credentials": "node scripts/check-credentials.cjs",
     "check": "npm run check:credentials && npm run prepare:pdf-worker && npm test -- --run && npm run build"

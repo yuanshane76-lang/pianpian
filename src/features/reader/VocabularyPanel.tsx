@@ -8,17 +8,20 @@ export function VocabularyPanel({ terms, onJump, onGuide, aiAvailable, busy, enr
 }) {
   const [query, setQuery] = useState("");
   const visible = useMemo(() => terms.filter((term) => `${term.term} ${term.translation}`.toLowerCase().includes(query.trim().toLowerCase())), [terms, query]);
+  const displayTerms = enriched ? terms : [];
   return <div className="vocabulary-panel">
-    <div className="vocabulary-intro"><strong>当前段落词汇{hasParagraph && pageNumber ? ` · 第 ${pageNumber} 页` : ""}</strong>
+    <div className="vocabulary-intro"><div className="vocabulary-heading"><Sparkles size={16} /><strong>AI 精选本段词汇</strong>
+      {hasParagraph && pageNumber ? <span>第 {pageNumber} 页</span> : null}</div>
       {guideOverview ? <p>{guideOverview}</p> : null}
       {!enriched ? <button className="text-button" disabled={busy || !hasParagraph} onClick={onGuide}>
         {loading ? <LoaderCircle className="spin" size={14} /> : <Sparkles size={14} />}
         {loading ? "正在挑选段落词汇…" : aiAvailable ? "AI 精选本段词汇" : "配置 AI 服务"}</button> : <span className="vocabulary-enriched">本段词汇已生成</span>}
+      {!enriched && !loading ? <p className="vocabulary-opt-in-hint">双击段落后自动精选，也可以现在手动生成。只展示本段原文中有依据的词汇。</p> : null}
       {error ? <p className="assistant-action-error" role="alert">{error}</p> : null}
     </div>
-    <label className="vocabulary-search"><Search size={15} /><input aria-label="搜索学术词汇" placeholder="搜索英文或中文" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
-    <p className="vocabulary-count">{visible.length} 个词汇 · {hasParagraph ? "来源为当前段落" : "未选择段落"}</p>
-    {visible.length ? visible.map((term) => <article className="vocabulary-card" key={term.term.toLowerCase()}>
+    {enriched && displayTerms.length ? <label className="vocabulary-search"><Search size={15} /><input aria-label="搜索学术词汇" placeholder="搜索英文或中文" value={query} onChange={(event) => setQuery(event.target.value)} /></label> : null}
+    <p className="vocabulary-count">{enriched ? `${visible.length} 个词汇 · 来源为当前段落` : loading ? "正在识别值得学习的词汇与表达…" : "AI 精选尚未生成"}</p>
+    {enriched && visible.length ? visible.map((term) => <article className="vocabulary-card" key={term.term.toLowerCase()}>
       <div className="vocabulary-word"><strong>{term.term}</strong>
         {onSaveTerm ? <button type="button" className={`icon-button vocabulary-save ${isTermSaved?.(term) ? "is-saved" : ""}`}
           disabled={isTermSaved?.(term)} aria-label={isTermSaved?.(term) ? `${term.term} 已加入单词表` : `将 ${term.term} 加入单词表`}
@@ -27,6 +30,9 @@ export function VocabularyPanel({ terms, onJump, onGuide, aiAvailable, busy, enr
       <span className="vocabulary-meaning">{term.translation}</span>
       <p>{term.definition}</p>
       <button className="vocabulary-example" onClick={() => onJump(term.blockId)}><span>{term.example}</span><small>第 {term.pageNumber} 页原文 <ArrowUpRight size={12} /></small></button>
-    </article>) : <div className="assistant-placeholder"><p>{query ? "没有匹配的词汇" : hasParagraph ? "本段暂无匹配词汇" : "未选择正文段落"}</p></div>}
+    </article>) : <div className={`assistant-placeholder vocabulary-empty ${loading ? "is-loading" : ""}`} role="status">
+      {loading ? <><LoaderCircle className="spin" size={20} /><p>正在挑选段落词汇…</p><span>翻译和解释会分别完成，你可以先查看其他结果。</span></>
+        : <><Sparkles size={22} /><p>{query ? "没有匹配的词汇" : enriched ? "本段没有需要单独学习的词汇" : hasParagraph ? "双击段落或点击上方按钮生成 AI 精选词汇" : "先选择一个正文段落"}</p></>}
+    </div>}
   </div>;
 }

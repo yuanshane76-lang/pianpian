@@ -19,9 +19,10 @@ async function mount(available = true) {
   document.body.append(container);
   root = createRoot(container);
   const onAddPaper = vi.fn(() => ({ id: "added", duplicate: false }));
-  await act(async () => root.render(<ResearchAssistant paper={paper} library={[paper]} onAddPaper={onAddPaper} onJump={vi.fn()} available={available} onOpenSettings={vi.fn()} />));
-  return { invoke, onAddPaper, rerender: async (id: string) => {
-    await act(async () => root.render(<ResearchAssistant paper={{ ...paper, id }} library={[paper]} onAddPaper={onAddPaper} onJump={vi.fn()} available={available} onOpenSettings={vi.fn()} />));
+  const onJump = vi.fn();
+  await act(async () => root.render(<ResearchAssistant paper={paper} library={[paper]} onAddPaper={onAddPaper} onJump={onJump} available={available} onOpenSettings={vi.fn()} />));
+  return { invoke, onAddPaper, onJump, rerender: async (id: string) => {
+    await act(async () => root.render(<ResearchAssistant paper={{ ...paper, id }} library={[paper]} onAddPaper={onAddPaper} onJump={onJump} available={available} onOpenSettings={vi.fn()} />));
   } };
 }
 
@@ -56,7 +57,7 @@ describe("research assistant", () => {
   });
 
   it("keeps whitespace in streamed replies and exposes generated documents", async () => {
-    await mount();
+    const mounted = await mount();
     await act(async () => {
       emit({ type: "message_delta", messageId: "m1", delta: "Hello" });
       emit({ type: "message_delta", messageId: "m1", delta: " world\n" });
@@ -65,6 +66,48 @@ describe("research assistant", () => {
     });
     expect(container.textContent).toContain("Hello world");
     expect(container.querySelector('[aria-label="保存 Markdown 文档"]')).not.toBeNull();
+  });
+
+  it("renders message citations as jumpable article references", async () => {
+    const { onJump } = await mount();
+    await act(async () => emit({ type: "message_end", message: {
+      id: "m1", role: "assistant", content: "结论见原文。", citations: [{ paperId: "p1", blockId: "b1", pageNumber: 1, label: "第 1 页 · 原文" }],
+    } }));
+    const citation = container.querySelector<HTMLButtonElement>(".research-message-citations button");
+    expect(citation?.textContent).toContain("第 1 页");
+    await act(async () => citation?.click());
+    expect(onJump).toHaveBeenCalledWith("b1");
+  });
+
+  it("renders citations during streaming from read blocks and rejects foreign or missing blocks", async () => {
+    const { onJump } = await mount();
+    await act(async () => {
+      emit({ type: "tool_end", tool: { id: "read", name: "read_current_paper", label: "读取当前论文",
+        status: "completed", input: {}, output: { paper: { id: "p1", blocks: paper.blockData } } } });
+      emit({ type: "message_delta", messageId: "answer", delta: "这是原文结论。[引用:b1]" });
+    });
+    const inline = container.querySelector<HTMLButtonElement>(".research-inline-citation");
+    expect(inline?.textContent).toBe("第 1 页");
+    await act(async () => inline!.click());
+    expect(onJump).toHaveBeenCalledWith("b1");
+    await act(async () => emit({ type: "message_end", message: { id: "answer", role: "assistant",
+      content: "无效来源[引用:missing]。", citations: [
+        { paperId: "other", blockId: "b1", label: "别的论文" },
+        { paperId: "p1", blockId: "missing", label: "不存在的块" },
+      ] } }));
+    expect(container.querySelector(".research-message-citations")).toBeNull();
+    expect(container.querySelector(".research-inline-citation")).toBeNull();
+  });
+
+  it("keeps search execution compact until its results are expanded", async () => {
+    await mount();
+    await act(async () => emit({ type: "tool_end", tool: { id: "search", name: "search_literature",
+      label: "检索公开文献", status: "completed", input: { query: "deep research" },
+      output: { papers: [{ title: "A search result", authors: [], year: 2024 }] } } }));
+    expect(container.querySelector(".research-tool-summary")?.textContent).toContain("1 篇结果");
+    expect(container.querySelector(".research-result-list")).toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>(".research-tool-heading")!.click());
+    expect(container.querySelector(".research-result-list")?.textContent).toContain("A search result");
   });
 
   it("does not write when an approval was stopped or invalidated in the main process", async () => {
