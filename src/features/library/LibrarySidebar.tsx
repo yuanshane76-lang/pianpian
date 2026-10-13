@@ -1,4 +1,5 @@
 import { BookOpen, Clock3, Heart, LibraryBig, Settings2, Tags } from "lucide-react";
+import { ThemeToggle } from "../settings/ThemeToggle";
 
 interface LibrarySidebarProps {
   activeFilter: string;
@@ -67,6 +68,7 @@ export function LibrarySidebar({ activeFilter, tags, onFilterChange, onOpenSetti
           <Settings2 size={17} />
           <span>服务配置</span>
         </button>
+        <ThemeToggle />
       </div>
     </aside>
   );

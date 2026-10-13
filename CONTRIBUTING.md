@@ -77,6 +77,8 @@ git worktree add -b fix/pdf-selection ../zhiyan-pdf-selection origin/main
 | --- | --- |
 | `node scripts/mineru-gate-e2e.cjs` | 隔离文献库、合成 PDF 和模拟 MinerU：验证强制解析门禁、真实阶段进度、下载持久化与重启恢复，不调用真实服务 |
 | `node scripts/desktop-e2e.cjs` | 临时空用户目录：验证中文壳、配置和 IPC；无需密钥和论文，禁止外部服务请求 |
+| `node scripts/theme-e2e.cjs` | 构建后使用合成 PDF 和隔离桌面目录，验证深浅主题、重启保留、新配置与研究助手界面、PDF 白底；禁止外部请求 |
+| `node scripts/research-agent-e2e.cjs --dark` | 构建后在深色界面验证真实 Pi SDK 的多轮工具链、确认写入、Markdown 导出、流式滚动与原文引用；模型及检索使用本地合成响应，不调用外部服务 |
 | `npm run test:paragraph-vocabulary:e2e` | 合成 PDF、模拟 SSE 与隔离桌面用户目录：验证段落词汇、单词表、Markdown、摘要和图表流式显示、定位提示及多种窗口尺寸；不调用真实模型服务 |
 | `node scripts/translation-math-e2e.cjs` | 临时用户目录和固定公式数据，无付费请求 |
 | `node scripts/paragraph-quick-analysis-e2e.cjs` | 读取本机已解析论文和配置，隔离浏览器会话、模拟模型响应；不是空文献库检查 |
