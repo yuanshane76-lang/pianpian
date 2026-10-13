@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, net, protocol, safeStorage, shell, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, net, protocol, safeStorage, shell, dialog, screen } = require("electron");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -31,11 +31,16 @@ function registerAppProtocol() {
 }
 
 function createWindow() {
+  const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const width = Math.min(workArea.width, 1440, Math.max(980, Math.floor(workArea.width * 0.92)));
+  const height = Math.min(workArea.height, 920, Math.max(680, Math.floor(workArea.height * 0.9)));
   const window = new BrowserWindow({
-    width: 1440,
-    height: 920,
-    minWidth: 980,
-    minHeight: 680,
+    width,
+    height,
+    x: workArea.x + Math.floor((workArea.width - width) / 2),
+    y: workArea.y + Math.floor((workArea.height - height) / 2),
+    minWidth: Math.min(980, workArea.width),
+    minHeight: Math.min(680, workArea.height),
     show: false,
     backgroundColor: "#f4f7f7",
     webPreferences: {

@@ -41,30 +41,32 @@ export function LibrarySidebar({ activeFilter, tags, onFilterChange, onOpenSetti
         ))}
       </nav>
 
-      <div className="sidebar-section-label">
-        <Tags size={15} />
-        <span>标签</span>
-      </div>
-      <div className="tag-list">
-        {tags.length ? (
-          tags.map((tag) => (
-            <button
-              className={`tag-link ${activeFilter === `tag:${tag}` ? "is-active" : ""}`}
-              key={tag}
-              onClick={() => onFilterChange(`tag:${tag}`)}
-              type="button"
-            >
-              <span className="tag-dot" />
-              {tag}
-            </button>
-          ))
-        ) : (
-          <span className="empty-tag-list">暂无标签</span>
-        )}
+      <div className="sidebar-tags">
+        <div className="sidebar-section-label">
+          <Tags size={15} />
+          <span>标签</span>
+        </div>
+        <div className="tag-list">
+          {tags.length ? (
+            tags.map((tag) => (
+              <button
+                className={`tag-link ${activeFilter === `tag:${tag}` ? "is-active" : ""}`}
+                key={tag}
+                onClick={() => onFilterChange(`tag:${tag}`)}
+                type="button"
+              >
+                <span className="tag-dot" />
+                {tag}
+              </button>
+            ))
+          ) : (
+            <span className="empty-tag-list">暂无标签</span>
+          )}
+        </div>
       </div>
 
       <div className="sidebar-footer">
-        <button className="nav-item" type="button" onClick={onOpenSettings} title="模型与解析配置">
+        <button className="nav-item" type="button" aria-label="服务配置" onClick={onOpenSettings} title="模型与解析配置">
           <Settings2 size={17} />
           <span>服务配置</span>
         </button>
