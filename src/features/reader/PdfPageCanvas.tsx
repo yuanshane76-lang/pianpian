@@ -8,7 +8,7 @@ import { renderPdfTextLayer } from "../../services/pdfTextLayer";
 import { BlockList } from "./BlockList";
 
 export function PdfPageCanvas({ pdfPage, layout, blocks, activeBlockId, onSelect, onSelectText, onAnalyzeParagraph, onAnalyzeChart, onReady }: {
-  pdfPage: PDFPageProxy; layout: PdfPageLayout; blocks: DocumentBlock[]; activeBlockId: string | null;
+  pdfPage?: PDFPageProxy; layout: PdfPageLayout; blocks: DocumentBlock[]; activeBlockId: string | null;
   onSelect: (block: DocumentBlock) => void; onSelectText: (block: DocumentBlock, text: string) => void;
   onReady: (page: number, ready: boolean) => void;
   onAnalyzeParagraph?: (block: DocumentBlock) => void;
@@ -27,6 +27,12 @@ export function PdfPageCanvas({ pdfPage, layout, blocks, activeBlockId, onSelect
     const canvas = canvasRef.current;
     const text = textRef.current;
     if (!canvas || !text) return;
+    if (!pdfPage) {
+      setReadyScale(null);
+      setError("");
+      onReady(layout.pageNumber, false);
+      return;
+    }
     let active = true;
     let task: RenderTask | undefined;
     let textTask: ReturnType<typeof renderPdfTextLayer> | undefined;

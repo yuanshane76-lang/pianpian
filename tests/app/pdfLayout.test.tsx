@@ -252,6 +252,19 @@ describe("continuous PDF page geometry", () => {
     expect(container.querySelectorAll(".pdf-page-slot")).toHaveLength(30);
   });
 
+  it("does not load every PDF page while preparing a long canvas", async () => {
+    const getPage = vi.fn(async () => ({
+      getViewport: ({ scale }: { scale: number }) => ({ width: 600 * scale, height: 800 * scale }),
+      render: () => ({ promise: Promise.resolve(), cancel: vi.fn() }),
+    }));
+    vi.mocked(openPdf).mockResolvedValueOnce({
+      numPages: 30, getPage, destroy: async () => {},
+    } as never);
+    const { container } = await mount([paragraph]);
+    expect(container.querySelectorAll(".pdf-page-slot")).toHaveLength(30);
+    expect(getPage.mock.calls.length).toBeLessThan(8);
+  });
+
   it("preserves the page-relative reading anchor when zoom changes", async () => {
     const { container } = await mount([paragraph, nextParagraph]);
     const scroll = container.querySelector<HTMLElement>(".pdf-canvas-scroll")!;
