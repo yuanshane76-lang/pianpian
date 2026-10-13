@@ -39,3 +39,8 @@ export function applyTheme(theme: ThemePreference): void {
   if (typeof document === "undefined") return;
   document.documentElement.dataset.theme = normalizeTheme(theme);
 }
+
+export function currentTheme(): ThemePreference {
+  const applied = typeof document === "undefined" ? undefined : document.documentElement.dataset.theme;
+  return applied === "light" || applied === "dark" ? applied : loadTheme();
+}

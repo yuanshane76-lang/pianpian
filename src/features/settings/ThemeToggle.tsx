@@ -1,14 +1,14 @@
 import { Moon, Sun } from "lucide-react";
 import { useState } from "react";
 import { nextTheme, type ThemePreference } from "../../domain/appearance";
-import { applyTheme, loadTheme, saveTheme } from "../../services/appearance";
+import { applyTheme, currentTheme, saveTheme } from "../../services/appearance";
 
 interface Props {
   variant?: "icon" | "nav";
 }
 
 export function ThemeToggle({ variant = "nav" }: Props) {
-  const [theme, setTheme] = useState<ThemePreference>(() => loadTheme());
+  const [theme, setTheme] = useState<ThemePreference>(currentTheme);
   const dark = theme === "dark";
   const label = dark ? "切换为浅色模式" : "切换为深色模式";
 
