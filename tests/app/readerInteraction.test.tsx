@@ -194,12 +194,14 @@ describe("paragraph translation interaction", () => {
     await act(async () => container.querySelector<HTMLButtonElement>(".chart-context .secondary-button")!.click());
     await vi.waitFor(() => expect(stream).toHaveBeenCalledOnce());
     await act(async () => emit('{"summary":"图表正在'));
-    expect(container.querySelector(".assistant-chart-streaming")?.textContent).toContain("图表正在");
-    expect(container.querySelector(".assistant-chart-reading")).toBeNull();
-    expect(container.querySelector(".assistant-chart-streaming")?.textContent).not.toContain("summary");
+    const surface = container.querySelector(".assistant-chart-reading")!;
+    expect(surface.textContent).toContain("图表正在");
+    expect(surface.getAttribute("aria-busy")).toBe("true");
+    expect(surface.textContent).not.toContain("summary");
     expect(window.localStorage.getItem("zhiyan-workbench.analysis.v1")).not.toContain("图表正在");
     await act(async () => finish(value));
-    expect(container.querySelector(".assistant-chart-streaming")).toBeNull();
+    expect(container.querySelector(".assistant-chart-reading")).toBe(surface);
+    expect(surface.getAttribute("aria-busy")).toBe("false");
     expect(container.querySelector(".assistant-chart-reading")?.textContent).toContain("RAG 为 44.5");
     await act(async () => root.unmount()); container.remove();
   });

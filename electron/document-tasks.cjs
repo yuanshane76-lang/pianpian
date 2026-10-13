@@ -28,7 +28,7 @@ function progressMessage(state, progress) {
 }
 
 function needsLayoutRecovery(result) {
-  return Boolean(result?.blocks?.length && result.layoutVersion !== 2);
+  return Boolean(result?.blocks?.length && result.layoutVersion !== 3);
 }
 
 function preserveBlockIds(previous, result) {

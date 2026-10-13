@@ -208,8 +208,10 @@ export function ServiceSettingsDialog({ onClose, onSaved }: Props) {
                   {keyField("aliyun", "百炼 API Key")}
                   <label className="settings-field" htmlFor="aliyun-model">模型名称<input id="aliyun-model" value={model.aliyun} onChange={(event) => setModel((value) => ({ ...value, aliyun: event.target.value }))} /></label>
                   <p className="settings-endpoint">官方接口：{current.aliyun.baseUrl}</p>
-                  <a href="https://bailian.console.aliyun.com/" target="_blank" rel="noreferrer">打开百炼控制台 <ExternalLink size={13} /></a>
-                  <button type="button" className="secondary-button compact" disabled={busy || (!current.aliyun.configured && !keys.aliyun.trim()) || clearKeys.aliyun} onClick={() => testConnection("aliyun")}>测试所选模型（可能计费）</button>
+                  <div className="settings-service-actions">
+                    <a href="https://bailian.console.aliyun.com/" target="_blank" rel="noreferrer">打开百炼控制台 <ExternalLink size={13} /></a>
+                    <button type="button" className="secondary-button compact" disabled={busy || (!current.aliyun.configured && !keys.aliyun.trim()) || clearKeys.aliyun} onClick={() => testConnection("aliyun")}>测试所选模型（可能计费）</button>
+                  </div>
                 </>
               ) : null}
               {provider === "deepseek" ? (
@@ -217,8 +219,10 @@ export function ServiceSettingsDialog({ onClose, onSaved }: Props) {
                   {keyField("deepseek", "DeepSeek API Key")}
                   <label className="settings-field" htmlFor="deepseek-model">模型名称<input id="deepseek-model" value={model.deepseek} onChange={(event) => setModel((value) => ({ ...value, deepseek: event.target.value }))} /></label>
                   <p className="settings-endpoint">官方接口：{current.deepseek.baseUrl}</p>
-                  <a href="https://platform.deepseek.com/" target="_blank" rel="noreferrer">打开 DeepSeek 开放平台 <ExternalLink size={13} /></a>
-                  <button type="button" className="secondary-button compact" disabled={busy || (!current.deepseek.configured && !keys.deepseek.trim()) || clearKeys.deepseek} onClick={() => testConnection("deepseek")}>测试所选模型（可能计费）</button>
+                  <div className="settings-service-actions">
+                    <a href="https://platform.deepseek.com/" target="_blank" rel="noreferrer">打开 DeepSeek 开放平台 <ExternalLink size={13} /></a>
+                    <button type="button" className="secondary-button compact" disabled={busy || (!current.deepseek.configured && !keys.deepseek.trim()) || clearKeys.deepseek} onClick={() => testConnection("deepseek")}>测试所选模型（可能计费）</button>
+                  </div>
                 </>
               ) : null}
             </div>

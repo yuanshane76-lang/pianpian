@@ -19,6 +19,7 @@ interface ReaderAssistantProps {
   actionError: string | null; pendingAction: string | null; insight: { summary: string; role: string } | null;
   pendingParagraphActions?: ParagraphOperation[];
   paragraphAnalysisRequestId?: number;
+  chartAnalysisRequestId?: number;
   paragraphInsightText?: string;
   streamingOutput: { operation: import("../../services/ai").AiRequest["operation"]; text: string } | null;
   onInsight: () => void; guide: { overview: string; terms: Array<{ term: string; translation: string; definition: string }> } | null;
@@ -43,6 +44,7 @@ export function ReaderAssistant({
   onJump,
   originalId, chartReading, onReadChart,
   pendingParagraphActions = [], paragraphAnalysisRequestId, paragraphInsightText,
+  chartAnalysisRequestId,
   vocabularyBlock, onSaveTerm, isTermSaved,
   researchPanel,
 }: ReaderAssistantProps) {
@@ -73,6 +75,12 @@ export function ReaderAssistant({
     setTab("assist");
     setParagraphTab("translate");
   }, [paragraphAnalysisRequestId]);
+  useEffect(() => {
+    if (pendingAction === "chart") setTab("assist");
+  }, [pendingAction]);
+  useEffect(() => {
+    if (chartAnalysisRequestId !== undefined) setTab("assist");
+  }, [chartAnalysisRequestId]);
   useEffect(() => {
     scrollRef.current?.scrollTo?.({ top: 0 });
   }, [selectedBlock?.id, selectionText, tab, paragraphTab]);
