@@ -265,6 +265,59 @@ describe("continuous PDF page geometry", () => {
     expect(getPage.mock.calls.length).toBeLessThan(8);
   });
 
+  it("bounds pending page loads across rapid jumps and prioritizes the latest target", async () => {
+    const pending = new Map<number, (page: unknown) => void>();
+    const pdfPage = {
+      getViewport: ({ scale }: { scale: number }) => ({ width: 600 * scale, height: 800 * scale }),
+      render: () => ({ promise: Promise.resolve(), cancel: vi.fn() }),
+    };
+    const getPage = vi.fn((number: number) => number === 1 ? Promise.resolve(pdfPage)
+      : new Promise((resolve) => pending.set(number, resolve)));
+    vi.mocked(openPdf).mockResolvedValueOnce({ numPages: 300, getPage, destroy: async () => {} } as never);
+    const { rerender } = await mount([paragraph]);
+    for (let number = 10; number <= 100; number += 10) {
+      await rerender({ page: number, navigationTarget: { page: number, requestId: number } });
+    }
+    expect(pending.size).toBeLessThanOrEqual(3);
+    const first = pending.entries().next().value!;
+    pending.delete(first[0]);
+    await act(async () => first[1](pdfPage));
+    expect(getPage.mock.calls.at(-1)?.[0]).toBe(100);
+    expect(pending.size).toBeLessThanOrEqual(3);
+    expect(getPage.mock.calls.filter(([number]) => number === 100)).toHaveLength(1);
+  });
+
+  it("finishes an outline jump when earlier neighboring pages correct their estimated sizes", async () => {
+    const pending = new Map<number, (page: unknown) => void>();
+    const makePage = (height: number) => ({
+      getViewport: ({ scale }: { scale: number }) => ({ width: 600 * scale, height: height * scale }),
+      render: () => ({ promise: Promise.resolve(), cancel: vi.fn() }),
+    });
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(800);
+    const getPage = vi.fn((number: number) => number === 1 ? Promise.resolve(makePage(100))
+      : new Promise((resolve) => pending.set(number, resolve)));
+    vi.mocked(openPdf).mockResolvedValueOnce({ numPages: 30, getPage, destroy: async () => {} } as never);
+    const far = { ...paragraph, id: "mixed-size-outline", pageNumber: 20 };
+    const { container, rerender } = await mount([paragraph, far]);
+    for (let pass = 0; pass < 10 && pending.size; pass += 1) {
+      const batch = [...pending.entries()];
+      pending.clear();
+      await act(async () => batch.forEach(([, finish]) => finish(makePage(800))));
+    }
+    await rerender({ page: 20, focusTarget: { id: far.id, requestId: 1 } });
+    for (let pass = 0; pass < 10; pass += 1) {
+      const neighbors = [...pending.entries()].filter(([number]) => number < 20);
+      if (!neighbors.length) break;
+      neighbors.forEach(([number]) => pending.delete(number));
+      await act(async () => neighbors.forEach(([, finish]) => finish(makePage(800))));
+    }
+    expect(pending.has(20)).toBe(true);
+    await act(async () => pending.get(20)!(makePage(800)));
+    expect(container.querySelector('.pdf-page-stage[data-page-number="20"][data-rendered="true"]')).not.toBeNull();
+    expect(scrollIntoView).toHaveBeenCalledOnce();
+    expect(scrollIntoView.mock.instances[0]).toBe(container.querySelector(`[id="pdf-block-${far.id}"]`));
+  });
+
   it("preserves the page-relative reading anchor when zoom changes", async () => {
     const { container } = await mount([paragraph, nextParagraph]);
     const scroll = container.querySelector<HTMLElement>(".pdf-canvas-scroll")!;
@@ -328,6 +381,27 @@ describe("continuous PDF page geometry", () => {
     }));
     expect(container.querySelectorAll(".pdf-page-slot")).toHaveLength(2);
     expect(container.querySelector<HTMLElement>(".pdf-page-slot")?.style.width).toBe("660px");
+    expect(container.querySelector(".parse-warning")).toBeNull();
+  });
+
+  it("cleans a subsequent lazy page returned after replacing the document without restarting its queue", async () => {
+    const pending = new Map<number, (page: unknown) => void>();
+    const firstPage = {
+      getViewport: ({ scale }: { scale: number }) => ({ width: 600 * scale, height: 800 * scale }),
+      render: () => ({ promise: Promise.resolve(), cancel: vi.fn() }),
+    };
+    const getPage = vi.fn((number: number) => number === 1 ? Promise.resolve(firstPage)
+      : new Promise((resolve) => pending.set(number, resolve)));
+    vi.mocked(openPdf).mockResolvedValueOnce({ numPages: 30, getPage, destroy: async () => {} } as never);
+    const { container, rerender } = await mount([paragraph]);
+    expect(pending.has(2)).toBe(true);
+    await rerender({ originalId: "replacement-original" });
+    const before = getPage.mock.calls.length;
+    const cleanup = vi.fn();
+    await act(async () => pending.get(2)!({ ...firstPage, cleanup }));
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(getPage.mock.calls).toHaveLength(before);
+    expect(container.querySelectorAll(".pdf-page-slot")).toHaveLength(2);
     expect(container.querySelector(".parse-warning")).toBeNull();
   });
 

@@ -74,7 +74,7 @@ Literature search currently uses **Crossref's public scholarly metadata**, with 
 3. **Open the original.** Reading unlocks only after parsed results, assets, and every reading region's coordinates are ready. Failed preparation can be retried from the library.
 4. **Request assistance.** Model analysis starts on user action. Import, parsing completion, and restart recovery do not trigger AI analysis. Model failures do not prevent reading an already prepared paper.
 
-The reader first creates lightweight placeholders for the whole paper, then loads the first page and pages near the current viewport. Scrolling or navigating to another page loads it on demand, avoiding a large burst of PDF rendering resources when opening a long paper.
+The reader first creates lightweight placeholders for the whole paper, then loads the first page and pages near the current viewport. At most three page loads run at once, with the navigation target taking priority. Scrolling or navigating to another page loads it on demand, keeping requests bounded when opening a long paper or rapidly changing pages.
 
 ## Getting started
 
