@@ -25,7 +25,7 @@ function clearLegacyStorage(storage: Storage): void {
 function parseEntries(value: string | null): AnalysisCacheEntry[] {
   if (!value) return [];
   try {
-    const parsed = JSON.parse(value) as AnalysisCacheEntry[];
+    const parsed: unknown = JSON.parse(value);
     return Array.isArray(parsed)
       ? parsed.filter(
           (entry): entry is AnalysisCacheEntry =>
@@ -35,6 +35,7 @@ function parseEntries(value: string | null): AnalysisCacheEntry[] {
                 typeof entry.paperId === "string" &&
                 typeof entry.scopeId === "string" &&
                 typeof entry.operation === "string" &&
+                entry.operation !== "overview" &&
                 typeof entry.sourceSignature === "string" &&
                 typeof entry.value === "string" &&
                 typeof entry.createdAt === "string",

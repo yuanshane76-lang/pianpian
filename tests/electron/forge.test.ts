@@ -22,6 +22,10 @@ describe("portable package contents", () => {
     expect(ignored("electron/document-store.cjs")).toBe(false);
     expect(ignored("electron/document-tasks.cjs")).toBe(false);
     expect(ignored("electron/mineru.cjs")).toBe(false);
+    expect(ignored("electron/pi-agent.cjs")).toBe(false);
+    expect(ignored("electron/research-agent-runtime.cjs")).toBe(false);
+    expect(ignored("node_modules/@earendil-works/pi-coding-agent/dist/index.js")).toBe(false);
+    expect(ignored("node_modules/vitest/vitest.mjs")).toBe(true);
     expect(ignored("dist/index.html")).toBe(false);
     expect(ignored("dist/pdf.worker.min.mjs")).toBe(false);
     expect(ignored("dist/assets/index-123.js")).toBe(false);
@@ -48,5 +52,16 @@ describe("portable package contents", () => {
     ]) {
       expect(ignored(file), file).toBe(true);
     }
+  });
+
+  it("includes the shipped research workflows but excludes unregistered skill files", () => {
+    expect(ignored("electron/research-skills.cjs")).toBe(false);
+    expect(ignored("skills/research/manifest.json")).toBe(false);
+    for (const name of ["paper-deep-reading", "literature-search-review", "literature-comparison-notes"]) {
+      expect(ignored(`skills/research/${name}/SKILL.md`)).toBe(false);
+      expect(ignored(`skills/research/${name}/private.pdf`)).toBe(true);
+    }
+    expect(ignored("skills/research/private-skill/SKILL.md")).toBe(true);
+    expect(ignored("skills/personal/SKILL.md")).toBe(true);
   });
 });

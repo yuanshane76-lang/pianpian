@@ -12,7 +12,7 @@ if (process.versions.electron) {
   const { createDocumentStore } = require("../electron/document-store.cjs");
   const fixtureDocuments = createDocumentStore({ rootDirectory: path.join(app.getPath("userData"), "documents") });
   globalThis.publishVocabularyFixture = async (paper) => {
-    await fixtureDocuments.saveParse(paper.originalId, { resultBatchId: "synthetic-batch", layoutVersion: 1,
+    await fixtureDocuments.saveParse(paper.originalId, { resultBatchId: "synthetic-batch", layoutVersion: 3,
       title: paper.title, blocks: paper.blockData, pageCount: 1 });
     await fixtureDocuments.saveTask(paper.originalId, { state: "done", batchId: "synthetic-batch", resultBatchId: "synthetic-batch" });
   };
@@ -117,22 +117,19 @@ if (process.versions.electron) {
       await page.locator(".import-button input").setInputFiles({
         name: "academic-fixture.pdf", mimeType: "application/pdf", buffer: Buffer.from(syntheticPdf()),
       });
-      await page.waitForSelector(".reader-shell");
-      await page.waitForSelector('.pdf-page-stage[data-rendered="true"]');
-      await page.waitForFunction(() => {
-        const paper = JSON.parse(localStorage.getItem("zhiyan-workbench.papers.v1") || "[]")[0];
-        return paper?.parseStatus === "ready" && paper.blockData?.length > 0;
-      });
-      assert.equal(await electron.evaluate(() => globalThis.vocabularyE2e.requests.length), 0, "Import and basic extraction do not call a model");
+      await page.waitForSelector(".paper-row-progress");
+      assert(await page.getByRole("button", { name: "打开阅读", exact: true }).isDisabled());
+      assert.equal(await page.locator(".reader-shell").count(), 0);
+      assert.equal(await electron.evaluate(() => globalThis.vocabularyE2e.requests.length), 0, "Import waiting for MinerU does not call a model");
       assert.equal(await page.getByText(/中文预览|后台翻译|导入与翻译/).count(), 0);
       await page.screenshot({ path: path.join(output, "00-import-no-background-ai.png") });
-      report.checks.push("Real PDF import and local extraction with configured AI produce zero model requests");
+      report.checks.push("Real PDF import waits for MinerU with configured AI and produces zero model requests");
       await page.evaluate(async (bytes) => {
         const saved = await window.zhiyan.invoke("zhiyan:documents:save", { name: "academic-fixture.pdf", data: new Uint8Array(bytes) });
         await window.zhiyan.invoke("zhiyan:settings:save", { aiProvider: "deepseek", deepseek: { apiKey: "synthetic-test-placeholder", model: "deepseek-flash" } });
         const paper = {
           id: saved.id, originalId: saved.id, title: "Academic Reading Fixture", authors: [], year: null, sourcePath: `local://${saved.id}`,
-          importedAt: "2026-10-09", tags: [], favorite: false, overview: null, blocks: 3, parseVersion: 2, parseStatus: "ready", pageCount: 1,
+          importedAt: "2026-10-09", tags: [], favorite: false, blocks: 3, parseVersion: 2, parseStatus: "ready", pageCount: 1,
           blockData: [
             { id: "fixture-a", kind: "paragraph", pageNumber: 1, order: 0, text: "The model uses attention to select useful features. An ablation study evaluates the model.", bbox: [.09, .14, .92, .20] },
             { id: "fixture-b", kind: "paragraph", pageNumber: 1, order: 1, text: "The hypothesis supports inference and estimation.", bbox: [.09, .36, .92, .40] },
@@ -158,12 +155,15 @@ if (process.versions.electron) {
       assert.equal(await electron.evaluate(() => globalThis.vocabularyE2e.requests.length), 0, "Restoring parsed results does not call a model");
       assert.equal(await page.getByText(/中文预览|后台翻译|导入与翻译/).count(), 0);
       report.checks.push("Completed MinerU restore leaves original readable without translation counters or automatic model calls");
-      assert.equal(await page.locator(".pipeline-step").count(), 2);
+      assert.equal(await page.getByRole("region", { name: "论文准备进度", exact: true }).count(), 0);
       assert.equal(await page.locator(".reader-processing").count(), 0);
       const beforeToast = await page.locator(".reader-layout").boundingBox();
       await page.locator(".reader-ready-toast").waitFor({ state: "hidden", timeout: 6000 });
       assert.deepEqual(await page.locator(".reader-layout").boundingBox(), beforeToast);
-      report.checks.push("Original and positioning statuses stay independent; readiness toast auto-dismisses without moving the PDF");
+      const topbar = await page.locator(".reader-topbar").boundingBox();
+      assert(topbar && beforeToast && Math.abs(topbar.y + topbar.height - beforeToast.y) < 1,
+        "The PDF layout starts immediately below the toolbar without a permanent preparation row");
+      report.checks.push("No permanent preparation row; readiness toast auto-dismisses without moving the PDF");
       await page.locator("#pdf-block-fixture-a").focus();
       await page.keyboard.press("Enter");
       await page.getByRole("tab", { name: /学术词汇/ }).click();
@@ -185,12 +185,9 @@ if (process.versions.electron) {
       report.checks.push("Paragraph-only vocabulary, real secure IPC, SSE request and explicit collection");
 
       await page.getByRole("tab", { name: "读懂这段", exact: true }).click();
-      const arrow = page.locator(".assistant-overview > summary > svg");
-      assert.equal(await arrow.evaluate((element) => getComputedStyle(element).outlineStyle), "none");
-      await page.locator(".assistant-overview").evaluate((element) => { element.open = true; });
-      await page.waitForFunction(() => getComputedStyle(document.querySelector(".assistant-overview > summary > svg")).transform.startsWith("matrix(-1"));
-      await page.locator(".assistant-overview").evaluate((element) => { element.open = false; });
-      report.checks.push("Disclosure arrow rotates when open and has no persistent focus outline");
+      assert.equal(await page.locator(".assistant-overview").count(), 0);
+      assert.equal(await page.getByText("论文概览", { exact: true }).count(), 0);
+      report.checks.push("Whole-paper overview module and action are absent");
       await page.getByRole("tab", { name: "摘要与作用", exact: true }).click();
       await page.waitForSelector(".paragraph-progress");
       await emit(1, '{"summary":"这段介绍注意力');
@@ -201,14 +198,48 @@ if (process.versions.electron) {
       await page.locator(".assistant-insight").getByText("连接方法与评价。", { exact: true }).waitFor();
       await page.getByRole("tab", { name: "解释", exact: true }).click();
       await page.waitForSelector(".assistant-explanation .spin");
-      await emit(2, "## 核心术语\n\n**注意力**：根据相关性选择信息。\n\n- 方法：分配权重。\n- 评价：消融实验。\n\n| 术语 | 含义 |\n| --- | --- |\n| ablation | 消融 |\n\n<img src=\"https://example.com/track.png\">\n\n[引用](javascript:alert(1))", true);
+      await emit(2, "## 核心术语\n\n**注意力**：根据相关性选择信息。\n\n循环模型按序列位置计算：时间步 $t$ 的隐藏状态 $h_t$ 依赖上一状态 $h_{t");
+      await page.locator(".assistant-explanation .katex").first().waitFor();
+      assert.equal(await page.locator(".assistant-explanation .katex").count(), 2);
+      assert.equal(await page.locator(".assistant-explanation").getAttribute("aria-busy"), "true");
+      assert((await page.locator(".assistant-explanation").textContent()).includes("$h_{t"));
+      await emit(2, "-1}$ 和当前输入。\n\n$$\nh_t = f(h_{t-1}, x_t) + \\frac{a}{b}\n$$\n\n- 方法：分配权重。\n- 评价：消融实验。\n\n| 术语 | 含义 |\n| --- | --- |\n| ablation | 消融 |\n\n长公式：\n\n$$\n" +
+        Array(6).fill("\\sum_{i=1}^{n} x_i^2 + \\frac{a_i}{b_i}").join(" + ") +
+        "\n$$\n\n<img src=\"https://example.com/track.png\">\n\n[引用](javascript:alert(1))", true);
       await page.locator(".assistant-explanation h2").getByText("核心术语", { exact: true }).waitFor();
       assert.equal(await page.locator(".assistant-explanation strong").first().textContent(), "注意力");
       assert.equal(await page.locator(".assistant-explanation li").count(), 2);
       assert.equal(await page.locator(".assistant-explanation table").count(), 1);
       assert.equal(await page.locator(".assistant-explanation img, .assistant-explanation a").count(), 0);
+      assert.equal(await page.locator(".assistant-explanation .katex").count(), 5);
+      assert.equal(await page.locator(".assistant-explanation .katex-display").count(), 2);
+      assert.equal(await page.locator(".assistant-explanation").getAttribute("aria-busy"), "false");
       await page.screenshot({ path: path.join(output, "03-markdown-explanation.png") });
-      report.checks.push("Summary visible before completion; Markdown headings, emphasis, lists, GFM table and HTML safety");
+      const explanationBounds = await page.locator(".assistant-explanation").evaluate((element) => ({
+        width: element.clientWidth, scrollWidth: element.scrollWidth,
+        math: [...element.querySelectorAll(".markdown-math")].map((math) => ({
+          width: math.clientWidth, scrollWidth: math.scrollWidth,
+          font: getComputedStyle(math.querySelector(".katex")).fontSize,
+        })),
+      }));
+      assert(explanationBounds.scrollWidth <= explanationBounds.width + 1, "Explanation formulas must not widen the assistant");
+      report.checks.push({ name: "Streaming Markdown and math; headings, emphasis, lists, GFM table, HTML safety and contained formula layout", explanationBounds });
+      for (const [name, width, height] of [["laptop", 1024, 768], ["narrow", 390, 844]]) {
+        await page.setViewportSize({ width, height });
+        const layout = await page.locator(".assistant-explanation").evaluate((element) => {
+          const inline = [...element.querySelectorAll(".markdown-math:not(.markdown-math-display)")];
+          const long = [...element.querySelectorAll(".markdown-math-display")].at(-1);
+          return { width: element.clientWidth, scrollWidth: element.scrollWidth,
+            shortMathFits: inline.every((math) => math.scrollWidth <= math.clientWidth + 1),
+            longMathScrolls: long.scrollWidth > long.clientWidth + 1 };
+        });
+        assert(layout.scrollWidth <= layout.width + 1, `${name}: formulas stay inside the explanation`);
+        assert(layout.shortMathFits, `${name}: short variables have no spurious scrollbar`);
+        assert(layout.longMathScrolls, `${name}: long formula scrolls within its own area`);
+        await page.locator(".reader-assistant").screenshot({ path: path.join(output, `03-explanation-${name}.png`) });
+        report.checks.push({ name: `explanation-math-${name}`, width, height, layout });
+      }
+      await page.setViewportSize({ width: 1440, height: 920 });
 
       await page.getByRole("tab", { name: "翻译", exact: true }).click();
       await page.waitForSelector('.assistant-translation[aria-busy="true"]');
@@ -220,9 +251,10 @@ if (process.versions.electron) {
       await page.screenshot({ path: path.join(output, "05-on-demand-translation.png") });
       report.checks.push("Only explicit translate click starts a streaming translation");
 
-      await page.locator("#pdf-block-fixture-table").focus();
-      await page.keyboard.press("Enter");
-      await page.getByRole("button", { name: "读图表", exact: true }).click();
+      await page.locator("#pdf-block-fixture-table").scrollIntoViewIfNeeded();
+      const tableText = page.locator(".pdf-text-layer span").filter({ hasText: "Method Accuracy" }).first();
+      const tableTextBox = await tableText.boundingBox();
+      await page.mouse.dblclick(tableTextBox.x + 12, tableTextBox.y + tableTextBox.height / 2);
       await page.waitForSelector(".chart-reading-progress");
       await page.waitForFunction(() => document.querySelector(".chart-context .figure-image-button img")?.complete);
       const chartRequest = await waitForRequest(4);
@@ -230,15 +262,98 @@ if (process.versions.electron) {
       assert.equal(chartRequest.stream, true);
       assert.equal(chartRequest.imageAttached, true);
       assert.deepEqual(chartRequest.thinking, { type: "disabled" });
-      await emit(4, '{"summary":"图表逐步比较成绩');
-      await page.locator(".assistant-chart-streaming").getByText("图表逐步比较成绩", { exact: true }).waitFor();
-      assert(!(await page.locator(".assistant-chart-streaming").innerText()).includes("summary"));
+      await page.mouse.dblclick(tableTextBox.x + 12, tableTextBox.y + tableTextBox.height / 2);
+      assert.equal(await electron.evaluate(() => globalThis.vocabularyE2e.requests.length), 5);
+      assert.equal(await page.evaluate(() => window.getSelection().toString()), "");
+      await emit(4, '{"summary":"图表逐步**比较成绩**');
+      await page.locator('.assistant-chart-reading[aria-busy="true"]').getByText("图表逐步比较成绩", { exact: true }).waitFor();
+      await page.locator('.assistant-chart-reading[aria-busy="true"] .markdown-content strong').waitFor();
+      assert.equal(await page.locator('.assistant-chart-reading[aria-busy="true"] .markdown-content strong').innerText(), "比较成绩");
+      const chartSurface = await page.locator(".assistant-chart-reading").evaluate((element) => ({
+        maxHeight: getComputedStyle(element).maxHeight, overflowY: getComputedStyle(element).overflowY,
+      }));
+      assert.equal(chartSurface.maxHeight, "none");
+      assert.notEqual(chartSurface.overflowY, "auto");
+      assert(!(await page.locator('.assistant-chart-reading[aria-busy="true"]').innerText()).includes("summary"));
       assert(!(await page.evaluate(() => localStorage.getItem("zhiyan-workbench.analysis.v1"))).includes("图表逐步"));
       await page.screenshot({ path: path.join(output, "06-streaming-chart.png") });
       await emit(4, '。","encoding":"准确率越高越好","findings":["RAG 44.5，Baseline 40.0"],"role":"比较实验结果","caveats":["仅比较该实验条件"]}', true);
       await page.locator(".assistant-chart-reading").getByText("RAG 44.5，Baseline 40.0", { exact: true }).waitFor();
-      assert.equal(await page.locator(".assistant-chart-streaming").count(), 0);
-      report.checks.push("Image chart request disables thinking, streams readable fields before completion and caches only validated final results");
+      assert.equal(await page.locator('.assistant-chart-reading[aria-busy="true"]').count(), 0);
+      report.checks.push("Native PDF table-word double-click starts one chart SSE request; repeated double-click does not cancel or duplicate it; Markdown renders immediately in the same unbounded result surface");
+
+      const paragraph = page.locator("#pdf-block-fixture-b");
+      await paragraph.scrollIntoViewIfNeeded();
+      const paragraphPoint = await paragraph.boundingBox();
+      assert(paragraphPoint, "The second paragraph is visible for a real double-click");
+      await page.mouse.dblclick(paragraphPoint.x + paragraphPoint.width / 2, paragraphPoint.y + paragraphPoint.height / 2);
+      await page.waitForFunction(() => document.querySelector('[data-operation="translate"] .spin') &&
+        document.querySelector('[data-operation="explain"] .spin') &&
+        document.querySelector('[data-operation="insight"] .spin') &&
+        document.querySelector(".assistant-tabs button:nth-child(2) .spin"));
+      const bundle = [];
+      for (let index = 5; index < 9; index++) bundle.push({ index, ...await waitForRequest(index) });
+      assert.deepEqual(bundle.map((request) => request.operation).sort(), ["explain", "insight", "translate", "vocabulary"]);
+      for (const request of bundle) {
+        assert.equal(request.stream, true);
+        assert.deepEqual(request.thinking, { type: "disabled" });
+        assert(request.prompt.includes("The hypothesis supports inference and estimation."));
+      }
+      const job = (operation) => bundle.find((request) => request.operation === operation).index;
+      const vocabularyRequest = bundle.find((request) => request.operation === "vocabulary");
+      assert(!vocabularyRequest.prompt.includes("attention") && !vocabularyRequest.prompt.includes("RAG"), "Automatic vocabulary sends only the double-clicked paragraph");
+      await emit(job("translate"), "本段假设用于");
+      await emit(job("explain"), "## 推理与估计\n\n**假设**作为前提。");
+      await emit(job("insight"), '{"summary":"本段逐步说明假设');
+      await page.locator(".assistant-translation").getByText("本段假设用于", { exact: true }).waitFor();
+      await page.getByRole("tab", { name: "摘要与作用", exact: true }).click();
+      await page.locator(".assistant-insight").getByText("本段逐步说明假设", { exact: true }).waitFor();
+      assert.equal(await page.locator(".assistant-insight").getAttribute("aria-busy"), "true");
+      await page.screenshot({ path: path.join(output, "07-bundle-streaming-insight.png") });
+      await page.getByRole("tab", { name: /学术词汇/ }).click();
+      await page.getByText("正在挑选段落词汇…", { exact: true }).waitFor();
+      await page.screenshot({ path: path.join(output, "08-bundle-vocabulary-running.png") });
+      await emit(job("vocabulary"), '{"overview":"本段关注假设、推理与估计。","terms":[{"term":"hypothesis","translation":"假设","definition":"支撑推理的前提。"}]}', true);
+      await page.getByText("本段词汇已生成", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "将 hypothesis 加入单词表", exact: true }).waitFor();
+      assert(await page.locator(".vocabulary-panel").getByText("hypothesis", { exact: true }).isVisible());
+      const noAutomaticCollection = await page.evaluate(() => JSON.parse(localStorage.getItem("zhiyan-workbench.wordbook.v1") || "[]").map((entry) => entry.term));
+      assert.deepEqual(noAutomaticCollection, ["attention"], "AI selection never automatically adds a word to the wordbook");
+      await page.screenshot({ path: path.join(output, "09-bundle-vocabulary-complete.png") });
+      await emit(job("translate"), "推理与估计。", true);
+      await emit(job("explain"), "\n\n论证随后使用推理与估计。", true);
+      await emit(job("insight"), '。","role":"连接假设与方法。"}', true);
+      await page.getByRole("tab", { name: "读懂这段", exact: true }).click();
+      await page.getByRole("tab", { name: "解释", exact: true }).click();
+      await page.locator(".assistant-explanation h2").getByText("推理与估计", { exact: true }).waitFor();
+      await page.screenshot({ path: path.join(output, "10-bundle-explanation-complete.png") });
+      await page.getByRole("tab", { name: "摘要与作用", exact: true }).click();
+      await page.locator(".assistant-insight").getByText("连接假设与方法。", { exact: true }).waitFor();
+      assert.equal(await page.locator(".assistant-insight").getAttribute("aria-busy"), "false");
+      await paragraph.scrollIntoViewIfNeeded();
+      const repeatedPoint = await paragraph.boundingBox();
+      await page.mouse.dblclick(repeatedPoint.x + repeatedPoint.width / 2, repeatedPoint.y + repeatedPoint.height / 2);
+      await page.getByRole("tab", { name: "翻译", exact: true }).waitFor();
+      assert.equal(await electron.evaluate(() => globalThis.vocabularyE2e.requests.length), 9, "Repeated double-click reuses all four completed results");
+      await page.reload();
+      await page.getByRole("button", { name: "打开阅读", exact: true }).click();
+      await page.waitForSelector('.pdf-page-stage[data-rendered="true"]');
+      await paragraph.scrollIntoViewIfNeeded();
+      const restoredPoint = await paragraph.boundingBox();
+      await page.mouse.click(restoredPoint.x + restoredPoint.width / 2, restoredPoint.y + restoredPoint.height / 2);
+      await page.getByRole("tab", { name: "解释", exact: true }).click();
+      await page.locator(".assistant-explanation h2").getByText("推理与估计", { exact: true }).waitFor();
+      assert.equal(await electron.evaluate(() => globalThis.vocabularyE2e.requests.length), 9, "Individual explanation uses its persisted cache after reload");
+      await page.mouse.dblclick(restoredPoint.x + restoredPoint.width / 2, restoredPoint.y + restoredPoint.height / 2);
+      await page.locator(".assistant-translation").getByText("本段假设用于推理与估计。", { exact: true }).waitFor();
+      await page.getByRole("tab", { name: "摘要与作用", exact: true }).click();
+      await page.locator(".assistant-insight").getByText("连接假设与方法。", { exact: true }).waitFor();
+      await page.getByRole("tab", { name: "解释", exact: true }).click();
+      await page.locator(".assistant-explanation h2").getByText("推理与估计", { exact: true }).waitFor();
+      await page.getByRole("tab", { name: /学术词汇/ }).click();
+      await page.getByText("本段词汇已生成", { exact: true }).waitFor();
+      assert.equal(await electron.evaluate(() => globalThis.vocabularyE2e.requests.length), 9, "Reload restores all four caches without model calls");
+      report.checks.push("Real paragraph double-click starts four independent streams with thinking disabled, displays insight before completion, automatically selects paragraph vocabulary and reuses all results after reload");
 
       await page.getByRole("button", { name: "打开单词表", exact: true }).click();
       await page.getByRole("dialog", { name: "单词表", exact: true }).waitFor();
@@ -263,14 +378,6 @@ if (process.versions.electron) {
             controlsFit: controls.every((item) => { const rect = item.getBoundingClientRect(); return rect.x >= 0 && rect.right <= innerWidth + 1; }) };
         });
         assert(bounds.fits && bounds.horizontalOverflow <= 1 && bounds.controlsFit, `${name}: modal and controls fit`);
-        const progressFits = await page.locator(".pipeline-status-bar").evaluate((bar) => {
-          const rect = bar.getBoundingClientRect();
-          return [...bar.querySelectorAll(".pipeline-step, .pipeline-control")].every((element) => {
-            const child = element.getBoundingClientRect();
-            return child.left >= rect.left && child.right <= rect.right + 1 && child.top >= rect.top && child.bottom <= rect.bottom + 1;
-          });
-        });
-        assert(progressFits, `${name}: reading status fits`);
         await page.screenshot({ path: path.join(output, `04-wordbook-${name}.png`) });
         report.checks.push({ name: `wordbook-${name}`, width, height, bounds });
       }
@@ -289,7 +396,7 @@ if (process.versions.electron) {
         unexpectedRequests: globalThis.vocabularyE2e.unexpectedRequests,
         requests: globalThis.vocabularyE2e.requests.map(({ operation, stream, thinking }) => ({ operation, stream, thinking })),
       }));
-      assert.equal(state.count, 5);
+      assert.equal(state.count, 9);
       assert.equal(state.unexpectedRequests, 0);
       assert.deepEqual(report.errors, []);
       report.transport = state;

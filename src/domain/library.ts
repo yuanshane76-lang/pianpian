@@ -1,6 +1,10 @@
 import type { DocumentBlock } from "./documentBlocks";
 
 export interface PaperRecord {
+  recordType?: "reference";
+  doi?: string;
+  landingUrl?: string;
+  abstract?: string;
   id: string;
   title: string;
   authors: string[];
@@ -9,7 +13,6 @@ export interface PaperRecord {
   importedAt: string;
   tags: string[];
   favorite: boolean;
-  overview: string | null;
   blocks: number;
   blockData?: DocumentBlock[];
   parseStatus?: "pending" | "ready" | "fallback";
@@ -18,7 +21,7 @@ export interface PaperRecord {
   pageCount?: number;
   parseVersion?: number;
   mineruBatchId?: string;
-  readingPosition?: { mode: "pdf" | "reading"; page: number; blockId?: string };
+  readingPosition?: { mode: "pdf" | "reading"; page: number; blockId?: string; regionId?: string };
 }
 
 export interface PaperMetadataPatch {

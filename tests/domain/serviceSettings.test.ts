@@ -7,10 +7,10 @@ import {
 } from "../../src/domain/serviceSettings";
 
 describe("service settings", () => {
-  it("provides local mode defaults without configured secrets", () => {
-    expect(DEFAULT_SERVICE_SETTINGS.aiProvider).toBe("local");
+  it("provides a real provider default without configured secrets", () => {
+    expect(DEFAULT_SERVICE_SETTINGS.aiProvider).toBe("deepseek");
     expect(toPublicServiceSettings(DEFAULT_SERVICE_SETTINGS)).toMatchObject({
-      aiProvider: "local",
+      aiProvider: "deepseek",
       aliyun: { configured: false, model: "qwen-plus" },
       deepseek: { configured: false, model: "deepseek-flash" },
       mineru: { configured: false },

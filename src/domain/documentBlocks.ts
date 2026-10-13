@@ -18,6 +18,8 @@ export interface DocumentBlock {
   caption?: string;
   /** Top-left page fractions [x0, y0, x1, y1], all in 0–1. */
   bbox?: [number, number, number, number];
+  /** Disjoint physical regions of one canonical paragraph, including same-page columns. */
+  pageBounds?: Array<{ pageNumber: number; bbox: [number, number, number, number] }>;
   pageWidth?: number;
   pageHeight?: number;
 }

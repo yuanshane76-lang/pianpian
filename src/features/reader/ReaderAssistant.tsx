@@ -1,5 +1,5 @@
-import { BookOpen, Bot, Check, ChevronDown, Copy, Languages, LoaderCircle, MessageSquareText, RotateCcw, Send, Sparkles, Settings2 } from "lucide-react";
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { BookOpen, Bot, Check, Copy, Languages, LoaderCircle, MessageSquareText, RotateCcw, Send, Sparkles, Settings2 } from "lucide-react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { DocumentBlock } from "../../domain/documentBlocks";
 import type { AcademicTerm } from "../../domain/vocabulary";
 import { VocabularyPanel } from "./VocabularyPanel";
@@ -8,15 +8,19 @@ import { ChartContext } from "./ChartContext";
 import { TranslationContent } from "./TranslationContent";
 import { MarkdownContent } from "./MarkdownContent";
 import { previewParagraphInsight } from "../../domain/learning";
+import type { ParagraphOperation } from "../../domain/analysis";
 
 interface ReaderAssistantProps {
+  researchPanel?: ReactNode;
   originalId?: string; chartReading: import("../../domain/learning").ChartReading | null; onReadChart: () => void;
-  selectedBlock: DocumentBlock | null; overview: string | null; answer: string | null; isBusy: boolean;
-  onOverview: () => void; onTranslate: () => void; onExplain: () => void; explanation: string | null; onAsk: (question: string) => void;
+  selectedBlock: DocumentBlock | null; answer: string | null; isBusy: boolean;
+  onTranslate: () => void; onExplain: (force?: boolean) => void; explanation: string | null; onAsk: (question: string) => void;
   translation: string | null; selectionText: string; serviceLabel: string; serviceModel: string; aiAvailable: boolean; onOpenSettings: () => void;
   actionError: string | null; pendingAction: string | null; insight: { summary: string; role: string } | null;
-  pendingParagraphActions?: Array<"translate" | "explain">;
+  pendingParagraphActions?: ParagraphOperation[];
   paragraphAnalysisRequestId?: number;
+  chartAnalysisRequestId?: number;
+  paragraphInsightText?: string;
   streamingOutput: { operation: import("../../services/ai").AiRequest["operation"]; text: string } | null;
   onInsight: () => void; guide: { overview: string; terms: Array<{ term: string; translation: string; definition: string }> } | null;
   onGuide: () => void; vocabulary: AcademicTerm[];
@@ -34,16 +38,18 @@ const PARAGRAPH_TABS = [
 type ParagraphTab = typeof PARAGRAPH_TABS[number]["operation"];
 
 export function ReaderAssistant({
-  selectedBlock, overview, answer, isBusy, onOverview, onTranslate, onExplain, explanation, onAsk,
+  selectedBlock, answer, isBusy, onTranslate, onExplain, explanation, onAsk,
   translation, selectionText, serviceLabel, serviceModel, aiAvailable, onOpenSettings, actionError, pendingAction,
   streamingOutput, insight, onInsight, guide, onGuide, vocabulary,
   onJump,
   originalId, chartReading, onReadChart,
-  pendingParagraphActions = [], paragraphAnalysisRequestId,
+  pendingParagraphActions = [], paragraphAnalysisRequestId, paragraphInsightText,
+  chartAnalysisRequestId,
   vocabularyBlock, onSaveTerm, isTermSaved,
+  researchPanel,
 }: ReaderAssistantProps) {
   const [question, setQuestion] = useState("");
-  const [tab, setTab] = useState<"assist" | "vocabulary">("assist");
+  const [tab, setTab] = useState<"assist" | "vocabulary" | "research">("assist");
   const [paragraphTab, setParagraphTab] = useState<ParagraphTab>("translate");
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [questionSequence, setQuestionSequence] = useState(0);
@@ -60,13 +66,21 @@ export function ReaderAssistant({
   const explaining = pendingAction === "explain" || pendingParagraphActions.includes("explain");
   const translationText = translation || (streamingOutput?.operation === "translate" ? streamingOutput.text : "");
   const chartStreamingText = streamingOutput?.operation === "chart" ? streamingOutput.text : "";
-  const insightLoading = pendingAction === "insight";
-  const displayedInsight = insight ?? (streamingOutput?.operation === "insight" ? previewParagraphInsight(streamingOutput.text) : null);
+  const insightLoading = pendingAction === "insight" || pendingParagraphActions.includes("insight");
+  const vocabularyLoading = pendingAction === "vocabulary" || pendingParagraphActions.includes("vocabulary");
+  const displayedInsight = paragraphInsightText !== undefined ? previewParagraphInsight(paragraphInsightText)
+    : insight ?? (streamingOutput?.operation === "insight" ? previewParagraphInsight(streamingOutput.text) : null);
   useEffect(() => {
     if (paragraphAnalysisRequestId === undefined) return;
     setTab("assist");
     setParagraphTab("translate");
   }, [paragraphAnalysisRequestId]);
+  useEffect(() => {
+    if (pendingAction === "chart") setTab("assist");
+  }, [pendingAction]);
+  useEffect(() => {
+    if (chartAnalysisRequestId !== undefined) setTab("assist");
+  }, [chartAnalysisRequestId]);
   useEffect(() => {
     scrollRef.current?.scrollTo?.({ top: 0 });
   }, [selectedBlock?.id, selectionText, tab, paragraphTab]);
@@ -102,16 +116,18 @@ export function ReaderAssistant({
 
   function changeTab(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     let next: number;
-    if (event.key === "ArrowRight" || event.key === "ArrowLeft") next = 1 - index;
+    const count = researchPanel ? 3 : 2;
+    if (event.key === "ArrowRight") next = (index + 1) % count;
+    else if (event.key === "ArrowLeft") next = (index + count - 1) % count;
     else if (event.key === "Home") next = 0;
-    else if (event.key === "End") next = 1;
+    else if (event.key === "End") next = count - 1;
     else return;
     event.preventDefault();
-    setTab(next === 0 ? "assist" : "vocabulary");
+    setTab(next === 0 ? "assist" : next === 1 ? "vocabulary" : "research");
     tabsRef.current[next]?.focus();
   }
 
-  function runParagraphAction(operation: ParagraphTab) {
+  function runParagraphAction(operation: ParagraphTab, force = false) {
     if (isBusy) return;
     if (!aiAvailable) { onOpenSettings(); return; }
     const source = scrollRef.current?.querySelector(".paragraph-result");
@@ -121,7 +137,7 @@ export function ReaderAssistant({
     }
     if (operation === "translate") onTranslate();
     else if (operation === "insight") onInsight();
-    else onExplain();
+    else onExplain(force);
   }
 
   function selectParagraphTab(operation: ParagraphTab, generate = true) {
@@ -150,6 +166,7 @@ export function ReaderAssistant({
     onAsk(value);
     setQuestion("");
   }
+
   return <aside className="reader-assistant" aria-label="研究助手">
     <div className="assistant-heading">
       <div className="assistant-title"><div className="assistant-icon"><Bot size={18} /></div><strong>研究助手</strong></div>
@@ -157,11 +174,12 @@ export function ReaderAssistant({
     </div>
     <div className="assistant-tabs" role="tablist" aria-label="研究助手视图">
       <button ref={(element) => { tabsRef.current[0] = element; }} id={`${id}-assist-tab`} aria-controls={`${id}-assist-panel`} tabIndex={tab === "assist" ? 0 : -1} className={tab === "assist" ? "is-active" : ""} role="tab" aria-selected={tab === "assist"} onKeyDown={(event) => changeTab(event, 0)} onClick={() => setTab("assist")} type="button"><BookOpen size={15} />{visual ? "读图表" : "读懂这段"}</button>
-      <button ref={(element) => { tabsRef.current[1] = element; }} id={`${id}-vocabulary-tab`} aria-controls={`${id}-vocabulary-panel`} tabIndex={tab === "vocabulary" ? 0 : -1} className={tab === "vocabulary" ? "is-active" : ""} role="tab" aria-selected={tab === "vocabulary"} onKeyDown={(event) => changeTab(event, 1)} onClick={() => setTab("vocabulary")} type="button"><Languages size={15} />学术词汇 <span>{vocabulary.length}</span></button>
+      <button ref={(element) => { tabsRef.current[1] = element; }} id={`${id}-vocabulary-tab`} aria-controls={`${id}-vocabulary-panel`} tabIndex={tab === "vocabulary" ? 0 : -1} className={tab === "vocabulary" ? "is-active" : ""} role="tab" aria-selected={tab === "vocabulary"} onKeyDown={(event) => changeTab(event, 1)} onClick={() => setTab("vocabulary")} type="button">{vocabularyLoading ? <LoaderCircle className="spin" size={15} /> : <Languages size={15} />}学术词汇 <span>{vocabulary.length}</span></button>
+      {researchPanel ? <button ref={(element) => { tabsRef.current[2] = element; }} id={`${id}-research-tab`} aria-controls={`${id}-research-panel`} tabIndex={tab === "research" ? 0 : -1} className={tab === "research" ? "is-active" : ""} role="tab" aria-selected={tab === "research"} onKeyDown={(event) => changeTab(event, 2)} onClick={() => setTab("research")} type="button"><Bot size={15} />研究对话</button> : null}
     </div>
-    <div ref={scrollRef} className="assistant-scroll" id={`${id}-${tab}-panel`} role="tabpanel" aria-labelledby={`${id}-${tab}-tab`} tabIndex={0}>
+    <div ref={scrollRef} hidden={tab === "research"} className="assistant-scroll" id={`${id}-${tab === "research" ? "assist" : tab}-panel`} role="tabpanel" aria-labelledby={`${id}-${tab === "research" ? "assist" : tab}-tab`} tabIndex={0}>
       {tab === "vocabulary" ? <VocabularyPanel key={vocabularyBlock?.id ?? selectedBlock?.id ?? "none"} terms={vocabulary} onJump={onJump} onGuide={onGuide} aiAvailable={aiAvailable} busy={isBusy} enriched={Boolean(guide)} guideOverview={guide?.overview}
-        loading={pendingAction === "vocabulary"} hasParagraph={(vocabularyBlock ?? selectedBlock)?.kind === "paragraph"} pageNumber={(vocabularyBlock ?? selectedBlock)?.pageNumber}
+        loading={vocabularyLoading} hasParagraph={(vocabularyBlock ?? selectedBlock)?.kind === "paragraph"} pageNumber={(vocabularyBlock ?? selectedBlock)?.pageNumber}
         onSaveTerm={onSaveTerm} isTermSaved={isTermSaved} /> : <>
         <section className="assistant-section selected-context">
           <div className="section-heading"><h2>{visual ? selectedBlock?.kind === "table" ? "表格理解" : "图表理解" : selectionText ? "选中句子" : "段落理解"}</h2><span className="context-count">{selectedBlock ? `第 ${selectedBlock.pageNumber} 页` : "未选择"}</span></div>
@@ -174,7 +192,7 @@ export function ReaderAssistant({
               aria-selected={paragraphTab === operation} tabIndex={paragraphTab === operation ? 0 : -1}
               className={paragraphTab === operation ? "is-active" : ""}
               onClick={() => selectParagraphTab(operation)} onKeyDown={(event) => changeParagraphTab(event, index)}>
-              {pendingAction === operation || (operation !== "insight" && pendingParagraphActions.includes(operation))
+              {pendingAction === operation || pendingParagraphActions.includes(operation)
                 ? <LoaderCircle className="spin" size={14} /> : <Icon size={14} />}{label}
             </button>)}
           </div>
@@ -191,9 +209,9 @@ export function ReaderAssistant({
             <div className="assistant-result-heading"><h3>这段讲什么</h3>{insightLoading ? <span className="assistant-result-state"><LoaderCircle className="spin" size={12} />生成中</span> : null}</div>
             {displayedInsight.summary ? <MarkdownContent text={displayedInsight.summary} /> : null}<h3>在上下文中的作用</h3>
             {displayedInsight.role ? <MarkdownContent text={displayedInsight.role} /> : insightLoading ? <p className="muted-copy">正在生成上下文作用…</p> : null}</div>
-            : pendingAction === "insight" ? <p className="muted-copy paragraph-progress" role="status"><LoaderCircle className="spin" size={14} />正在生成摘要与作用…</p>
+            : insightLoading ? <p className="muted-copy paragraph-progress" role="status"><LoaderCircle className="spin" size={14} />正在生成摘要与作用…</p>
             : <div className="paragraph-empty"><p className="muted-copy">尚无段落摘要</p><button type="button" className="secondary-button compact" aria-label="段落摘要与作用" disabled={isBusy} onClick={() => runParagraphAction("insight")}><Sparkles size={14} />{aiAvailable ? "生成摘要与作用" : "配置 AI 服务"}</button></div> : null}
-          {paragraphTab === "explain" ? explanation || explaining ? <div className="assistant-explanation" aria-live="polite" aria-busy={explaining}><div className="assistant-result-heading"><h3>术语与逻辑</h3>{explaining ? <LoaderCircle className="spin" size={13} /> : <button type="button" className="assistant-copy-button" aria-label="重新生成解释" title="重新生成解释" disabled={isBusy} onClick={() => runParagraphAction("explain")}><RotateCcw size={14} /></button>}</div><MarkdownContent text={explanation || "正在生成解释…"} /></div>
+          {paragraphTab === "explain" ? explanation || explaining ? <div className="assistant-explanation" aria-live="polite" aria-busy={explaining}><div className="assistant-result-heading"><h3>术语与逻辑</h3>{explaining ? <LoaderCircle className="spin" size={13} /> : <button type="button" className="assistant-copy-button" aria-label="重新生成解释" title="重新生成解释" disabled={isBusy} onClick={() => runParagraphAction("explain", true)}><RotateCcw size={14} /></button>}</div><MarkdownContent text={explanation || "正在生成解释…"} /></div>
             : <div className="paragraph-empty"><p className="muted-copy">尚无内容解释</p><button type="button" className="secondary-button compact" aria-label="解释术语与逻辑" disabled={isBusy} onClick={() => runParagraphAction("explain")}><MessageSquareText size={14} />{aiAvailable ? "生成解释" : "配置 AI 服务"}</button></div> : null}
           </div></>
             : <div className="assistant-empty"><BookOpen size={24} /><p className="muted-copy">未选择阅读内容</p></div>}
@@ -203,16 +221,14 @@ export function ReaderAssistant({
           <div className="section-heading"><h2>论文回答</h2>{pendingAction === "qa" ? <LoaderCircle className="spin" size={14} /> : <MessageSquareText size={14} />}</div>
           <div className="answer-copy" aria-live="polite" aria-busy={pendingAction === "qa"}><MarkdownContent text={answer || "正在生成回答…"} /></div>
         </section> : null}
-        <details className="assistant-section assistant-overview">
-          <summary><span><Sparkles size={14} />论文摘要</span><ChevronDown size={14} /></summary>
-          {overview ? <MarkdownContent text={overview} /> : <button className="text-button" type="button" onClick={aiAvailable ? onOverview : onOpenSettings} disabled={isBusy}>{pendingAction === "overview" ? <LoaderCircle className="spin" size={14} /> : <Sparkles size={14} />}{aiAvailable ? "生成 AI 概览" : "配置 AI 服务"}</button>}
-        </details>
       </>}
     </div>
-    <div className="assistant-composer">
+    {researchPanel ? <div hidden={tab !== "research"} className="research-tab-panel" id={`${id}-research-panel`} role="tabpanel" aria-labelledby={`${id}-research-tab`}>{researchPanel}</div> : null}
+    {researchPanel && actionError && tab !== "research" ? <div className="assistant-action-error" role="alert">{actionError}<button type="button" className="text-button" onClick={onOpenSettings}><Settings2 size={13} />检查配置</button></div> : null}
+    {researchPanel ? tab !== "research" ? <button type="button" className="research-entry-button" onClick={() => setTab("research")}><MessageSquareText size={16} /><span>向论文提问 · 查找相关文献</span><Send size={14} /></button> : null : <div className="assistant-composer">
       <div className="assistant-composer-heading"><label htmlFor={`${id}-question`}>论文问答</label><MessageSquareText size={14} /></div>
       <div className="question-box"><textarea id={`${id}-question`} aria-label="向论文提问" value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (!event.nativeEvent.isComposing && (event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); submitQuestion(); } }} placeholder="这篇论文的核心贡献是什么？" rows={2} /><button aria-label="发送问题" className="send-button" disabled={!question.trim() || isBusy || !aiAvailable} onClick={submitQuestion} title="发送问题 (Ctrl / Command + Enter)" type="button">{pendingAction === "qa" ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}</button></div>
       {actionError ? <div className="assistant-action-error" role="alert">{actionError}<button type="button" className="text-button" onClick={onOpenSettings}><Settings2 size={13} />检查配置</button></div> : null}
-    </div>
+    </div>}
   </aside>;
 }

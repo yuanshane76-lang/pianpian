@@ -16,8 +16,8 @@ async function mount(overrides: Partial<ComponentProps<typeof ReaderAssistant>> 
   const props: ComponentProps<typeof ReaderAssistant> = {
     selectedBlock: { id: "p1-b1", kind: "paragraph", pageNumber: 1, order: 0, text: "Retrieval augments the language model with external knowledge." },
     originalId: "paper", chartReading: null, onReadChart: vi.fn(),
-    overview: "论文使用检索增强生成。", answer: null, isBusy: false,
-    onOverview: vi.fn(), onTranslate: vi.fn(), onExplain: vi.fn(), explanation: null, onAsk: vi.fn(),
+    answer: null, isBusy: false,
+    onTranslate: vi.fn(), onExplain: vi.fn(), explanation: null, onAsk: vi.fn(),
     translation: "检索为语言模型补充外部知识。", selectionText: "", serviceLabel: "DeepSeek",
     serviceModel: "deepseek-flash", aiAvailable: true, onOpenSettings: vi.fn(), actionError: null,
     pendingAction: null, insight: null, streamingOutput: null, onInsight: vi.fn(), guide: null,
@@ -38,7 +38,47 @@ afterEach(async () => {
   writeText.mockResolvedValue(undefined);
 });
 
+describe("chart result streaming", () => {
+  it("reveals a cached chart result when another double-click starts from the research tab", async () => {
+    const props = await mount({ selectedBlock: { id: "chart", kind: "image", pageNumber: 1, order: 0, text: "Figure" },
+      researchPanel: <div>研究对话内容</div>, chartReading: { summary: "比较模型", encoding: "读指标", findings: ["发现"],
+        role: "作用", caveats: ["限制"] } });
+    await act(async () => container.querySelector<HTMLButtonElement>('[role="tab"]:last-child')!.click());
+    expect(container.querySelector('[role="tab"]:last-child')?.getAttribute("aria-selected")).toBe("true");
+    await act(async () => root!.render(<ReaderAssistant {...props} chartAnalysisRequestId={1} />));
+    expect(container.querySelector('[role="tab"]')?.getAttribute("aria-selected")).toBe("true");
+    expect(container.querySelector(".assistant-chart-reading")?.textContent).toContain("比较模型");
+  });
+  it("renders Markdown in the same result surface during streaming and completion", async () => {
+    const props = await mount({ selectedBlock: { id: "chart", kind: "image", pageNumber: 1, order: 0, text: "Figure" },
+      isBusy: true, pendingAction: "chart", streamingOutput: { operation: "chart", text: '{"summary":"**比较对象**与 $x$' } });
+    const surface = container.querySelector(".assistant-chart-reading")!;
+    expect(surface).not.toBeNull();
+    expect(surface.getAttribute("aria-busy")).toBe("true");
+    expect(surface.querySelector(".markdown-content strong")?.textContent).toBe("比较对象");
+    expect(surface.querySelector(".katex")).not.toBeNull();
+    const reading = { summary: "**比较对象**与 $x$", encoding: "指标", findings: ["**发现**"], role: "作用", caveats: ["限制"] };
+    await act(async () => root!.render(<ReaderAssistant {...props} isBusy={false} pendingAction={null}
+      streamingOutput={null} chartReading={reading} />));
+    expect(container.querySelector(".assistant-chart-reading")).toBe(surface);
+    expect(surface.getAttribute("aria-busy")).toBe("false");
+    expect(surface.querySelectorAll(".markdown-content strong")).toHaveLength(2);
+  });
+});
+
 describe("reader assistant layout", () => {
+  it("has no whole-paper overview and displays independent insight and vocabulary loading from quick analysis", async () => {
+    await mount({ isBusy: true, pendingParagraphActions: ["translate", "explain", "insight", "vocabulary"] });
+    expect(container.querySelector(".assistant-overview")).toBeNull();
+    expect(container.querySelector('[data-operation="insight"] .spin')).not.toBeNull();
+    const tabs = container.querySelectorAll<HTMLButtonElement>(".assistant-tabs [role='tab']");
+    expect(tabs[1].querySelector(".spin")).not.toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="insight"]')!.click());
+    expect(container.querySelector(".paragraph-progress")?.textContent).toContain("正在生成摘要与作用");
+    await act(async () => tabs[1].click());
+    expect(container.querySelector(".vocabulary-intro")?.textContent).toContain("正在挑选段落词汇");
+  });
+
   it("prioritizes the selected paragraph without duplicating the original text", async () => {
     await mount();
     expect(container.querySelector(".assistant-scroll")?.firstElementChild?.classList.contains("selected-context")).toBe(true);

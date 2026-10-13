@@ -27,4 +27,11 @@ describe("structured reading assistance", () => {
   it("keeps only well formed glossary terms from an AI reading guide", () => {
     expect(parseReadingGuide('{"overview":"论文介绍注意力模型。","terms":[{"term":"attention","translation":"注意力","definition":"关注相关输入"},{"term":"","translation":"empty"}]}').terms).toHaveLength(1);
   });
+  it("distinguishes an explicitly empty vocabulary from a missing or invalid terms field", () => {
+    expect(parseReadingGuide('{"overview":"本段无适合的词汇。","terms":[]}').terms).toEqual([]);
+    for (const value of [{ overview: "学习重点" }, { overview: "学习重点", terms: null },
+      { overview: "学习重点", terms: "attention" }]) {
+      expect(() => parseReadingGuide(JSON.stringify(value))).toThrow("结构");
+    }
+  });
 });

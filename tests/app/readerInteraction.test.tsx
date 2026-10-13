@@ -32,7 +32,7 @@ Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
 
 const paper = {
   id: "interaction-paper", title: "Paper", authors: [], year: null, sourcePath: "local://interaction", originalId: "interaction-document", pageCount: 1,
-  importedAt: "2026-10-04", tags: [], favorite: false, overview: null, blocks: 2, parseVersion: 2,
+  importedAt: "2026-10-04", tags: [], favorite: false, blocks: 2, parseVersion: 2,
   blockData: [
     { id: "p001-b001", kind: "paragraph", pageNumber: 1, order: 0, text: "The model uses attention. It works well.", bbox: [0.1, 0.1, 0.9, 0.2] },
     { id: "p001-b002", kind: "paragraph", pageNumber: 1, order: 1, text: "A different paragraph.", bbox: [0.1, 0.3, 0.9, 0.4] },
@@ -47,7 +47,9 @@ async function mount(response: () => Promise<string>, streamResponse?: (onDelta:
   const currentSettings = { ...settings, revision: `test-${++settingsRevision}` };
   const invoke = vi.fn(async (channel: string) => {
     if (channel === "zhiyan:settings:get") return currentSettings;
-    if (channel === "zhiyan:documents:states") return [];
+    if (channel === "zhiyan:documents:states") return [{
+      paperId: source.id, task: { state: "done" }, result: { blocks: source.blockData },
+    }];
     return response();
   });
   const stream = vi.fn(async (_channel: string, _payload: unknown, onDelta: (text: string) => void, onAbort?: (cancel: () => void) => (() => void)) => {
@@ -192,12 +194,14 @@ describe("paragraph translation interaction", () => {
     await act(async () => container.querySelector<HTMLButtonElement>(".chart-context .secondary-button")!.click());
     await vi.waitFor(() => expect(stream).toHaveBeenCalledOnce());
     await act(async () => emit('{"summary":"图表正在'));
-    expect(container.querySelector(".assistant-chart-streaming")?.textContent).toContain("图表正在");
-    expect(container.querySelector(".assistant-chart-reading")).toBeNull();
-    expect(container.querySelector(".assistant-chart-streaming")?.textContent).not.toContain("summary");
+    const surface = container.querySelector(".assistant-chart-reading")!;
+    expect(surface.textContent).toContain("图表正在");
+    expect(surface.getAttribute("aria-busy")).toBe("true");
+    expect(surface.textContent).not.toContain("summary");
     expect(window.localStorage.getItem("zhiyan-workbench.analysis.v1")).not.toContain("图表正在");
     await act(async () => finish(value));
-    expect(container.querySelector(".assistant-chart-streaming")).toBeNull();
+    expect(container.querySelector(".assistant-chart-reading")).toBe(surface);
+    expect(surface.getAttribute("aria-busy")).toBe("false");
     expect(container.querySelector(".assistant-chart-reading")?.textContent).toContain("RAG 为 44.5");
     await act(async () => root.unmount()); container.remove();
   });

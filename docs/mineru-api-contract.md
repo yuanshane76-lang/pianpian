@@ -23,12 +23,13 @@ type Block = {
   assetPath?: string;
   caption?: string;
   bbox?: [number, number, number, number]; // left, top, right, bottom; normalized 0-1
+  pageBounds?: Array<{ pageNumber: number; bbox: [number, number, number, number] }>;
   pageWidth?: number;
   pageHeight?: number;
 };
 type ParseResult = {
   blocks: Block[]; title?: string; pageCount?: number;
-  layoutVersion: 1;
+  layoutVersion: 3;
   layoutStatus: "available" | "partial" | "unavailable";
 };
 type BatchState = "waiting-file" | "pending" | "running" | "converting" | "downloading" | "failed" | "done";
@@ -113,8 +114,14 @@ The renderer receives only normalized `bbox` values. Page dimensions come from P
 
 `layoutVersion` records the adapter version; `layoutStatus` separately records coordinate availability. A no-coordinate result is a readable degraded result, not an indefinitely running layout task. An explicit start can submit a new parse after the usual upload consent; normal status reads never repeatedly upload it.
 
-Previously published results without `layoutVersion` recover from the **existing completed batch ZIP**. Matching old block IDs are retained by page, kind and normalized text, so adding geometry does not invalidate translation caches. Download failures retain the prior published parse. Legacy completed tasks without `resultBatchId` must first verify the remote batch; their unbound local parse is not trusted as current.
+Version 2 retains `pageBounds` for merged cross-page paragraphs. The adapter reads same-archive `layout.json` or `*_middle.json`, associates the first region by its page and exact 0–1000 grid box, and matches each explicit `cross_page` line against later pages' original `preproc_blocks` by raw coordinates and typed content. It normalizes those point coordinates using each source page's `page_size`. Missing, invalid or ambiguous continuation sources reject publication instead of producing an apparently complete result.
+
+Previously published results without `layoutVersion`, or with version 1, recover from the **existing completed batch ZIP**. Matching old block IDs are retained by page, kind and normalized text, so adding geometry does not invalidate translation caches. Download failures retain the prior published parse. Legacy completed tasks without `resultBatchId` must first verify the remote batch; their unbound local parse is not trusted as current. Rendering projections carry the physical page, while analysis continues to receive the original canonical block and a separate interaction page number.
+
+`node scripts/cross-page-layout-e2e.cjs` verifies continuation selection, complete-paragraph double-click, zoom, collapsed outline, figure/formula hits, selected-sentence input, restored page positions and cache reuse with a synthetic PDF and mocked model. It uses an isolated library, blocks all external requests and writes ignored reports under `out/cross-page-layout-checks/`.
 
 Desktop layout regression: with the dev server running and the app closed, run `node scripts/pdf-layout-e2e.cjs`. It uses the local Attention paper and writes reports/screenshots under ignored `out/layout-checks/`. Add `--live-ai` to validate a real selected-sentence translation; this may incur a small model charge and requires configured credentials. The script requires Playwright available in the configured local runtime.
 
 Packaging must include both new CJS files in the parent's Electron allowlist; runtime imports use Node built-ins only.
+
+Geometry v3 allows multiple disjoint `pageBounds` entries on the same page. Same-page continuation lines outside the canonical box are resolved using exact layout/preproc line matches, without requiring `cross_page`. Physical source regions remain separate, preserving gutters and canonical block identities. Completed v1/v2 results recover from the existing batch without another PDF upload.

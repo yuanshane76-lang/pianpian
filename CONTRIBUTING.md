@@ -17,7 +17,7 @@ npm ci
 npm run desktop:dev
 ```
 
-开发时只需预览网页，可以运行 `npm run dev`，打开 `http://127.0.0.1:4173/`。密钥保存、原件持久化和 MinerU 调用需要桌面端。
+开发时只需预览网页，可以运行 `npm run dev`，打开 `http://127.0.0.1:4173/`。网页预览也会将导入的 PDF 保存在浏览器存储中；桌面版将原件保存为用户数据目录中的文件。系统密钥存储和 MinerU 调用需要桌面端。
 
 桌面窗口打开后，在“服务配置”里填写自己的 DeepSeek 或百炼 API Key，以及 MinerU Token。只做界面、领域规则和自动测试时，无需配置密钥。申请步骤见 [服务密钥配置](docs/服务密钥配置.md)。
 
@@ -66,12 +66,16 @@ git worktree add -b fix/pdf-selection ../zhiyan-pdf-selection origin/main
 | `npm test -- --run` | 运行自动测试 |
 | `npm run check:credentials` | 检查常见凭据格式及当前分支历史，不打印密钥 |
 | `npm run check` | 凭据检查、测试、TypeScript 检查和前端构建 |
+| `npm run test:pi-agent:smoke` | 真实 Pi SDK、本地合成 SSE 和文献元数据，验证预置 Skill 按需读取与产品工具调用；禁止外部请求 |
+| `npm run test:research-agent:e2e` | 隔离 Electron、本地合成 SSE，验证预置技能入口、工具确认、文档导出、长文流式滚动和窗口尺寸变化 |
+| `node scripts/packaged-research-skills-e2e.cjs <解压后的 Zhiyan.exe 路径>` | 验证 Windows 压缩包内的三个 Skill、已打包 Pi 工具循环及无密钥的中文技能入口；使用隔离用户目录与合成服务 |
 | `npm run make:win` | 验证后生成 Windows x64 免安装压缩包 |
 
 启动 `npm run dev` 后，可另开终端执行桌面检查：
 
 | 命令 | 数据与服务边界 |
 | --- | --- |
+| `node scripts/mineru-gate-e2e.cjs` | 隔离文献库、合成 PDF 和模拟 MinerU：验证强制解析门禁、真实阶段进度、下载持久化与重启恢复，不调用真实服务 |
 | `node scripts/desktop-e2e.cjs` | 临时空用户目录：验证中文壳、配置和 IPC；无需密钥和论文，禁止外部服务请求 |
 | `npm run test:paragraph-vocabulary:e2e` | 合成 PDF、模拟 SSE 与隔离桌面用户目录：验证段落词汇、单词表、Markdown、摘要和图表流式显示、定位提示及多种窗口尺寸；不调用真实模型服务 |
 | `node scripts/translation-math-e2e.cjs` | 临时用户目录和固定公式数据，无付费请求 |

@@ -4,6 +4,7 @@ import type { DocumentBlock } from "../../domain/documentBlocks";
 import { getDocumentVisualSignature } from "../../domain/documentBlocks";
 import { previewChartReading, type ChartReading } from "../../domain/learning";
 import { loadChartImage } from "../../services/chartImage";
+import { MarkdownContent } from "./MarkdownContent";
 
 export function ChartContext({ originalId, block, reading, streamingText, busy, loading, aiAvailable, onRead, onOpenSettings }: {
   originalId?: string; block: DocumentBlock; reading: ChartReading | null; busy: boolean;
@@ -14,7 +15,7 @@ export function ChartContext({ originalId, block, reading, streamingText, busy, 
   const [imageError, setImageError] = useState("");
   const [expanded, setExpanded] = useState(false);
   const signature = getDocumentVisualSignature(block);
-  const preview = loading ? previewChartReading(streamingText) : null;
+  const displayed = loading ? previewChartReading(streamingText) : reading;
   useEffect(() => {
     let active = true;
     setSource(""); setImageError(""); setExpanded(false);
@@ -38,19 +39,12 @@ export function ChartContext({ originalId, block, reading, streamingText, busy, 
     <div className="context-actions"><button className="secondary-button compact" type="button" disabled={busy}
       onClick={aiAvailable ? onRead : onOpenSettings}>{loading ? <LoaderCircle className="spin" size={14} /> : <ChartNoAxesCombined size={14} />}{aiAvailable ? "读图表" : "配置 AI 服务"}</button></div>
     {loading ? <p className="chart-reading-progress" role="status"><LoaderCircle className="spin" size={14} />正在解读图表…</p> : null}
-    {preview ? <div className="assistant-chart-streaming" aria-live="polite" aria-busy="true">
-      {preview.summary ? <><strong>比较对象</strong><p>{preview.summary}</p></> : null}
-      {preview.encoding ? <><strong>指标读法</strong><p>{preview.encoding}</p></> : null}
-      {preview.findings.length ? <><strong>关键发现</strong><ul>{preview.findings.map((finding, index) => <li key={index}>{finding}</li>)}</ul></> : null}
-      {preview.role ? <><strong>论文中的作用</strong><p>{preview.role}</p></> : null}
-      {preview.caveats.length ? <><strong>注意事项</strong><ul>{preview.caveats.map((caveat, index) => <li key={index}>{caveat}</li>)}</ul></> : null}
-    </div> : null}
-    {reading ? <div className="assistant-chart-reading" aria-live="polite">
-      <strong>比较对象</strong><p>{reading.summary}</p>
-      <strong>指标读法</strong><p>{reading.encoding}</p>
-      <strong>关键发现</strong><ul>{reading.findings.map((finding, index) => <li key={index}>{finding}</li>)}</ul>
-      <strong>论文中的作用</strong><p>{reading.role}</p>
-      <strong>注意事项</strong><ul>{reading.caveats.map((caveat, index) => <li key={index}>{caveat}</li>)}</ul>
+    {displayed ? <div className="assistant-chart-reading" aria-live="polite" aria-busy={loading}>
+      {displayed.summary ? <><strong>比较对象</strong><MarkdownContent text={displayed.summary} /></> : null}
+      {displayed.encoding ? <><strong>指标读法</strong><MarkdownContent text={displayed.encoding} /></> : null}
+      {displayed.findings.length ? <><strong>关键发现</strong><ul>{displayed.findings.map((finding, index) => <li key={index}><MarkdownContent text={finding} /></li>)}</ul></> : null}
+      {displayed.role ? <><strong>论文中的作用</strong><MarkdownContent text={displayed.role} /></> : null}
+      {displayed.caveats.length ? <><strong>注意事项</strong><ul>{displayed.caveats.map((caveat, index) => <li key={index}><MarkdownContent text={caveat} /></li>)}</ul></> : null}
     </div> : null}
     {expanded ? <div className="figure-overlay" role="dialog" aria-modal="true" aria-label="选中图表放大预览" onClick={() => setExpanded(false)}>
       <button autoFocus className="figure-close icon-button" type="button" aria-label="关闭图表预览" onClick={() => setExpanded(false)}><X size={22} /></button>

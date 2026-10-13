@@ -1,6 +1,6 @@
-import katex from "katex";
 import "katex/dist/katex.min.css";
 import { useLayoutEffect, useRef } from "react";
+import { renderMathHtml } from "./mathRendering";
 
 const DELIMITERS = [
   { left: "$$", right: "$$", display: true },
@@ -31,27 +31,13 @@ function renderTranslation(text: string) {
     const end = formulaEnd + delimiter.right.length;
     const source = text.slice(index, end);
     const wrapper = document.createElement("span");
-    try {
-      let rejectedTrust = false;
-      const html = katex.renderToString(text.slice(formulaStart, formulaEnd), {
-        displayMode: delimiter.display,
-        output: "htmlAndMathml",
-        // Record denied commands because KaTeX otherwise drops their arguments.
-        trust: () => { rejectedTrust = true; return false; },
-        strict: "ignore",
-        throwOnError: true,
-        maxExpand: 1000,
-        maxSize: 10,
-      });
-      if (rejectedTrust) {
-        fragment.append(document.createTextNode(source));
-      } else {
-        wrapper.className = delimiter.display ? "translation-math translation-math-display" : "translation-math";
-        wrapper.innerHTML = html;
-        fragment.append(wrapper);
-      }
-    } catch {
+    const html = renderMathHtml(text.slice(formulaStart, formulaEnd), delimiter.display);
+    if (html === null) {
       fragment.append(document.createTextNode(source));
+    } else {
+      wrapper.className = delimiter.display ? "translation-math translation-math-display" : "translation-math";
+      wrapper.innerHTML = html;
+      fragment.append(wrapper);
     }
     plainStart = end;
     index = end;

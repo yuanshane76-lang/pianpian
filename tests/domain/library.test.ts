@@ -14,7 +14,6 @@ const papers: PaperRecord[] = [
     importedAt: "2026-09-29T08:00:00.000Z",
     tags: ["研究方法", "论文阅读"],
     favorite: true,
-    overview: null,
     blocks: 18,
   },
   {
@@ -26,7 +25,6 @@ const papers: PaperRecord[] = [
     importedAt: "2026-09-28T08:00:00.000Z",
     tags: ["研究方法", "实验分析"],
     favorite: false,
-    overview: null,
     blocks: 42,
   },
 ];

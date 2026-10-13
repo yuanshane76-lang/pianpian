@@ -1,0 +1,43 @@
+.research-assistant-panel .research-agent-scroll {
+  scroll-behavior: auto;
+  overflow-anchor: none;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.research-skills {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--line);
+  background: #fbfdfc;
+  padding: 9px 16px;
+  font-size: 11px;
+}
+
+.research-skills summary {
+  cursor: pointer;
+  color: var(--teal-dark);
+  line-height: 1.6;
+}
+
+.research-skills-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding-top: 9px;
+}
+
+.research-skills-list button {
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--teal-dark);
+  font: inherit;
+  line-height: 1.6;
+}
+
+.research-skills-list button:hover { background: var(--teal-soft); }
+.research-skills-list button:focus-visible, .research-skills summary:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 3px;
+}

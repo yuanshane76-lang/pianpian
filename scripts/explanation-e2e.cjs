@@ -79,7 +79,7 @@ const report = { checks: [], errors: [], requests: [] };
       const parsed = JSON.parse(fs.readFileSync(path.join(directory, id, "parse.json"), "utf8"));
       return { id, title: parsed.title, authors: [], year: null, sourcePath: `local://explanation-check/${id}`,
         originalId: id, pageCount: parsed.pageCount, importedAt: "2026-10-09", tags: [], favorite: false,
-        overview: null, blocks: parsed.blocks.length, blockData: parsed.blocks, parseVersion: 2, parseStatus: "ready" };
+        blocks: parsed.blocks.length, blockData: parsed.blocks, parseVersion: 2, parseStatus: "ready" };
     });
     const paper = papers.find((item) => item.title.includes("Retrieval-Augmented")) || papers[0];
     const paragraph = paper?.blockData.find((block) => block.kind === "paragraph" && block.bbox && block.pageNumber === 1 && block.text.length > 500)

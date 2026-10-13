@@ -16,8 +16,8 @@ export function isVisualBlock(block: DocumentBlock | null): boolean {
 export function getAnalysisAvailability(settings: PublicServiceSettings) {
   const provider = settings.aiProvider;
   return {
-    available: provider !== "local" && settings[provider].configured,
-    label: provider === "local" ? "未启用 AI" : provider === "deepseek" ? "DeepSeek" : "阿里云百炼",
-    model: provider === "local" ? "" : settings[provider].model,
+    available: settings[provider].configured,
+    label: provider === "deepseek" ? "DeepSeek" : "阿里云百炼",
+    model: settings[provider].model,
   };
 }

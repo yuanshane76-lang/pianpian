@@ -53,10 +53,14 @@ describe("real translation transport", () => {
       const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
       if (provider === "deepseek") expect(body.thinking).toEqual({ type: "disabled" });
       else expect(body.enable_thinking).toBe(false);
-      const overviewFetch = vi.fn().mockResolvedValue(sseResponse('{"choices":[{"delta":{"content":"概览"}}]}'));
-      await callModel(settings, { operation: "overview", paper: {} }, overviewFetch);
-      expect(JSON.parse(overviewFetch.mock.calls[0][1].body).thinking).toBeUndefined();
     }
+  });
+
+  it("rejects the removed whole-paper overview operation before a model call", async () => {
+    const settings = { ...DEFAULT, aiProvider: "deepseek", deepseek: { ...DEFAULT.deepseek, apiKey: "unit-test-secret" } };
+    const fetchImpl = vi.fn();
+    await expect(callModel(settings, { operation: "overview", paper: {} }, fetchImpl)).rejects.toThrow();
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("disables thinking for short paragraph explanations on each configured provider", async () => {
@@ -197,7 +201,7 @@ describe("real translation transport", () => {
   it("streams all AI operations through the same OpenAI-compatible request mode", async () => {
     const encoder = new TextEncoder();
     const settings = { ...DEFAULT, aiProvider: "deepseek", deepseek: { ...DEFAULT.deepseek, apiKey: "unit-test-secret" } };
-    for (const operation of ["overview", "translate", "qa", "explain", "insight", "guide"]) {
+    for (const operation of ["translate", "qa", "explain", "insight", "guide"]) {
       const fetchImpl = vi.fn().mockResolvedValue(new Response(
         new ReadableStream<Uint8Array>({
           start(controller) {

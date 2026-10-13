@@ -1,5 +1,6 @@
 export interface ZhiyanBridge {
   invoke<T = unknown>(channel: string, payload?: unknown): Promise<T>;
+  on?<T = unknown>(channel: string, handler: (payload: T) => void): () => void;
   stream?<T = string>(
     channel: string,
     payload: unknown,

@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 const STREAM_START_CHANNEL = "zhiyan:ai:stream:start";
 const STREAM_CANCEL_CHANNEL = "zhiyan:ai:stream:cancel";
 const STREAM_EVENT_CHANNEL = "zhiyan:ai:stream:event";
+const AGENT_EVENT_CHANNEL = "zhiyan:agent:event";
 
 contextBridge.exposeInMainWorld("zhiyan", {
   invoke(channel, payload) {
@@ -19,11 +20,26 @@ contextBridge.exposeInMainWorld("zhiyan", {
       "zhiyan:documents:states",
       "zhiyan:mineru:start",
       "zhiyan:mineru:status",
+      "zhiyan:agent:start",
+      "zhiyan:agent:skills",
+      "zhiyan:agent:update-context",
+      "zhiyan:agent:prompt",
+      "zhiyan:agent:abort",
+      "zhiyan:agent:approve",
+      "zhiyan:agent:save-document",
     ]);
     if (!allowedChannels.has(channel)) {
       throw new Error(`Unsupported IPC channel: ${channel}`);
     }
     return ipcRenderer.invoke(channel, payload);
+  },
+  on(channel, handler) {
+    if (channel !== AGENT_EVENT_CHANNEL || typeof handler !== "function") {
+      throw new Error(`Unsupported event channel: ${channel}`);
+    }
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
   },
   stream(channel, payload, onDelta, onAbort) {
     if (channel !== "zhiyan:ai:run" || typeof onDelta !== "function") {

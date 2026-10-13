@@ -11,7 +11,6 @@ const basePaper: PaperRecord = {
   importedAt: "2026-09-29T08:00:00.000Z",
   tags: [],
   favorite: false,
-  overview: null,
   blocks: 1,
 };
 
