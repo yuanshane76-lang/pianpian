@@ -270,10 +270,13 @@ describe("document task orchestration", () => {
 
   it("marks downloading before download, resumes after failure, and publishes done only after all durable writes", async () => {
     let releaseDownload!: () => void;
+    let notifyDownloadStarted!: () => void;
+    const downloadStarted = new Promise<void>((resolve) => { notifyDownloadStarted = resolve; });
     const download = vi.fn()
       .mockRejectedValueOnce(new Error("offline"))
       .mockImplementationOnce(() => new Promise<Uint8Array>((resolve) => {
         releaseDownload = () => resolve(Uint8Array.from([1]));
+        notifyDownloadStarted();
       }));
     const { id, tasks, documents, calls } = await fixture({
       getBatch: vi.fn(async () => ({ state: "done", progress: 1, zipUrl: "https://cdn-mineru.openxlab.org.cn/result.zip" })),
@@ -287,10 +290,11 @@ describe("document task orchestration", () => {
     await expect(tasks.status(id)).rejects.toThrow(/解析|网络|结果/);
     expect(await documents.loadTask(id)).toMatchObject({ batchId: "batch-1", state: "downloading" });
     const status = tasks.status(id);
-    await vi.waitFor(async () => {
-      expect(await documents.loadTask(id)).toMatchObject({ state: "downloading", batchId: "batch-1", zipUrl: "https://cdn-mineru.openxlab.org.cn/result.zip" });
-      expect(download).toHaveBeenCalledTimes(2);
-    });
+    // Synchronize with the actual download phase instead of a one-second poll
+    // that races filesystem scheduling on Windows CI. Propagate task failures.
+    await Promise.race([downloadStarted, status]);
+    expect(await documents.loadTask(id)).toMatchObject({ state: "downloading", batchId: "batch-1", zipUrl: "https://cdn-mineru.openxlab.org.cn/result.zip" });
+    expect(download).toHaveBeenCalledTimes(2);
     releaseDownload();
     await expect(status).resolves.toMatchObject({ state: "done", batchId: "batch-1", result: validResult });
     expect(download).toHaveBeenCalledTimes(2);
