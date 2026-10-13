@@ -12,7 +12,7 @@ if (process.versions.electron) {
   const { createDocumentStore } = require("../electron/document-store.cjs");
   const fixtureDocuments = createDocumentStore({ rootDirectory: path.join(app.getPath("userData"), "documents") });
   globalThis.publishVocabularyFixture = async (paper) => {
-    await fixtureDocuments.saveParse(paper.originalId, { resultBatchId: "synthetic-batch", layoutVersion: 2,
+    await fixtureDocuments.saveParse(paper.originalId, { resultBatchId: "synthetic-batch", layoutVersion: 3,
       title: paper.title, blocks: paper.blockData, pageCount: 1 });
     await fixtureDocuments.saveTask(paper.originalId, { state: "done", batchId: "synthetic-batch", resultBatchId: "synthetic-batch" });
   };
@@ -248,9 +248,10 @@ if (process.versions.electron) {
       await page.screenshot({ path: path.join(output, "05-on-demand-translation.png") });
       report.checks.push("Only explicit translate click starts a streaming translation");
 
-      await page.locator("#pdf-block-fixture-table").focus();
-      await page.keyboard.press("Enter");
-      await page.getByRole("button", { name: "读图表", exact: true }).click();
+      await page.locator("#pdf-block-fixture-table").scrollIntoViewIfNeeded();
+      const tableText = page.locator(".pdf-text-layer span").filter({ hasText: "Method Accuracy" }).first();
+      const tableTextBox = await tableText.boundingBox();
+      await page.mouse.dblclick(tableTextBox.x + 12, tableTextBox.y + tableTextBox.height / 2);
       await page.waitForSelector(".chart-reading-progress");
       await page.waitForFunction(() => document.querySelector(".chart-context .figure-image-button img")?.complete);
       const chartRequest = await waitForRequest(4);
@@ -258,15 +259,25 @@ if (process.versions.electron) {
       assert.equal(chartRequest.stream, true);
       assert.equal(chartRequest.imageAttached, true);
       assert.deepEqual(chartRequest.thinking, { type: "disabled" });
-      await emit(4, '{"summary":"图表逐步比较成绩');
-      await page.locator(".assistant-chart-streaming").getByText("图表逐步比较成绩", { exact: true }).waitFor();
-      assert(!(await page.locator(".assistant-chart-streaming").innerText()).includes("summary"));
+      await page.mouse.dblclick(tableTextBox.x + 12, tableTextBox.y + tableTextBox.height / 2);
+      assert.equal(await electron.evaluate(() => globalThis.vocabularyE2e.requests.length), 5);
+      assert.equal(await page.evaluate(() => window.getSelection().toString()), "");
+      await emit(4, '{"summary":"图表逐步**比较成绩**');
+      await page.locator('.assistant-chart-reading[aria-busy="true"]').getByText("图表逐步比较成绩", { exact: true }).waitFor();
+      await page.locator('.assistant-chart-reading[aria-busy="true"] .markdown-content strong').waitFor();
+      assert.equal(await page.locator('.assistant-chart-reading[aria-busy="true"] .markdown-content strong').innerText(), "比较成绩");
+      const chartSurface = await page.locator(".assistant-chart-reading").evaluate((element) => ({
+        maxHeight: getComputedStyle(element).maxHeight, overflowY: getComputedStyle(element).overflowY,
+      }));
+      assert.equal(chartSurface.maxHeight, "none");
+      assert.notEqual(chartSurface.overflowY, "auto");
+      assert(!(await page.locator('.assistant-chart-reading[aria-busy="true"]').innerText()).includes("summary"));
       assert(!(await page.evaluate(() => localStorage.getItem("zhiyan-workbench.analysis.v1"))).includes("图表逐步"));
       await page.screenshot({ path: path.join(output, "06-streaming-chart.png") });
       await emit(4, '。","encoding":"准确率越高越好","findings":["RAG 44.5，Baseline 40.0"],"role":"比较实验结果","caveats":["仅比较该实验条件"]}', true);
       await page.locator(".assistant-chart-reading").getByText("RAG 44.5，Baseline 40.0", { exact: true }).waitFor();
-      assert.equal(await page.locator(".assistant-chart-streaming").count(), 0);
-      report.checks.push("Image chart request disables thinking, streams readable fields before completion and caches only validated final results");
+      assert.equal(await page.locator('.assistant-chart-reading[aria-busy="true"]').count(), 0);
+      report.checks.push("Native PDF table-word double-click starts one chart SSE request; repeated double-click does not cancel or duplicate it; Markdown renders immediately in the same unbounded result surface");
 
       const paragraph = page.locator("#pdf-block-fixture-b");
       await paragraph.scrollIntoViewIfNeeded();

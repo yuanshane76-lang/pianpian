@@ -4,7 +4,7 @@ import type { PDFPageProxy } from "pdfjs-dist";
 import { openPdf } from "../../services/document";
 import { readOriginalPdf } from "../../services/originalPdf";
 import type { DocumentBlock } from "../../domain/documentBlocks";
-import { getPageBlocks, hasPageBounds } from "../../domain/pdfLayout";
+import { getPageBlockRegionId, getPageBlocks, hasPageBounds } from "../../domain/pdfLayout";
 import { buildPdfPageLayout, getPdfViewportPages, PDF_SCROLL_PADDING, type PdfPageLayout } from "../../domain/pdfScroll";
 import { PdfPageCanvas } from "./PdfPageCanvas";
 
@@ -18,11 +18,12 @@ interface Props {
   onReimport: (file: File) => void;
   blocks: DocumentBlock[];
   activeBlockId: string | null;
-  onSelect: (block: DocumentBlock, pageNumber?: number) => void;
-  onSelectText: (block: DocumentBlock, text: string, pageNumber?: number) => void;
-  onAnalyzeParagraph?: (block: DocumentBlock, pageNumber?: number) => void;
-  focusTarget?: { id: string; requestId: number; pageNumber?: number };
-  onVisibleBlock?: (block: DocumentBlock, pageNumber?: number) => void;
+  onSelect: (block: DocumentBlock, pageNumber?: number, regionId?: string) => void;
+  onSelectText: (block: DocumentBlock, text: string, pageNumber?: number, regionId?: string) => void;
+  onAnalyzeParagraph?: (block: DocumentBlock, pageNumber?: number, regionId?: string) => void;
+  onAnalyzeChart?: (block: DocumentBlock, pageNumber?: number, regionId?: string) => void;
+  focusTarget?: { id: string; requestId: number; pageNumber?: number; regionId?: string };
+  onVisibleBlock?: (block: DocumentBlock, pageNumber?: number, regionId?: string) => void;
 }
 const EMPTY_PAGES: PDFPageProxy[] = [];
 
@@ -59,7 +60,7 @@ export function PdfPreview(props: Props) {
   const pageBlocks = useMemo(() => {
     const result = new Map<number, DocumentBlock[]>();
     for (const block of blocks.filter(hasPageBounds)) {
-      const numbers = block.pageBounds?.map((region) => region.pageNumber) ?? [block.pageNumber];
+      const numbers = new Set(block.pageBounds?.map((region) => region.pageNumber) ?? [block.pageNumber]);
       for (const number of numbers) {
         const current = result.get(number) ?? [];
         current.push(...getPageBlocks([block], number));
@@ -68,6 +69,14 @@ export function PdfPreview(props: Props) {
     }
     return result;
   }, [blocks]);
+
+  function regionLocation(block: DocumentBlock, canonical: DocumentBlock): [pageNumber?: number, regionId?: string] {
+    // An optional physical identity is only needed when a page has multiple regions.
+    if ((block.pageBounds?.filter((region) => region.pageNumber === block.pageNumber).length ?? 0) > 1) {
+      return [block.pageNumber, getPageBlockRegionId(block)];
+    }
+    return block.pageNumber === canonical.pageNumber ? [] : [block.pageNumber];
+  }
 
   function updateViewport(notify: boolean) {
     const scroll = scrollRef.current;
@@ -98,8 +107,7 @@ export function PdfPreview(props: Props) {
       .sort((left, right) => left.distance - right.distance)[0]?.candidate;
     if (block) {
       const canonical = propsRef.current.blocks.find((candidate) => candidate.id === block.id)!;
-      if (block.pageNumber === canonical.pageNumber) propsRef.current.onVisibleBlock?.(canonical);
-      else propsRef.current.onVisibleBlock?.(canonical, block.pageNumber);
+      propsRef.current.onVisibleBlock?.(canonical, ...regionLocation(block, canonical));
     }
   }
   const updateViewportRef = useRef(updateViewport);
@@ -183,7 +191,8 @@ export function PdfPreview(props: Props) {
     if (!focusTarget || !layout.length || handledFocus.current === focusTarget.requestId) return;
     const canonical = blocks.find((item) => item.id === focusTarget.id);
     if (!canonical || !hasPageBounds(canonical)) return;
-    const block = getPageBlocks([canonical], focusTarget.pageNumber ?? propsRef.current.page)[0] ?? canonical;
+    const regions = getPageBlocks([canonical], focusTarget.pageNumber ?? propsRef.current.page);
+    const block = regions.find((region) => getPageBlockRegionId(region) === focusTarget.regionId) ?? regions[0] ?? canonical;
     const target = layout[block.pageNumber - 1];
     const scroll = scrollRef.current;
     if (!target || !scroll) return;
@@ -193,7 +202,8 @@ export function PdfPreview(props: Props) {
       updateViewportRef.current(false);
     }
     if (!readyPages[block.pageNumber]) return;
-    const element = scroll.querySelector<HTMLElement>(`.pdf-page-stage[data-page-number="${block.pageNumber}"] [data-block-id="${block.id}"]`);
+    const element = [...scroll.querySelectorAll<HTMLElement>(`.pdf-page-stage[data-page-number="${block.pageNumber}"] [data-block-id]`)]
+      .find((region) => region.id === `pdf-block-${getPageBlockRegionId(block)}`);
     if (!element) return;
     handledFocus.current = focusTarget.requestId;
     pendingFocus.current = undefined;
@@ -236,17 +246,18 @@ export function PdfPreview(props: Props) {
             ? <PdfPageCanvas pdfPage={pages[item.pageNumber - 1]} layout={item} blocks={pageBlocks.get(item.pageNumber) ?? []}
               activeBlockId={activeBlockId} onSelect={(block) => {
                 const canonical = canonicalBlocks.get(block.id)!;
-                if (block.pageNumber === canonical.pageNumber) onSelect(canonical);
-                else onSelect(canonical, block.pageNumber);
+                onSelect(canonical, ...regionLocation(block, canonical));
               }} onSelectText={(block, text) => {
                 const canonical = canonicalBlocks.get(block.id)!;
-                if (block.pageNumber === canonical.pageNumber) onSelectText(canonical, text);
-                else onSelectText(canonical, text, block.pageNumber);
+                onSelectText(canonical, text, ...regionLocation(block, canonical));
               }}
               onAnalyzeParagraph={props.onAnalyzeParagraph ? (block) => {
                 const canonical = canonicalBlocks.get(block.id)!;
-                if (block.pageNumber === canonical.pageNumber) props.onAnalyzeParagraph?.(canonical);
-                else props.onAnalyzeParagraph?.(canonical, block.pageNumber);
+                props.onAnalyzeParagraph?.(canonical, ...regionLocation(block, canonical));
+              } : undefined}
+              onAnalyzeChart={props.onAnalyzeChart ? (block) => {
+                const canonical = canonicalBlocks.get(block.id)!;
+                props.onAnalyzeChart?.(canonical, ...regionLocation(block, canonical));
               } : undefined} onReady={onReady} />
             : <div className="pdf-page-placeholder" aria-label={`论文原文第 ${item.pageNumber} 页`} />}
         </div>)}

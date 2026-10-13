@@ -306,7 +306,7 @@ describe("bounded MinerU ZIP extraction", () => {
       { ...content, bbox: [169, 126, 825, 156] },
     ]) }])).result;
     expect(enriched.blocks[0].id).toBe(previous.blocks[0].id);
-    expect(enriched).toHaveProperty("layoutVersion", 2);
+    expect(enriched).toHaveProperty("layoutVersion", 3);
     expect(previous).toHaveProperty("layoutStatus", "unavailable");
     expect(enriched).toHaveProperty("layoutStatus", "available");
   });
@@ -343,7 +343,28 @@ describe("bounded MinerU ZIP extraction", () => {
         { pageNumber: 2, bbox: [0.1, 0.2, 0.9, 0.4] },
       ],
     });
-    expect(result).toHaveProperty("layoutVersion", 2);
+    expect(result).toHaveProperty("layoutVersion", 3);
+  });
+
+  it("recovers an unflagged same-page column continuation from exact layout lines", () => {
+    const content = [{ type: "text", text: "Left column. Right column.", page_idx: 0, bbox: [100, 800, 450, 900] }];
+    const first = { bbox: [60, 640, 270, 720], spans: [{ type: "text", content: "Left column." }] };
+    const continued = { bbox: [330, 80, 540, 320], spans: [{ type: "text", content: "Right column." }] };
+    const layout = { pdf_info: [{ page_idx: 0, page_size: [600, 800],
+      para_blocks: [{ type: "text", bbox: first.bbox, lines: [first, continued] }],
+      preproc_blocks: [{ type: "text", bbox: first.bbox, lines: [first] },
+        { type: "text", bbox: continued.bbox, lines: [continued] }],
+    }] };
+    const baseline = mineru().extractResultZip(zip([{ name: "content_list.json", data: JSON.stringify(content) }])).result.blocks[0];
+    const result = mineru().extractResultZip(zip([
+      { name: "content_list.json", data: JSON.stringify(content) },
+      { name: "layout.json", data: JSON.stringify(layout) },
+    ])).result;
+    expect(result.blocks[0]).toMatchObject({ id: baseline.id, text: baseline.text, pageBounds: [
+      { pageNumber: 1, bbox: [.1, .8, .45, .9] },
+      { pageNumber: 1, bbox: [.55, .1, .9, .4] },
+    ] });
+    expect(result).toHaveProperty("layoutVersion", 3);
   });
 
   it("rejects unresolved cross-page coordinates rather than publishing a falsely complete result", () => {

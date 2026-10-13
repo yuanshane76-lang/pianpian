@@ -45,6 +45,34 @@ async function mount(blocks: DocumentBlock[], options: Partial<Parameters<typeof
 }
 
 describe("continuous PDF page geometry", () => {
+  it("renders two column regions with unique DOM ids that analyze one complete paragraph", async () => {
+    const merged: DocumentBlock = { ...paragraph, text: "Starts in the left column. Continues in the right column.",
+      bbox: [.1, .8, .45, .9], pageBounds: [
+        { pageNumber: 1, bbox: [.1, .8, .45, .9] },
+        { pageNumber: 1, bbox: [.55, .1, .9, .4] },
+      ] };
+    const onAnalyzeParagraph = vi.fn();
+    const { container, onSelect, rerender } = await mount([merged], { onAnalyzeParagraph });
+    const regions = [...container.querySelectorAll<HTMLButtonElement>(".pdf-block-hit-area")];
+    expect(regions).toHaveLength(2);
+    expect(new Set(regions.map((region) => region.id)).size).toBe(2);
+    await act(async () => regions[1].click());
+    expect(onSelect).toHaveBeenCalledWith(merged, 1, regions[1].id.slice("pdf-block-".length));
+    await act(async () => regions[1].dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+    expect(onAnalyzeParagraph).toHaveBeenCalledWith(merged, 1, regions[1].id.slice("pdf-block-".length));
+    await rerender({ focusTarget: { id: merged.id, requestId: 1, pageNumber: 1,
+      regionId: regions[1].id.slice("pdf-block-".length) } });
+    expect(scrollIntoView.mock.instances.at(-1)).toBe(regions[1]);
+  });
+  it.each(["image", "table"] as const)("double-clicks a %s through the chart analysis callback", async (kind) => {
+    const block: DocumentBlock = { ...paragraph, id: kind, kind };
+    const onAnalyzeChart = vi.fn();
+    const onAnalyzeParagraph = vi.fn();
+    const { container } = await mount([block], { onAnalyzeChart, onAnalyzeParagraph });
+    await act(async () => container.querySelector(".pdf-block-hit-area")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+    expect(onAnalyzeChart).toHaveBeenCalledWith(block);
+    expect(onAnalyzeParagraph).not.toHaveBeenCalled();
+  });
   it("selects and analyzes the canonical complete paragraph from its continuation page", async () => {
     const merged = { ...paragraph, text: "First page starts the paragraph. The next page continues it.", pageBounds: [
       { pageNumber: 1, bbox: paragraph.bbox! },
@@ -191,6 +219,21 @@ describe("continuous PDF page geometry", () => {
     vi.spyOn(target, "getBoundingClientRect").mockReturnValue({ top: 60, bottom: 110 } as DOMRect);
     await act(async () => scroll.dispatchEvent(new Event("scroll")));
     await vi.waitFor(() => expect(onVisibleBlock).toHaveBeenCalledWith(nextParagraph));
+  });
+  it("saves the latest visible block when search filtering changes during a pending scroll update", async () => {
+    vi.useFakeTimers();
+    try {
+      const added: DocumentBlock = { ...paragraph, id: "revealed-after-search", bbox: [.1, .5, .9, .6] };
+      const onVisibleBlock = vi.fn();
+      const { container, rerender } = await mount([paragraph], { onVisibleBlock });
+      const scroll = container.querySelector<HTMLElement>(".pdf-canvas-scroll")!;
+      Object.defineProperty(scroll, "clientHeight", { value: 200 });
+      scroll.scrollTop = 400;
+      await act(async () => scroll.dispatchEvent(new Event("scroll")));
+      await rerender({ blocks: [paragraph, added] });
+      await act(async () => vi.advanceTimersByTime(250));
+      expect(onVisibleBlock).toHaveBeenCalledWith(added);
+    } finally { vi.useRealTimers(); }
   });
 
   it("keeps page slots for a long document but rasterizes only the viewport neighborhood", async () => {

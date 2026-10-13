@@ -10,6 +10,9 @@ import { DEFAULT_SERVICE_SETTINGS, toPublicServiceSettings } from "../../src/dom
 vi.mock("../../src/services/originalPdf", () => ({
   readOriginalPdf: async () => new ArrayBuffer(8),
 }));
+vi.mock("../../src/services/chartImage", () => ({
+  loadChartImage: vi.fn(async () => "data:image/png;base64,c3ludGhldGlj"),
+}));
 vi.mock("../../src/services/document", () => ({
   extractPdfBlocks: vi.fn(),
   openPdf: async () => ({
@@ -126,6 +129,65 @@ function finishJobs(jobs: Job[], text = "已完成") {
 }
 
 describe("paragraph quick analysis", () => {
+  it("starts chart analysis on double-click and reuses the running request and completed result", async () => {
+    const source = { ...paper, blockData: [{ ...paper.blockData[0], id: "figure", kind: "image", text: "Figure 1" }, paper.blockData[1]] };
+    const { container, blocks, jobs, stream } = await mount(source);
+    await doubleClick(blocks[0]);
+    expect(stream).toHaveBeenCalledOnce();
+    expect(jobs[0].request).toMatchObject({ operation: "chart", block: { id: "figure" }, imageDataUrl: "data:image/png;base64,c3ludGhldGlj" });
+    await doubleClick(blocks[0]);
+    expect(stream).toHaveBeenCalledOnce();
+    await act(async () => jobs[0].emit('{"summary":"**流程图**'));
+    expect(container.querySelector(".assistant-chart-reading strong")?.textContent).toBe("比较对象");
+    expect(container.querySelector(".assistant-chart-reading .markdown-content strong")?.textContent).toBe("流程图");
+    await act(async () => jobs[0].finish(JSON.stringify({ summary: "**流程图**", encoding: "六个步骤", findings: ["逐步筛选"],
+      role: "展示方法", caveats: ["未显示具体数值"] })));
+    await doubleClick(blocks[0]);
+    expect(stream).toHaveBeenCalledOnce();
+    expect(container.querySelector(".assistant-chart-reading")?.getAttribute("aria-busy")).toBe("false");
+  });
+  it("cancels chart analysis when another block is selected and ignores late output", async () => {
+    const source = { ...paper, blockData: [{ ...paper.blockData[0], id: "figure", kind: "image", text: "Figure 1" }, paper.blockData[1]] };
+    const { container, blocks, jobs } = await mount(source);
+    await doubleClick(blocks[0]);
+    expect(jobs).toHaveLength(1);
+    await act(async () => blocks[1].click());
+    expect(jobs[0].cancel).toHaveBeenCalledOnce();
+    await act(async () => jobs[0].emit('{"summary":"过期结果'));
+    expect(container.textContent).not.toContain("过期结果");
+    expect(container.querySelector(".chart-context")).toBeNull();
+  });
+  it("reports a chart failure and lets another double-click retry", async () => {
+    const source = { ...paper, blockData: [{ ...paper.blockData[0], id: "figure", kind: "image", text: "Figure 1" }, paper.blockData[1]] };
+    const { container, blocks, jobs } = await mount(source);
+    await doubleClick(blocks[0]);
+    await act(async () => jobs[0].fail(new Error("图表服务暂不可用")));
+    expect(container.querySelector(".assistant-action-error")?.textContent).toContain("图表服务暂不可用");
+    await doubleClick(blocks[0]);
+    expect(jobs).toHaveLength(2);
+  });
+  it("keeps the running chart request when double-clicking a word in the PDF text layer", async () => {
+    const source = { ...paper, blockData: [{ ...paper.blockData[0], id: "table", kind: "table" }, paper.blockData[1]] };
+    const { container, blocks, jobs } = await mount(source);
+    await doubleClick(blocks[0]);
+    const stage = container.querySelector<HTMLElement>(".pdf-page-stage")!;
+    vi.spyOn(stage, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, width: 600, height: 800 } as DOMRect);
+    const span = document.createElement("span");
+    span.textContent = "attention";
+    stage.querySelector(".pdf-text-layer")!.append(span);
+    const range = document.createRange();
+    range.selectNodeContents(span);
+    Object.defineProperty(range, "getClientRects", { value: () => [{ left: 90, top: 90, width: 20, height: 20 }] });
+    window.getSelection()!.addRange(range);
+    await act(async () => {
+      span.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, detail: 2, clientX: 100, clientY: 100 }));
+      span.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, detail: 2, clientX: 100, clientY: 100 }));
+      span.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, detail: 2, clientX: 100, clientY: 100 }));
+    });
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].cancel).not.toHaveBeenCalled();
+    expect(window.getSelection()?.toString()).toBe("");
+  });
   it("does not expose a whole-paper overview module or action", async () => {
     const { container, stream } = await mount();
     expect(container.querySelector(".assistant-overview")).toBeNull();
@@ -691,7 +753,8 @@ describe("paragraph quick analysis", () => {
       ...paper, blockData: [{ ...paper.blockData[0], kind: "table" }, paper.blockData[1]],
     });
     await doubleClick(blocks[0]);
-    expect(stream).not.toHaveBeenCalled();
+    expect(stream).toHaveBeenCalledOnce();
+    expect(stream.mock.calls[0][1].operation).toBe("chart");
     expect(blocks[0].textContent).not.toContain("翻译并解释");
   });
 

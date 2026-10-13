@@ -31,7 +31,7 @@ type Tasks = {
 
 const pdf = Uint8Array.from(Buffer.from("%PDF-1.7\n%%EOF\n"));
 const apiKey = "synthetic-key";
-const validResult = { layoutVersion: 2, blocks: [{ id: "b1", kind: "paragraph", text: "Body", pageNumber: 1, order: 0, bbox: [0.1, 0.2, 0.8, 0.4] }] };
+const validResult = { layoutVersion: 3, blocks: [{ id: "b1", kind: "paragraph", text: "Body", pageNumber: 1, order: 0, bbox: [0.1, 0.2, 0.8, 0.4] }] };
 const loadedModules = {
   store: require("../../electron/document-store.cjs") as { createDocumentStore(options: { rootDirectory: string }): Store },
   tasks: require("../../electron/document-tasks.cjs") as { createDocumentTasks(options: any): Tasks },
@@ -68,8 +68,25 @@ afterEach(async () => {
 });
 
 describe("document task orchestration", () => {
+  it("recovers version-two column bounds from the completed batch without another upload", async () => {
+    const upgraded = { ...validResult, layoutVersion: 3, blocks: [{ ...validResult.blocks[0], id: "replacement",
+      pageBounds: [{ pageNumber: 1, bbox: validResult.blocks[0].bbox }, { pageNumber: 1, bbox: [.85, .1, .95, .3] }],
+    }] };
+    const { id, tasks, documents, calls } = await fixture({
+      getBatch: vi.fn(async () => ({ state: "done", progress: 1, zipUrl: "https://cdn-mineru.openxlab.org.cn/cloud.zip" })),
+      extractResultZip: vi.fn(() => ({ result: upgraded, assets: [] })),
+    });
+    await documents.saveTask(id, { batchId: "completed", resultBatchId: "completed", state: "done", progress: 1 });
+    await documents.saveParse(id, { ...validResult, layoutVersion: 2 });
+    expect((await tasks.snapshot(id)).layoutRecoveryNeeded).toBe(true);
+    await tasks.status(id);
+    const status = await tasks.status(id);
+    expect(status.result.blocks[0]).toMatchObject({ id: "b1", pageBounds: upgraded.blocks[0].pageBounds });
+    expect(calls.requestUpload).not.toHaveBeenCalled();
+    expect(calls.uploadPdf).not.toHaveBeenCalled();
+  });
   it("upgrades a version-one completed result from the same batch without uploading", async () => {
-    const upgraded = { ...validResult, layoutVersion: 2, blocks: [{ ...validResult.blocks[0],
+    const upgraded = { ...validResult, layoutVersion: 3, blocks: [{ ...validResult.blocks[0],
       id: "replacement-id", pageBounds: [
         { pageNumber: 1, bbox: validResult.blocks[0].bbox },
         { pageNumber: 2, bbox: [.1, .2, .8, .4] },
@@ -195,7 +212,7 @@ describe("document task orchestration", () => {
   });
 
   it("recovers coordinates from an existing completed batch without uploading and preserves block identity", async () => {
-    const positioned = { ...validResult, layoutVersion: 2, blocks: [{ ...validResult.blocks[0], id: "new-id", bbox: [0.1, 0.2, 0.8, 0.4] }] };
+    const positioned = { ...validResult, layoutVersion: 3, blocks: [{ ...validResult.blocks[0], id: "new-id", bbox: [0.1, 0.2, 0.8, 0.4] }] };
     const { id, tasks, documents, calls } = await fixture({
       getBatch: vi.fn(async () => ({ state: "done", progress: 1, zipUrl: "https://cdn-mineru.openxlab.org.cn/result.zip" })),
       extractResultZip: vi.fn(() => ({ result: positioned, assets: [] })),
@@ -209,7 +226,7 @@ describe("document task orchestration", () => {
     expect(calls.requestUpload).not.toHaveBeenCalled();
     expect(calls.uploadPdf).not.toHaveBeenCalled();
     expect(calls.getBatch).toHaveBeenCalledOnce();
-    expect((await documents.loadParse(id)).layoutVersion).toBe(2);
+    expect((await documents.loadParse(id)).layoutVersion).toBe(3);
   });
 
   it("lets an explicit restart replace unavailable or partial coordinates", async () => {
@@ -218,7 +235,7 @@ describe("document task orchestration", () => {
       [...validResult.blocks, { ...validResult.blocks[0], id: "missing", bbox: undefined }],
     ]) {
       const { id, tasks, documents, calls } = await fixture();
-      await documents.saveParse(id, { layoutVersion: 2, layoutStatus: "unavailable", blocks });
+      await documents.saveParse(id, { layoutVersion: 3, layoutStatus: "unavailable", blocks });
       await documents.saveTask(id, { batchId: "no-layout", resultBatchId: "no-layout", state: "done", progress: 1 });
       expect((await tasks.snapshot(id)).layoutRecoveryNeeded).toBeUndefined();
       expect(await tasks.start(id)).toEqual({ batchId: "batch-1" });

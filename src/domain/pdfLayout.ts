@@ -13,7 +13,7 @@ export function hasPageBounds(block: DocumentBlock): boolean {
   return Array.isArray(block.pageBounds) && block.pageBounds.length > 0
     && block.pageBounds.every((region) => region && Number.isInteger(region.pageNumber)
       && region.pageNumber > 0 && isUnitBox(region.bbox))
-    && new Set(block.pageBounds.map((region) => region.pageNumber)).size === block.pageBounds.length
+    && new Set(block.pageBounds.map((region) => JSON.stringify([region.pageNumber, region.bbox]))).size === block.pageBounds.length
     && block.pageBounds.some((region) => region.pageNumber === block.pageNumber
       && region.bbox.every((value, index) => value === block.bbox![index]));
 }
@@ -22,10 +22,19 @@ export function hasPageBounds(block: DocumentBlock): boolean {
 export function getPageBlocks(blocks: DocumentBlock[], pageNumber: number): DocumentBlock[] {
   return blocks.filter(hasPageBounds).flatMap((block) => {
     const bounds = block.pageBounds ?? [{ pageNumber: block.pageNumber, bbox: block.bbox! }];
-    const region = bounds.find((bound) => bound.pageNumber === pageNumber);
-    if (!region) return [];
-    return block.pageNumber === pageNumber ? [block] : [{ ...block, pageNumber, bbox: region.bbox }];
+    return bounds.filter((region) => region.pageNumber === pageNumber).map((region) =>
+      block.pageNumber === pageNumber && region.bbox.every((value, index) => value === block.bbox![index])
+        ? block : { ...block, pageNumber, bbox: region.bbox });
   });
+}
+
+/** Only identifies a drawn region; the canonical block id remains the analysis/cache identity. */
+export function getPageBlockRegionId(block: DocumentBlock): string {
+  const index = block.pageBounds?.findIndex((region) => region.pageNumber === block.pageNumber
+    && region.bbox.every((value, coordinate) => value === block.bbox![coordinate])) ?? 0;
+  if (index <= 0) return block.id;
+  const samePage = block.pageBounds!.slice(0, index).some((region) => region.pageNumber === block.pageNumber);
+  return `${block.id}-page-${block.pageNumber}${samePage ? `-region-${index}` : ""}`;
 }
 
 export function findPageBlockAtPoint(blocks: DocumentBlock[], x: number, y: number): DocumentBlock | null {

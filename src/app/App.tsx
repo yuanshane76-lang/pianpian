@@ -99,6 +99,7 @@ export default function App() {
   const [pendingAction, setPendingAction] = useState<AiRequest["operation"] | null>(null);
   const [paragraphAnalysis, setParagraphAnalysis] = useState<ParagraphAnalysis | null>(null);
   const activeParagraphAnalysisRef = useRef<string | null>(null);
+  const activeChartAnalysisRef = useRef<string | null>(null);
   const [importing, setImporting] = useState(false);
   const importingRef = useRef(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -126,6 +127,7 @@ export default function App() {
     setPendingAction(null);
     setParagraphAnalysis(null);
     activeParagraphAnalysisRef.current = null;
+    activeChartAnalysisRef.current = null;
     if (!importingRef.current) setIsBusy(false);
   }
 
@@ -959,16 +961,27 @@ export default function App() {
     }
   }
 
-  async function handleReadChart() {
-    if (!selectedPaper || !selectedBlock || !isVisualBlock(selectedBlock)) return;
-    if (chartReading) return;
-    const block = selectedBlock;
+  async function handleReadChart(target = selectedBlock) {
+    if (!selectedPaper || !target || !isVisualBlock(target)) return;
+    const block = target;
     const paper = selectedPaper;
     const identity = serviceIdentity;
-    const requestId = analysisRequestIdRef.current;
     const sourceSignature = getDocumentSourceSignature(paper.blockData ?? []);
     const visual = getDocumentVisualSignature(block);
-    const key = chartKey;
+    const key = buildAnalysisCacheKey(paper.id, block.id, "chart", `${identity}:${paper.originalId}:${sourceSignature}:${visual}`);
+    if (activeChartAnalysisRef.current === key) return;
+    invalidateAnalysisRequests();
+    selectedBlockRef.current = block;
+    setSelectedBlock(block);
+    setSelectionText("");
+    setActionError(null);
+    if (!availability.available) { setSettingsOpen(true); return; }
+    const cached = analysisCache.get(key);
+    if (cached) {
+      try { parseChartReading(cached.value); return; } catch { /* Regenerate invalid entries. */ }
+    }
+    const requestId = analysisRequestIdRef.current;
+    activeChartAnalysisRef.current = key;
     function stillCurrent() {
       const currentPaper = papersRef.current.find((item) => item.id === paper.id);
       const currentBlock = currentPaper?.blockData?.find((item) => item.id === block.id);
@@ -995,8 +1008,14 @@ export default function App() {
           sourceSignature: `${identity}:${paper.originalId}:${sourceSignature}:${visual}`, value, createdAt: new Date().toISOString() });
         return next;
       });
+    } catch (error) {
+      const failure = error as { name?: unknown; message?: unknown } | null;
+      if (stillCurrent() && failure?.name !== "AbortError") {
+        setActionError(typeof failure?.message === "string" ? failure.message : "图表解读失败，请重试");
+      }
     } finally {
       if (analysisRequestIdRef.current === requestId) {
+        activeChartAnalysisRef.current = null;
         setIsBusy(false);
         setPendingAction(null);
         setStreamingOutput(null);
@@ -1081,8 +1100,9 @@ export default function App() {
           }}
           onSelectText={(block, text) => { invalidateAnalysisRequests(); setSelectedBlock(block); setSelectionText(text); setActionError(null); }}
           onAnalyzeParagraph={(block) => void handleAnalyzeParagraph(block)}
+          onAnalyzeChart={(block) => void withAnalysisError(() => handleReadChart(block))}
           onTranslate={() => void withAnalysisError(handleTranslate)}
-          onReadChart={() => void withAnalysisError(handleReadChart)}
+          onReadChart={() => void withAnalysisError(() => handleReadChart())}
           chartReading={chartReading}
           onExplain={(force) => void withAnalysisError(() => handleExplain(force))}
           explanation={currentParagraphAnalysis?.outputs.explain ?? explanations[`${selectedPaper.id}:${targetSignature}`] ?? null}

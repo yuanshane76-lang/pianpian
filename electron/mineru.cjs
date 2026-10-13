@@ -441,10 +441,10 @@ function normalizeContentList(bytes, sourcePath, files) {
   return { blocks, ...(title ? { title } : {}), ...(pageCount ? { pageCount } : {}) };
 }
 
-// content_list merges paragraphs across pages but keeps only the first box.
-// layout.json retains the explicit cross_page lines and their physical source
-// in preproc_blocks. Match those exact lines; never infer a page from text order.
-function addCrossPageBounds(result, bytes) {
+// content_list keeps only the first box when merging paragraphs across columns
+// or pages. Same-page continuation lines need not carry cross_page. Resolve
+// out-of-box lines against their exact preproc source, retaining separate regions.
+function addParagraphBounds(result, bytes) {
   let layout;
   try { layout = JSON.parse(bytes.toString("utf8").replace(/^\uFEFF/, "")); }
   catch { fail("Invalid MinerU layout JSON."); }
@@ -461,13 +461,13 @@ function addCrossPageBounds(result, bytes) {
   const sources = new Map();
   for (const page of layout.pdf_info) {
     if (!Number.isInteger(page?.page_idx) || page.page_idx < 0 || page.page_idx >= 100000) fail("Invalid MinerU layout page index.");
-    for (const block of page.preproc_blocks || []) {
+    for (const [index, block] of (page.preproc_blocks || []).entries()) {
       if (block.type !== "text") continue;
       for (const line of block.lines || []) {
         const bbox = unitBox(line.bbox, page);
         const key = lineKey(line);
         const entries = sources.get(key) || [];
-        entries.push({ pageNumber: page.page_idx + 1, bbox });
+        entries.push({ pageNumber: page.page_idx + 1, bbox, regionKey: `${page.page_idx}:${index}` });
         sources.set(key, entries);
       }
     }
@@ -483,24 +483,32 @@ function addCrossPageBounds(result, bytes) {
   for (const page of layout.pdf_info) {
     for (const paragraph of page.para_blocks || []) {
       if (paragraph.type !== "text") continue;
-      const lines = (paragraph.lines || []).filter((line) => line.spans?.some((span) => span.cross_page === true));
+      const box = normalizeBbox(paragraph.bbox);
+      const lines = (paragraph.lines || []).filter((line) => {
+        if (line.spans?.some((span) => span.cross_page === true)) return true;
+        const physical = normalizeBbox(line.bbox);
+        return box && physical && (physical[0] < box[0] - 2 || physical[1] < box[1] - 2
+          || physical[2] > box[2] + 2 || physical[3] > box[3] + 2);
+      });
       if (!lines.length) continue;
       const primary = unitBox(paragraph.bbox, page);
       const matches = primary ? paragraphs.get(gridKey(page.page_idx + 1, primary)) : undefined;
       if (matches?.length !== 1) fail("Invalid MinerU cross-page layout paragraph.");
       const block = matches[0];
-      const bounds = new Map([[block.pageNumber, [...block.bbox]]]);
+      const bounds = new Map([["primary", { pageNumber: block.pageNumber, bbox: [...block.bbox] }]]);
       for (const line of lines) {
-        const candidates = (sources.get(lineKey(line)) || []).filter((source) => source.pageNumber > block.pageNumber);
+        const crossPage = line.spans?.some((span) => span.cross_page === true);
+        const candidates = (sources.get(lineKey(line)) || []).filter((source) =>
+          crossPage ? source.pageNumber > block.pageNumber : source.pageNumber === block.pageNumber);
         if (candidates.length !== 1 || !candidates[0].bbox) fail("Invalid MinerU cross-page layout source.");
         const source = candidates[0];
-        const prior = bounds.get(source.pageNumber);
-        bounds.set(source.pageNumber, prior
+        const prior = bounds.get(source.regionKey)?.bbox;
+        bounds.set(source.regionKey, { pageNumber: source.pageNumber, bbox: prior
           ? [Math.min(prior[0], source.bbox[0]), Math.min(prior[1], source.bbox[1]), Math.max(prior[2], source.bbox[2]), Math.max(prior[3], source.bbox[3])]
-          : source.bbox);
+          : source.bbox });
       }
-      block.pageBounds = [...bounds].sort(([left], [right]) => left - right).map(([pageNumber, bbox]) => ({ pageNumber, bbox }));
-      result.pageCount = Math.max(result.pageCount || 0, ...bounds.keys());
+      block.pageBounds = [...bounds.values()].sort((left, right) => left.pageNumber - right.pageNumber);
+      result.pageCount = Math.max(result.pageCount || 0, ...block.pageBounds.map((region) => region.pageNumber));
     }
   }
   return result;
@@ -582,7 +590,7 @@ function extractResultZip(buffer) {
     result = normalizeContentList(files.get(contentLists[0]), contentLists[0], files);
     const layouts = [...files.keys()].filter((name) => /(?:^|\/)(?:layout|[^/]+_middle)\.json$/i.test(name));
     if (layouts.length > 1) fail("Ambiguous MinerU layout JSON.");
-    if (layouts.length) result = addCrossPageBounds(result, files.get(layouts[0]));
+    if (layouts.length) result = addParagraphBounds(result, files.get(layouts[0]));
   } else {
     const markdown = [...files.keys()].filter((name) => /\.md$/i.test(name)).sort((a, b) => {
       const priority = (name) => /(?:^|\/)full\.md$/i.test(name) ? 0 : /(?:^|\/)markdown\.md$/i.test(name) ? 1 : 2;
@@ -594,7 +602,7 @@ function extractResultZip(buffer) {
   const assets = [...files].filter(([name]) => IMAGE_EXTENSION.test(name)).map(([name, data]) => ({ path: name, data }));
   const positionedCount = result.blocks.filter((block) => block.bbox).length;
   const layoutStatus = positionedCount === 0 ? "unavailable" : positionedCount === result.blocks.length ? "available" : "partial";
-  return { result: { ...result, layoutVersion: 2, layoutStatus }, assets };
+  return { result: { ...result, layoutVersion: 3, layoutStatus }, assets };
 }
 
 module.exports = { requestUpload, uploadPdf, getBatch, downloadResultZip, extractResultZip };

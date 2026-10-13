@@ -25,7 +25,7 @@ if (process.versions.electron) {
     rootDirectory: path.join(app.getPath("userData"), "documents"),
   });
   globalThis.publishCrossPageFixture = async (paper) => {
-    await store.saveParse(paper.originalId, { layoutVersion: 2, layoutStatus: "available",
+    await store.saveParse(paper.originalId, { layoutVersion: 3, layoutStatus: "available",
       title: paper.title, blocks: paper.blockData, pageCount: 2 });
     await store.saveTask(paper.originalId, { state: "done", batchId: "cross-page-fixture", resultBatchId: "cross-page-fixture" });
   };

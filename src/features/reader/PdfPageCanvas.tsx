@@ -7,11 +7,12 @@ import { findPageBlockAtPoint, hasPageBounds } from "../../domain/pdfLayout";
 import { renderPdfTextLayer } from "../../services/pdfTextLayer";
 import { BlockList } from "./BlockList";
 
-export function PdfPageCanvas({ pdfPage, layout, blocks, activeBlockId, onSelect, onSelectText, onAnalyzeParagraph, onReady }: {
+export function PdfPageCanvas({ pdfPage, layout, blocks, activeBlockId, onSelect, onSelectText, onAnalyzeParagraph, onAnalyzeChart, onReady }: {
   pdfPage: PDFPageProxy; layout: PdfPageLayout; blocks: DocumentBlock[]; activeBlockId: string | null;
   onSelect: (block: DocumentBlock) => void; onSelectText: (block: DocumentBlock, text: string) => void;
   onReady: (page: number, ready: boolean) => void;
   onAnalyzeParagraph?: (block: DocumentBlock) => void;
+  onAnalyzeChart?: (block: DocumentBlock) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -72,16 +73,25 @@ export function PdfPageCanvas({ pdfPage, layout, blocks, activeBlockId, onSelect
     window.getSelection()?.removeAllRanges();
     onAnalyzeParagraph(block);
   }
+  function analyzeChart(block: DocumentBlock) {
+    if (!["image", "table"].includes(block.kind) || !onAnalyzeChart) return;
+    window.getSelection()?.removeAllRanges();
+    onAnalyzeChart(block);
+  }
+  function canAnalyze(block: DocumentBlock | null) {
+    return Boolean(block && (block.kind === "paragraph" ? onAnalyzeParagraph
+      : ["image", "table"].includes(block.kind) && onAnalyzeChart));
+  }
 
   return <div className="pdf-page-stage" ref={stageRef} data-page-number={layout.pageNumber}
     data-rendered={interactive ? "true" : "false"} style={{ width: layout.width, height: layout.height }}
     onPointerMove={(event) => setHoveredBlockId(blockAt(event.clientX, event.clientY)?.id ?? null)}
     onPointerLeave={() => setHoveredBlockId(null)}
     onMouseDown={(event) => {
-      if (event.detail > 1 && onAnalyzeParagraph && blockAt(event.clientX, event.clientY)?.kind === "paragraph") event.preventDefault();
+      if (event.detail > 1 && canAnalyze(blockAt(event.clientX, event.clientY))) event.preventDefault();
     }}
     onMouseUp={(event) => {
-      if (event.detail > 1 && onAnalyzeParagraph && blockAt(event.clientX, event.clientY)?.kind === "paragraph") return;
+      if (event.detail > 1 && canAnalyze(blockAt(event.clientX, event.clientY))) return;
       const selected = selectedSentence(); if (selected) onSelectText(selected.block, selected.text);
     }}
     onClick={(event) => {
@@ -90,16 +100,22 @@ export function PdfPageCanvas({ pdfPage, layout, blocks, activeBlockId, onSelect
     }}
     onDoubleClick={(event) => {
       const block = blockAt(event.clientX, event.clientY);
-      if (block?.kind !== "paragraph" || !onAnalyzeParagraph) return;
-      event.preventDefault();
-      analyzeParagraph(block);
+      if (!block) return;
+      if (block.kind === "paragraph" && onAnalyzeParagraph) {
+        event.preventDefault();
+        analyzeParagraph(block);
+      } else if (["image", "table"].includes(block.kind) && onAnalyzeChart) {
+        event.preventDefault();
+        analyzeChart(block);
+      }
     }}>
     <canvas ref={canvasRef} aria-label={`论文原文第 ${layout.pageNumber} 页，包含原始图表和公式`} />
     <div className="pdf-text-layer" ref={textRef} style={{ visibility: interactive ? "visible" : "hidden" }} />
     {interactive && positionedBlocks.length ? <div className="pdf-structure-overlay" aria-label={`第 ${layout.pageNumber} 页 MinerU 结构化交互层`}>
       <BlockList blocks={positionedBlocks} activeBlockId={activeBlockId} hoveredBlockId={hoveredBlockId}
         onSelect={(block) => { window.getSelection()?.removeAllRanges(); onSelect(block); }}
-        onAnalyzeParagraph={onAnalyzeParagraph ? analyzeParagraph : undefined} />
+        onAnalyzeParagraph={onAnalyzeParagraph ? analyzeParagraph : undefined}
+        onAnalyzeChart={onAnalyzeChart ? analyzeChart : undefined} />
     </div> : null}
     {!interactive ? <div className="pdf-page-loading" role={error ? "alert" : "status"}>
       {error || <><LoaderCircle size={16} className="spin" />正在加载第 {layout.pageNumber} 页…</>}

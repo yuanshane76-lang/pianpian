@@ -11,7 +11,7 @@ if (process.versions.electron) {
     rootDirectory: path.join(app.getPath("userData"), "documents"),
   });
   globalThis.publishAgentFixture = async (paper) => {
-    await documents.saveParse(paper.originalId, { resultBatchId: "synthetic-agent", layoutVersion: 2,
+    await documents.saveParse(paper.originalId, { resultBatchId: "synthetic-agent", layoutVersion: 3,
       title: paper.title, blocks: paper.blockData, pageCount: 1 });
     await documents.saveTask(paper.originalId, { state: "done", batchId: "synthetic-agent", resultBatchId: "synthetic-agent" });
   };

@@ -21,7 +21,7 @@ export interface PaperRecord {
   pageCount?: number;
   parseVersion?: number;
   mineruBatchId?: string;
-  readingPosition?: { mode: "pdf" | "reading"; page: number; blockId?: string };
+  readingPosition?: { mode: "pdf" | "reading"; page: number; blockId?: string; regionId?: string };
 }
 
 export interface PaperMetadataPatch {

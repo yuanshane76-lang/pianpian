@@ -29,7 +29,7 @@ type Block = {
 };
 type ParseResult = {
   blocks: Block[]; title?: string; pageCount?: number;
-  layoutVersion: 2;
+  layoutVersion: 3;
   layoutStatus: "available" | "partial" | "unavailable";
 };
 type BatchState = "waiting-file" | "pending" | "running" | "converting" | "downloading" | "failed" | "done";
@@ -123,3 +123,5 @@ Previously published results without `layoutVersion`, or with version 1, recover
 Desktop layout regression: with the dev server running and the app closed, run `node scripts/pdf-layout-e2e.cjs`. It uses the local Attention paper and writes reports/screenshots under ignored `out/layout-checks/`. Add `--live-ai` to validate a real selected-sentence translation; this may incur a small model charge and requires configured credentials. The script requires Playwright available in the configured local runtime.
 
 Packaging must include both new CJS files in the parent's Electron allowlist; runtime imports use Node built-ins only.
+
+Geometry v3 allows multiple disjoint `pageBounds` entries on the same page. Same-page continuation lines outside the canonical box are resolved using exact layout/preproc line matches, without requiring `cross_page`. Physical source regions remain separate, preserving gutters and canonical block identities. Completed v1/v2 results recover from the existing batch without another PDF upload.

@@ -5,6 +5,19 @@ import type { DocumentBlock } from "../../src/domain/documentBlocks";
 
 const paragraph: DocumentBlock = { id: "paragraph", kind: "paragraph", text: "Body", order: 0, pageNumber: 5, bbox: [0.169, 0.5, 0.825, 0.6] };
 describe("PDF interaction coordinates", () => {
+  it("projects disjoint columns of the same paragraph without covering the gutter", () => {
+    const merged: DocumentBlock = { ...paragraph, bbox: [.1, .8, .45, .9], pageBounds: [
+      { pageNumber: 5, bbox: [.1, .8, .45, .9] },
+      { pageNumber: 5, bbox: [.55, .1, .9, .4] },
+    ] };
+    expect(hasPageBounds(merged)).toBe(true);
+    const regions = getPageBlocks([merged], 5);
+    expect(regions).toHaveLength(2);
+    expect(findPageBlockAtPoint(regions, .7, .2)?.id).toBe(merged.id);
+    expect(findPageBlockAtPoint(regions, .25, .85)?.id).toBe(merged.id);
+    expect(findPageBlockAtPoint(regions, .5, .5)).toBeNull();
+    expect(hasPageBounds({ ...merged, pageBounds: [merged.pageBounds![0], merged.pageBounds![0]] })).toBe(false);
+  });
   it("projects the continuation onto its own page while keeping the canonical paragraph identity", () => {
     const merged = { ...paragraph, pageBounds: [
       { pageNumber: 5, bbox: paragraph.bbox! },
