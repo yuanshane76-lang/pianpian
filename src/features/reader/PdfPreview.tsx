@@ -68,11 +68,14 @@ export function PdfPreview(props: Props) {
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   const pageCount = source && source.id === originalId ? source.pageCount : 0;
+  // ReaderView assigns both kinds of navigation from one increasing sequence.
+  const focusIsLatest = Boolean(focusTarget && (!navigationTarget || focusTarget.requestId >= navigationTarget.requestId));
+  const navigationIsLatest = Boolean(navigationTarget && (!focusTarget || navigationTarget.requestId > focusTarget.requestId));
   const focusBlock = focusTarget ? blocks.find((block) => block.id === focusTarget.id) : undefined;
-  const pendingFocusPage = focusTarget && focusBlock && hasPageBounds(focusBlock) && handledFocus.current !== focusTarget.requestId
+  const pendingFocusPage = focusIsLatest && focusTarget && focusBlock && hasPageBounds(focusBlock) && handledFocus.current !== focusTarget.requestId
     ? focusTarget.pageNumber ?? focusBlock.pageNumber
     : undefined;
-  const pendingNavigationPage = navigationTarget && handledNavigation.current !== navigationTarget.requestId
+  const pendingNavigationPage = navigationIsLatest && navigationTarget && handledNavigation.current !== navigationTarget.requestId
     ? Math.min(Math.max(navigationTarget.page, 1), pageCount || 1) : undefined;
   const pendingPage = pendingFocusPage ?? pendingNavigationPage;
   const renderedZoom = layout[Math.min(Math.max(page - 1, 0), layout.length - 1)]?.scale ?? zoom;
@@ -227,17 +230,17 @@ export function PdfPreview(props: Props) {
   }, [layout, originalId]);
 
   useLayoutEffect(() => {
-    if (!navigationTarget || !layout.length || handledNavigation.current === navigationTarget.requestId) return;
+    if (!navigationIsLatest || !navigationTarget || !layout.length || handledNavigation.current === navigationTarget.requestId) return;
     const destination = layout[Math.min(Math.max(navigationTarget.page - 1, 0), layout.length - 1)];
     if (!scrollRef.current || !destination) return;
     scrollRef.current.scrollTop = PDF_SCROLL_PADDING + destination.top;
     reportedPage.current = destination.pageNumber;
     updateViewportRef.current(false);
     if (readyPages[destination.pageNumber]) handledNavigation.current = navigationTarget.requestId;
-  }, [navigationTarget, layout, readyPages]);
+  }, [navigationIsLatest, navigationTarget, layout, readyPages]);
 
   useLayoutEffect(() => {
-    if (!focusTarget || !layout.length || handledFocus.current === focusTarget.requestId) return;
+    if (!focusIsLatest || !focusTarget || !layout.length || handledFocus.current === focusTarget.requestId) return;
     const canonical = blocks.find((item) => item.id === focusTarget.id);
     if (!canonical || !hasPageBounds(canonical)) return;
     const regions = getPageBlocks([canonical], focusTarget.pageNumber ?? propsRef.current.page);
@@ -254,7 +257,7 @@ export function PdfPreview(props: Props) {
     handledFocus.current = focusTarget.requestId;
     element.scrollIntoView?.({ behavior: "auto", block: "center" });
     updateViewportRef.current(false);
-  }, [focusTarget, layout, blocks, readyPages]);
+  }, [focusIsLatest, focusTarget, layout, blocks, readyPages]);
 
   if (!originalId) return <div className="pdf-missing">
     <h3>这篇旧记录没有保存原始 PDF</h3>

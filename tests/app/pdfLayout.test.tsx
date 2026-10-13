@@ -318,6 +318,37 @@ describe("continuous PDF page geometry", () => {
     expect(scrollIntoView.mock.instances[0]).toBe(container.querySelector(`[id="pdf-block-${far.id}"]`));
   });
 
+  it("does not let an unfinished page jump override a newer outline target", async () => {
+    const pending = new Map<number, (page: unknown) => void>();
+    const pdfPage = {
+      getViewport: ({ scale }: { scale: number }) => ({ width: 600 * scale, height: 800 * scale }),
+      render: () => ({ promise: Promise.resolve(), cancel: vi.fn() }),
+      cleanup: vi.fn(),
+    };
+    const getPage = vi.fn((number: number) => number === 1 ? Promise.resolve(pdfPage)
+      : new Promise((resolve) => pending.set(number, resolve)));
+    vi.mocked(openPdf).mockResolvedValueOnce({ numPages: 40, getPage, destroy: async () => {} } as never);
+    const far = { ...paragraph, id: "latest-outline", pageNumber: 30 };
+    const { container, rerender } = await mount([paragraph, far]);
+    await act(async () => { pending.get(2)?.(pdfPage); pending.get(3)?.(pdfPage); });
+    const navigationTarget = { page: 20, requestId: 1 };
+    await rerender({ page: 20, navigationTarget });
+    await rerender({ page: 30, navigationTarget, focusTarget: { id: far.id, requestId: 2 } });
+    await act(async () => pending.get(19)?.(pdfPage));
+    expect(pending.has(30)).toBe(true);
+    await act(async () => pending.get(30)!(pdfPage));
+    expect(scrollIntoView).toHaveBeenCalledOnce();
+    const scroll = container.querySelector<HTMLElement>(".pdf-canvas-scroll")!;
+    const targetPosition = scroll.scrollTop;
+    for (let pass = 0; pass < 4; pass += 1) {
+      const batch = [...pending.entries()];
+      pending.clear();
+      await act(async () => batch.forEach(([, finish]) => finish(pdfPage)));
+    }
+    expect(scroll.scrollTop).toBe(targetPosition);
+    expect(container.querySelector('.pdf-page-stage[data-page-number="30"]')).not.toBeNull();
+  });
+
   it("preserves the page-relative reading anchor when zoom changes", async () => {
     const { container } = await mount([paragraph, nextParagraph]);
     const scroll = container.querySelector<HTMLElement>(".pdf-canvas-scroll")!;
