@@ -56,6 +56,7 @@ Double-click a paragraph to start translation, explanation, summary with context
 | Research around a paper | Pi-powered conversations across multiple turns; read the current paper, cite pages, search the local library and Crossref, inspect tool progress and paper candidates, and confirm adding paper metadata to the library. |
 | Prepare reading notes | Generate Chinese Markdown drafts, preview them, and choose an export location; three bundled workflows cover close reading, literature search and screening, and literature comparison with notes. |
 | Manage a personal library | Import, search, favorites, tags, metadata editing, deletion, and saved reading positions. |
+| Adjust the reading environment | Switch between light and dark interfaces in the library sidebar or reader toolbar; keep the preference after restart while original PDF pages, figures, and equation images retain their appearance. |
 
 ### Research assistant
 

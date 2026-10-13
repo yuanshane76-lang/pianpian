@@ -143,6 +143,11 @@ if (process.versions.electron) {
     }
     try {
       await page.waitForSelector(".workspace-shell");
+      if (process.argv.includes("--dark")) {
+        await page.getByRole("button", { name: "切换为深色模式", exact: true }).click();
+        assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
+        report.checks.push("Research workflow runs in the user-selected dark theme");
+      }
       await page.getByRole("button", { name: "打开研究助手", exact: true }).click();
       await page.getByText("从这篇论文开始研究", { exact: true }).waitFor();
       await page.locator(".research-skills summary").waitFor();
