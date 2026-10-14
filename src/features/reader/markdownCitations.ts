@@ -1,4 +1,10 @@
-export interface MarkdownCitation { blockId: string; label: string; excerpt?: string }
+export interface MarkdownCitation {
+  blockId: string;
+  label: string;
+  inlineLabel?: string;
+  pageLabel?: string;
+  excerpt?: string;
+}
 interface Node { type: string; value?: string; children?: Node[]; url?: string }
 export function citationRemark(citations: MarkdownCitation[]) {
   return () => (tree: Node) => {
@@ -13,7 +19,7 @@ export function citationRemark(citations: MarkdownCitation[]) {
           const index = ids.get(match[1]);
           if (index === undefined) continue;
           parts.push({ type: "text", value: child.value.slice(position, match.index) });
-          parts.push({ type: "link", url: `zhiyan-citation:${index}`, children: [{ type: "text", value: citations[index].label }] });
+          parts.push({ type: "link", url: `zhiyan-citation:${index}`, children: [{ type: "text", value: citations[index].inlineLabel ?? citations[index].label }] });
           position = match.index! + match[0].length;
         }
         parts.push({ type: "text", value: child.value.slice(position) });

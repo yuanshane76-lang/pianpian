@@ -11,7 +11,24 @@ describe("current paper references", () => {
       { paperId: "foreign", blockId: "block" }, { paperId: "paper", blockId: "missing" },
       { paperId: "paper", blockId: "block", pageNumber: 99, label: "forged" },
       { paperId: "paper", blockId: "block" }, null, {},
-    ])).toEqual([{ blockId: "block", label: "第 3 页", excerpt: "Actual source." }]);
+    ])).toEqual([{ blockId: "block", label: "引用 1", pageLabel: "第 3 页", inlineLabel: "[1]", excerpt: "Actual source." }]);
     expect(currentPaperCitations({ ...paper, blockData: undefined }, [{ paperId: "paper", blockId: "block" }])).toEqual([]);
+  });
+
+  it("keeps same-page sources distinct with citation numbers", () => {
+    const sourcePaper = { ...paper, blockData: [
+      { id: "first", kind: "paragraph" as const, pageNumber: 1, order: 0, text: "First source." },
+      { id: "second", kind: "paragraph" as const, pageNumber: 1, order: 1, text: "Second source." },
+      { id: "third", kind: "paragraph" as const, pageNumber: 3, order: 2, text: "Third source." },
+    ] };
+    expect(currentPaperCitations(sourcePaper, [
+      { paperId: "paper", blockId: "first" },
+      { paperId: "paper", blockId: "second" },
+      { paperId: "paper", blockId: "third" },
+    ])).toEqual([
+      { blockId: "first", label: "引用 1", pageLabel: "第 1 页", inlineLabel: "[1]", excerpt: "First source." },
+      { blockId: "second", label: "引用 2", pageLabel: "第 1 页", inlineLabel: "[2]", excerpt: "Second source." },
+      { blockId: "third", label: "引用 3", pageLabel: "第 3 页", inlineLabel: "[3]", excerpt: "Third source." },
+    ]);
   });
 });

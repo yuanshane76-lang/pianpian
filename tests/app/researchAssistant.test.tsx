@@ -74,6 +74,7 @@ describe("research assistant", () => {
       id: "m1", role: "assistant", content: "结论见原文。", citations: [{ paperId: "p1", blockId: "b1", pageNumber: 1, label: "第 1 页 · 原文" }],
     } }));
     const citation = container.querySelector<HTMLButtonElement>(".research-message-citations button");
+    expect(citation?.textContent).toContain("引用 1");
     expect(citation?.textContent).toContain("第 1 页");
     await act(async () => citation?.click());
     expect(onJump).toHaveBeenCalledWith("b1");
@@ -87,7 +88,7 @@ describe("research assistant", () => {
       emit({ type: "message_delta", messageId: "answer", delta: "这是原文结论。[引用:b1]" });
     });
     const inline = container.querySelector<HTMLButtonElement>(".research-inline-citation");
-    expect(inline?.textContent).toBe("第 1 页");
+    expect(inline?.textContent).toBe("[1]");
     await act(async () => inline!.click());
     expect(onJump).toHaveBeenCalledWith("b1");
     await act(async () => emit({ type: "message_end", message: { id: "answer", role: "assistant",

@@ -29,9 +29,10 @@ describe("assistant Markdown math", () => {
     const onCitation = vi.fn();
     await act(async () => root!.render(<MarkdownContent
       text={"原文[引用:block]、未知[引用:missing]、未完成[引用:b\n\n`[引用:block]`\n\n```\n[引用:block]\n```"}
-      citations={[{ blockId: "block", label: "第 3 页" }]} onCitation={onCitation} />));
+      citations={[{ blockId: "block", label: "引用 1", inlineLabel: "[1]", pageLabel: "第 3 页" }]} onCitation={onCitation} />));
     expect(container.querySelectorAll(".research-inline-citation")).toHaveLength(1);
     expect(container.querySelectorAll("code")).toHaveLength(2);
+    expect(container.querySelector(".research-inline-citation")?.textContent).toBe("[1]");
     await act(async () => container.querySelector<HTMLButtonElement>(".research-inline-citation")!.click());
     expect(onCitation).toHaveBeenCalledWith("block");
   });

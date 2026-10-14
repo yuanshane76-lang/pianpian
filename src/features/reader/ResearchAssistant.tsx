@@ -385,7 +385,7 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
             const approval = approvalByToolId[item.tool.id];
             const output = isRecord(item.tool.output) ? item.tool.output : undefined;
             const references = currentPaperCitations(paper, output?.citations);
-            return <div key={`tool-${item.tool.id}`}><ToolCard tool={item.tool} approvalPaper={approval?.paper} onApprove={() => void approve(item.tool.id, true)} onReject={() => void approve(item.tool.id, false)} onSaveDocument={(draft) => void saveDocument(draft)} />{references.length ? <div className="research-citations">{references.slice(0, 4).map((citation) => <button key={citation.blockId} type="button" title={citation.excerpt} onClick={() => onJump(citation.blockId)}>{citation.label}</button>)}</div> : null}</div>;
+            return <div key={`tool-${item.tool.id}`}><ToolCard tool={item.tool} approvalPaper={approval?.paper} onApprove={() => void approve(item.tool.id, true)} onReject={() => void approve(item.tool.id, false)} onSaveDocument={(draft) => void saveDocument(draft)} />{references.length ? <div className="research-citations">{references.slice(0, 4).map((citation) => <button key={citation.blockId} type="button" title={citation.excerpt} aria-label={`打开${citation.label}，${citation.pageLabel}`} onClick={() => onJump(citation.blockId)}><span>{citation.label}</span><small>{citation.pageLabel}</small></button>)}</div> : null}</div>;
           }
           const content = streaming[item.message.id] ?? item.message.content;
           const references = item.message.role === "assistant" ? currentPaperCitations(paper, item.message.citations) : [];
@@ -396,7 +396,7 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
               onCitation={onJump} /> : <span className="research-placeholder">正在组织回答…</span>}</div>
             {references.length ? <div className="research-message-citations" aria-label="回答引用">
               {references.slice(0, 8).map((citation) =>
-                <button key={citation.blockId} type="button" title={citation.excerpt} onClick={() => onJump(citation.blockId)}>{citation.label}</button>)}
+                <button key={citation.blockId} type="button" title={citation.excerpt} aria-label={`打开${citation.label}，${citation.pageLabel}`} onClick={() => onJump(citation.blockId)}><span>{citation.label}</span><small>{citation.pageLabel}</small></button>)}
             </div> : null}
           </article>;
         })}

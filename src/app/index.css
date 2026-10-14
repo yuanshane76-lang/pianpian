@@ -2321,9 +2321,10 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
 .research-document-card > div > svg { color: var(--teal); flex-shrink: 0; margin-top: 2px; }
 .research-document-card > button { justify-self: start; font-size: 10px; }
 .research-citations { display: flex; gap: 6px; flex-wrap: wrap; margin: -3px 0 14px; }
-.research-citations button { background: var(--surface-raised); color: var(--teal-dark); border: 1px solid var(--accent-line); border-radius: 5px; padding: 4px 7px; font-size: 10px; }
+.research-citations button { display: inline-flex; align-items: baseline; gap: 5px; background: var(--surface-raised); color: var(--teal-dark); border: 1px solid var(--accent-line); border-radius: 5px; padding: 4px 7px; font-size: 10px; }
+.research-citations button small, .research-message-citations button small { color: var(--muted); font-size: 10px; }
 .research-message-citations { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.research-message-citations button { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; color: var(--teal-dark); background: var(--accent-wash); border: 1px solid var(--accent-line); border-radius: 5px; font-size: 10px; }
+.research-message-citations button { display: inline-flex; align-items: baseline; gap: 5px; padding: 4px 7px; color: var(--teal-dark); background: var(--accent-wash); border: 1px solid var(--accent-line); border-radius: 5px; font-size: 10px; }
 .research-message-citations button:hover { background: var(--teal-soft); }
 .research-inline-citation { display: inline-flex; align-items: center; margin: 0 2px; padding: 1px 5px; color: var(--teal-dark); background: var(--teal-soft); border: 1px solid var(--accent-line); border-radius: 4px; font: inherit; font-size: .9em; cursor: pointer; }
 .research-agent-composer { flex-shrink: 0; padding: 12px 14px 14px; border-top: 1px solid var(--line); background: var(--surface); }

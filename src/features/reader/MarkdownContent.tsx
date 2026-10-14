@@ -27,7 +27,8 @@ export function MarkdownContent({ text, citations = [], onCitation }: {
         const citation = href?.match(/^zhiyan-citation:(\d+)$/);
         const source = citation ? citations[Number(citation[1])] : undefined;
         return source && onCitation ? <button type="button" className="research-inline-citation"
-          title={source.excerpt || `${source.label} · 查看原文`} aria-label={`查看引用：${source.label}`}
+          title={source.excerpt || `${source.label}${source.pageLabel ? ` · ${source.pageLabel}` : ""} · 查看原文`}
+          aria-label={`查看引用：${source.label}${source.pageLabel ? `，${source.pageLabel}` : ""}`}
           onClick={() => onCitation(source.blockId)}>{children}</button> : <span className="markdown-link">{children}</span>;
       },
       img: ({ alt }) => <span>{alt}</span>,
