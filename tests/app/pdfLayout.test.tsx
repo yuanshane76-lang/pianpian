@@ -190,6 +190,20 @@ describe("continuous PDF page geometry", () => {
     expect(scrollIntoView).toHaveBeenCalledOnce();
   });
 
+  it("briefly flashes a block after an explicit jump", async () => {
+    vi.useFakeTimers();
+    try {
+      const { container, rerender } = await mount([paragraph]);
+      await rerender({ focusTarget: { id: paragraph.id, requestId: 1, pageNumber: 1, flash: true } });
+      const target = container.querySelector<HTMLElement>(`[id="pdf-block-${paragraph.id}"]`)!;
+      expect(target.classList.contains("is-focus-flash")).toBe(true);
+      await act(async () => vi.advanceTimersByTime(1700));
+      expect(target.classList.contains("is-focus-flash")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("loads and centers a remote outline target after its deferred canvas completes", async () => {
     let finish!: () => void;
     const far = { ...paragraph, id: "far-outline", pageNumber: 20 };

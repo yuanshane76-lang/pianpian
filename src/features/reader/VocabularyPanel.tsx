@@ -2,8 +2,8 @@ import { useMemo, useState } from "react";
 import { ArrowUpRight, BookmarkPlus, Check, LoaderCircle, Search, Sparkles } from "lucide-react";
 import type { AcademicTerm } from "../../domain/vocabulary";
 
-export function VocabularyPanel({ terms, onJump, onGuide, aiAvailable, busy, enriched, guideOverview, loading, hasParagraph, pageNumber, onSaveTerm, isTermSaved, error }: {
-  terms: AcademicTerm[]; onJump: (blockId: string) => void; onGuide: () => void; aiAvailable: boolean; busy: boolean; enriched: boolean; guideOverview?: string; loading?: boolean; hasParagraph?: boolean; pageNumber?: number;
+export function VocabularyPanel({ terms, onJump, onGuide, aiAvailable, busy, enriched, guideOverview, loading, hasParagraph, onSaveTerm, isTermSaved, error }: {
+  terms: AcademicTerm[]; onJump: (blockId: string) => void; onGuide: () => void; aiAvailable: boolean; busy: boolean; enriched: boolean; guideOverview?: string; loading?: boolean; hasParagraph?: boolean;
   onSaveTerm?: (term: AcademicTerm) => void; isTermSaved?: (term: AcademicTerm) => boolean; error?: string | null;
 }) {
   const [query, setQuery] = useState("");
@@ -11,11 +11,11 @@ export function VocabularyPanel({ terms, onJump, onGuide, aiAvailable, busy, enr
   const displayTerms = enriched ? terms : [];
   return <div className="vocabulary-panel">
     <div className="vocabulary-intro"><div className="vocabulary-heading"><Sparkles size={16} /><strong>AI 精选本段词汇</strong>
-      {hasParagraph && pageNumber ? <span>第 {pageNumber} 页</span> : null}</div>
+      </div>
       {guideOverview ? <p>{guideOverview}</p> : null}
       {!enriched ? <button className="text-button" disabled={busy || !hasParagraph} onClick={onGuide}>
         {loading ? <LoaderCircle className="spin" size={14} /> : <Sparkles size={14} />}
-        {loading ? "正在挑选段落词汇…" : aiAvailable ? "AI 精选本段词汇" : "配置 AI 服务"}</button> : <span className="vocabulary-enriched">本段词汇已生成</span>}
+        {loading ? "正在挑选段落词汇…" : aiAvailable ? "生成本段词汇" : "配置 AI 服务"}</button> : <span className="vocabulary-enriched">本段词汇已生成</span>}
       {!enriched && !loading ? <p className="vocabulary-opt-in-hint">双击段落后自动精选，也可以现在手动生成。只展示本段原文中有依据的词汇。</p> : null}
       {error ? <p className="assistant-action-error" role="alert">{error}</p> : null}
     </div>

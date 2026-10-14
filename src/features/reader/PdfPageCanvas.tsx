@@ -7,8 +7,8 @@ import { findPageBlockAtPoint, hasPageBounds } from "../../domain/pdfLayout";
 import { renderPdfTextLayer } from "../../services/pdfTextLayer";
 import { BlockList } from "./BlockList";
 
-export function PdfPageCanvas({ pdfPage, layout, blocks, activeBlockId, onSelect, onSelectText, onAnalyzeParagraph, onAnalyzeChart, onReady }: {
-  pdfPage?: PDFPageProxy; layout: PdfPageLayout; blocks: DocumentBlock[]; activeBlockId: string | null;
+export function PdfPageCanvas({ pdfPage, layout, blocks, activeBlockId, focusFlashRegionId, onSelect, onSelectText, onAnalyzeParagraph, onAnalyzeChart, onReady }: {
+  pdfPage?: PDFPageProxy; layout: PdfPageLayout; blocks: DocumentBlock[]; activeBlockId: string | null; focusFlashRegionId?: string | null;
   onSelect: (block: DocumentBlock) => void; onSelectText: (block: DocumentBlock, text: string) => void;
   onReady: (page: number, ready: boolean) => void;
   onAnalyzeParagraph?: (block: DocumentBlock) => void;
@@ -118,7 +118,7 @@ export function PdfPageCanvas({ pdfPage, layout, blocks, activeBlockId, onSelect
     <canvas ref={canvasRef} aria-label={`论文原文第 ${layout.pageNumber} 页，包含原始图表和公式`} />
     <div className="pdf-text-layer" ref={textRef} style={{ visibility: interactive ? "visible" : "hidden" }} />
     {interactive && positionedBlocks.length ? <div className="pdf-structure-overlay" aria-label={`第 ${layout.pageNumber} 页 MinerU 结构化交互层`}>
-      <BlockList blocks={positionedBlocks} activeBlockId={activeBlockId} hoveredBlockId={hoveredBlockId}
+      <BlockList blocks={positionedBlocks} activeBlockId={activeBlockId} hoveredBlockId={hoveredBlockId} focusFlashRegionId={focusFlashRegionId}
         onSelect={(block) => { window.getSelection()?.removeAllRanges(); onSelect(block); }}
         onAnalyzeParagraph={onAnalyzeParagraph ? analyzeParagraph : undefined}
         onAnalyzeChart={onAnalyzeChart ? analyzeChart : undefined} />

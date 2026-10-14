@@ -95,7 +95,7 @@ export function ReaderView(props: ReaderViewProps) {
   const readerLayoutRef = useRef<HTMLDivElement>(null);
   const assistantToggleRef = useRef<HTMLButtonElement>(null);
   const focusSequence = useRef(0);
-  const [focusTarget, setFocusTarget] = useState<{ id: string; requestId: number; pageNumber?: number; regionId?: string }>();
+  const [focusTarget, setFocusTarget] = useState<{ id: string; requestId: number; pageNumber?: number; regionId?: string; flash?: boolean }>();
   const [navigationTarget, setNavigationTarget] = useState<{ page: number; requestId: number }>();
   const [chartAnalysisRequestId, setChartAnalysisRequestId] = useState<number>();
   const outline = useMemo(() => getDocumentOutline(blocks), [blocks]);
@@ -190,7 +190,7 @@ export function ReaderView(props: ReaderViewProps) {
     if (!block) return;
     setPage(block.pageNumber);
     setSearchQuery("");
-    setFocusTarget({ id: block.id, requestId: ++focusSequence.current });
+    setFocusTarget({ id: block.id, requestId: ++focusSequence.current, flash: true });
     setRightOpen(!window.matchMedia?.("(max-width: 840px)").matches);
     props.onSourceNavigationConsumed?.(props.sourceNavigation.requestId);
   }, [props.sourceNavigation, paper.id]);
@@ -204,7 +204,7 @@ export function ReaderView(props: ReaderViewProps) {
   function navigate(block: DocumentBlock) {
     setSearchQuery("");
     select(block);
-    setFocusTarget({ id: block.id, requestId: ++focusSequence.current });
+    setFocusTarget({ id: block.id, requestId: ++focusSequence.current, flash: true });
   }
 
   function clampWidth(side: "outline" | "assistant", value: number) {

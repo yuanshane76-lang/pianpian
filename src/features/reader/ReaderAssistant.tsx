@@ -187,7 +187,7 @@ export function ReaderAssistant({
     </div>
     <div ref={scrollRef} hidden={tab === "research"} className="assistant-scroll" id={`${id}-${tab === "research" ? "assist" : tab}-panel`} role="tabpanel" aria-labelledby={`${id}-${tab === "research" ? "assist" : tab}-tab`} tabIndex={0}>
       {tab === "vocabulary" ? <VocabularyPanel key={vocabularyBlock?.id ?? selectedBlock?.id ?? "none"} terms={vocabulary} onJump={onJump} onGuide={onGuide} aiAvailable={aiAvailable} busy={isBusy} enriched={Boolean(guide)} guideOverview={guide?.overview}
-        loading={vocabularyLoading} hasParagraph={(vocabularyBlock ?? selectedBlock)?.kind === "paragraph"} pageNumber={(vocabularyBlock ?? selectedBlock)?.pageNumber}
+        loading={vocabularyLoading} hasParagraph={(vocabularyBlock ?? selectedBlock)?.kind === "paragraph"}
         onSaveTerm={onSaveTerm} isTermSaved={isTermSaved} /> : <>
         <section className="assistant-section selected-context">
           <div className="section-heading"><h2>{visual ? selectedBlock?.kind === "table" ? "表格理解" : "图表理解" : selectionText ? "选中句子" : "段落理解"}</h2><span className="context-count">{selectedBlock ? `第 ${selectedBlock.pageNumber} 页` : "未选择"}</span></div>
