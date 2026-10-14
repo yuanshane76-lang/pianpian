@@ -5,7 +5,7 @@
 <h1 align="center">Zhiyan Workbench · 纸研工作台</h1>
 
 <p align="center">
-  Read English research papers with Chinese translations, explanations, and academic vocabulary beside the original.
+  Understand English papers, find related literature, and prepare Chinese reading notes beside the original PDF.
 </p>
 
 <p align="center">
@@ -21,6 +21,13 @@ Zhiyan Workbench is a desktop paper reader for Chinese-speaking readers of Engli
 Current version: `0.3.0` · Primary distribution target: `Windows x64` · Built with `Electron / React / TypeScript`
 
 > These language options translate the repository documentation. The application interface and reading assistance currently focus on Chinese.
+
+## Recent updates
+
+- **Smoother long-paper startup:** PDF pages load on demand. Research sessions start when first opened, and Pi runs in a worker thread.
+- **Clearer tool progress:** A compact timeline shows status, task summaries, and search results. Details expand on demand, and library writes require confirmation.
+- **Clickable source references:** References in answers navigate to the corresponding PDF page and reading block.
+- **Vocabulary for the selected paragraph:** Double-click to generate translation, explanation, summary with contextual role, and AI-selected vocabulary in parallel. The vocabulary panel stays empty until generation; saved terms keep source sentences.
 
 ## Screenshots
 
@@ -52,8 +59,8 @@ Double-click a paragraph to start translation, explanation, summary with context
 | Keep the original layout | Continuous scrolling, pages, zoom, and outline navigation; aligned paragraph, figure, and equation regions, including paragraphs spanning pages. Long papers keep their full scroll layout while PDF pages near the viewport load on demand. |
 | Understand a paragraph or sentence | Chinese translation, explanation, summary, and contextual role; original-text selection, streaming results, and local caching. |
 | Interpret figures and equations | Double-click a figure to start interpretation with its image and context; answers stream directly as Markdown, with math rendering in translations. |
-| Learn academic language | Paragraph vocabulary and AI selections; a personal wordbook with meanings, source sentences, and links back to the paper. |
-| Research around a paper | Pi-powered conversations across multiple turns; read the current paper, cite pages, search the local library and Crossref, inspect tool progress and paper candidates, and confirm adding paper metadata to the library. |
+| Learn academic language | Double-click a paragraph to generate AI-selected vocabulary, or generate it manually. No initial term cards appear before generation. Only terms grounded in that paragraph are displayed; the wordbook keeps meanings, source sentences, and links. |
+| Research around a paper | Pi-powered conversations across multiple turns; read the current paper, click answer references to navigate to source blocks, search the local library and Crossref, expand compact tool rows, and confirm adding paper metadata to the library. |
 | Prepare reading notes | Generate Chinese Markdown drafts, preview them, and choose an export location; three bundled workflows cover close reading, literature search and screening, and literature comparison with notes. |
 | Manage a personal library | Import, search, favorites, tags, metadata editing, deletion, and saved reading positions. |
 | Adjust the reading environment | Switch between light and dark interfaces in the library sidebar or reader toolbar; keep the preference after restart while original PDF pages, figures, and equation images retain their appearance. |
@@ -62,7 +69,19 @@ Double-click a paragraph to start translation, explanation, summary with context
 
 Open the dedicated research workspace from the library, or select **研究对话** (Research conversation) beside the current paper. Ask follow-up questions, search for related papers, confirm additions to the library, and generate reading notes. Bundled research skills are read on demand. Tool status, results, page citations, and answers appear in one timeline. Scrolling up during a streamed answer preserves your reading position; returning to the bottom or sending a new question resumes following the output.
 
+Click a source reference in an answer to load its PDF page and locate the paragraph. References use stable reading-block IDs returned by a reading tool, rather than guessing from page numbers. Opening a PDF does not start a hidden research session; Pi initialization runs in a worker thread when the research tab is first visited.
+
 ![Dedicated research workspace and three bundled research skills](docs/screenshots/research-bundled-skills.png)
+
+![Compact tool progress and clickable references beside the original PDF](docs/screenshots/research-block-citations.png)
+
+<sub>The reference preview uses a synthetic paper and simulated streaming responses in an isolated desktop profile. It illustrates the interface and contains no user papers, credentials, or live-service output. See <a href="docs/assets/README.md">asset provenance</a>.</sub>
+
+A three-turn workflow can start with:
+
+1. “Summarize this paper's method and main findings, with source references.”
+2. “Find two related papers and list their titles, years, and DOIs.”
+3. “Use the paper and search results to draft Chinese reading notes.”
 
 Literature search currently uses **Crossref's public scholarly metadata**, with coverage determined by that source. Adding a candidate saves metadata; reading its full text still requires importing its PDF and completing MinerU parsing. Documents export as Markdown. Conversations stay on the current page and are not restored after leaving it or restarting. Model context length is limited for long papers.
 
@@ -132,6 +151,35 @@ npm run check
 This checks common credential formats and the current branch history, runs automated tests, checks TypeScript, and builds the frontend. GitHub's [Quality checks (Windows)](https://github.com/yuanshane76-lang/zhiyan-workbench/actions/workflows/quality.yml) uses the same command without real model or MinerU calls.
 
 For long-canvas changes, also verify that opening a long paper renders only pages near the viewport, page navigation loads the destination on demand, and coordinate hit testing, outline navigation, and zoom anchors keep working.
+
+### Validation record
+
+On October 14, 2026, feature commit `f838be9` was validated locally on Windows:
+
+| Scope | Result |
+| --- | --- |
+| Automated checks | `npm run check` passed: 56 test files, 428 tests, credential checks, TypeScript, and a production build. |
+| Synthetic desktop regression | Real Pi SDK with local simulated SSE verified skills, confirmations, cancellation, document export, streaming scroll behavior, and source navigation; no external services. |
+| Real long papers | DEER (45 pages) and FINDEEPRESEARCH (25 pages) passed cold startup, tail-page navigation, zoom, and on-demand canvas checks in temporary user profiles. |
+| Live model and search | DeepSeek paragraph streams, three Pi conversation turns, source navigation, Crossref search, Markdown drafts, and light/dark compact-window checks passed. |
+
+The two papers' first-page times in the live-service run were 543ms and 553ms. Each open read the original PDF once; no main-process heartbeat interval exceeded 100ms, and no native window “unresponsive” event was recorded. These are local samples; results depend on papers, hardware, and the runtime environment.
+
+The additional re-upload → MinerU reparse → first-read acceptance was not completed, so prepared-paper results do not establish that flow as passed. The Windows ZIP was not revalidated for this change. Real papers, service settings, and raw acceptance screenshots stay in ignored local directories.
+
+### Reproduce desktop acceptance
+
+With parsed local copies of DEER (45 pages) and FINDEEPRESEARCH (25 pages), the following script copies papers into temporary user profiles, records responsiveness and screenshots, and preserves the main library:
+
+```powershell
+npm run test:reader-performance:e2e
+# Explicitly use configured live services for paragraph streams and three conversation turns
+node scripts/reader-performance-e2e.cjs --live-ai
+# Extra reparse acceptance entry point, not yet passed; consumes MinerU quota
+node scripts/reader-performance-e2e.cjs --live-ai --reparse
+```
+
+Reports and screenshots are written to ignored `out/reader-performance-acceptance/` or `out/reader-live-acceptance/` directories. `npm run test:research-agent:e2e` and `npm run test:paragraph-vocabulary:e2e` use synthetic data without external service calls.
 
 | Directory | Responsibility |
 | --- | --- |

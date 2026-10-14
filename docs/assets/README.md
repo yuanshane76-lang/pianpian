@@ -9,8 +9,11 @@
 | `library.png` | 真实桌面文献库界面，三个专门编写的合成论文条目。 |
 | `reader.png` | 真实 PDF.js 画布与段落交互层，右侧为预设的中文解释模拟响应。 |
 | `wordbook.png` | 通过真实界面主动收藏三个词汇后打开个人单词表。 |
+| `../screenshots/research-block-citations.png` | 2026-10-14 的研究助手桌面回归截图：本仓库合成的一页 PDF、真实 Pi SDK、本地模拟 SSE，展示紧凑工具过程和可点击原文引用。无用户论文或真实服务输出。 |
 
-截图于 2026-10-11 基于 `0.3.0` 的桌面界面生成。演示文档均标为 `Documentation Example`，内容是为界面说明编写的英文短文，不是发表论文；其中的对比数值仅为合成图形数据，不构成研究证据。
+`library.png`、`reader.png`、`wordbook.png` 于 2026-10-11 基于 `0.3.0` 的桌面界面生成。演示文档均标为 `Documentation Example`，内容是为界面说明编写的英文短文，不是发表论文；其中的对比数值仅为合成图形数据，不构成研究证据。
+
+`research-block-citations.png` 来自 `scripts/research-agent-e2e.cjs` 的 `06-reader-agent.png`，文档标题为 `Research Agent Fixture`。模型与文献检索使用本地合成响应；截图用于展示工具状态、引用按钮与 PDF 的布局，不代表真实回答的质量评估。
 
 截图生成使用隔离的临时 Electron 用户目录。原始 PDF 在本机合成，解析结果为固定结构化数据，翻译、解释、摘要与词汇为模拟流式响应；未访问用户文献库、未使用真实密钥、未调用外部服务。演示 PDF、解析数据和临时设置文件不提交，只提交以上视觉资产。
 
