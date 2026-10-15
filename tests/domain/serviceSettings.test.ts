@@ -2,11 +2,25 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SERVICE_SETTINGS,
   mergeServiceSettings,
+  getMissingServiceCredentials,
   toPublicServiceSettings,
   type ServiceSettingsInput,
 } from "../../src/domain/serviceSettings";
 
 describe("service settings", () => {
+  it("requires only the selected model provider and independent MinerU credentials", () => {
+    const settings = toPublicServiceSettings(DEFAULT_SERVICE_SETTINGS);
+    expect(getMissingServiceCredentials(settings)).toEqual(["model", "parser"]);
+    settings.aliyun.configured = true;
+    expect(getMissingServiceCredentials(settings)).toEqual(["model", "parser"]);
+    settings.aiProvider = "aliyun";
+    expect(getMissingServiceCredentials(settings)).toEqual(["parser"]);
+    settings.mineru.configured = true;
+    expect(getMissingServiceCredentials(settings)).toEqual([]);
+    settings.aiProvider = "deepseek";
+    expect(getMissingServiceCredentials(settings)).toEqual(["model"]);
+  });
+
   it("provides a real provider default without configured secrets", () => {
     expect(DEFAULT_SERVICE_SETTINGS.aiProvider).toBe("deepseek");
     expect(toPublicServiceSettings(DEFAULT_SERVICE_SETTINGS)).toMatchObject({

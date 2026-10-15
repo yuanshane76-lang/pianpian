@@ -61,6 +61,13 @@ export interface PublicServiceSettings {
   };
 }
 
+export function getMissingServiceCredentials(settings: PublicServiceSettings): Array<"model" | "parser"> {
+  const missing: Array<"model" | "parser"> = [];
+  if (!settings[settings.aiProvider].configured) missing.push("model");
+  if (!settings.mineru.configured) missing.push("parser");
+  return missing;
+}
+
 export const DEFAULT_SERVICE_SETTINGS: StoredServiceSettings = {
   version: 1,
   revision: "service-v1",

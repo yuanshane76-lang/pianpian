@@ -38,7 +38,7 @@ import { WordbookDialog } from "../features/reader/WordbookDialog";
 import { LibraryView } from "../features/library/LibraryView";
 import { ReaderView } from "../features/reader/ReaderView";
 import { ServiceSettingsDialog } from "../features/settings/ServiceSettingsDialog";
-import { DEFAULT_SERVICE_SETTINGS, toPublicServiceSettings, type PublicServiceSettings } from "../domain/serviceSettings";
+import { DEFAULT_SERVICE_SETTINGS, getMissingServiceCredentials, toPublicServiceSettings, type PublicServiceSettings } from "../domain/serviceSettings";
 import { getDesktopBridge } from "../platform/electron";
 import { ResearchAssistant } from "../features/reader/ResearchAssistant";
 import { addLiteraturePaper, type LiteraturePaper } from "../domain/literature";
@@ -108,7 +108,11 @@ export default function App() {
   const [serviceSettings, setServiceSettings] = useState<PublicServiceSettings>(() =>
     toPublicServiceSettings(DEFAULT_SERVICE_SETTINGS),
   );
-  const [settingsReady, setSettingsReady] = useState(!getDesktopBridge());
+  const initialBridge = getDesktopBridge();
+  const isDesktop = initialBridge?.isDesktop === true;
+  const [settingsReady, setSettingsReady] = useState(!initialBridge);
+  const [settingsLoaded, setSettingsLoaded] = useState(!getDesktopBridge());
+  const [settingsReadFailed, setSettingsReadFailed] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const activeAnalysisAbortRef = useRef(new Set<AbortController>());
   const [pipelineStates, setPipelineStates] = useState<Record<string, PaperPipelineState>>({});
@@ -150,10 +154,16 @@ export default function App() {
     let cancelled = false;
     const snapshotGenerations = new Map(papers.map((paper) => [paper.id, taskGenerations.current.get(paper.id) ?? 0]));
     bridge.invoke<PublicServiceSettings>("zhiyan:settings:get")
+      .catch((failure) => {
+        if (alive.current && !cancelled) setSettingsReadFailed(true);
+        throw failure;
+      })
       .then((settings) => {
         if (!alive.current || cancelled) return [];
         serviceSettingsRef.current = settings;
         setServiceSettings(settings);
+        setSettingsLoaded(true);
+        setSettingsReadFailed(false);
         type Snapshot = {
           paperId: string;
           task: { batchId?: string; state?: string; progress?: number; error?: string } | null;
@@ -1034,10 +1044,18 @@ export default function App() {
       </button>
     </div>
   ) : null;
-  const settingsDialog = settingsOpen ? (
+  const setupRequired = isDesktop && (settingsReadFailed
+    || settingsLoaded && getMissingServiceCredentials(serviceSettings).length > 0);
+  const settingsDialog = settingsOpen || setupRequired ? (
     <ServiceSettingsDialog
+      required={setupRequired}
+      initialSettings={settingsLoaded ? serviceSettings : undefined}
+      readFailed={settingsReadFailed}
       onClose={() => setSettingsOpen(false)}
       onSaved={(settings) => {
+        setSettingsLoaded(true);
+        setSettingsReadFailed(false);
+        if (setupRequired && getMissingServiceCredentials(settings).length === 0) setSettingsOpen(false);
         serviceIdentityRef.current = `${settings.revision}:${settings.aiProvider}:${settings[settings.aiProvider].model}`;
         invalidateAnalysisRequests();
         serviceSettingsRef.current = settings;

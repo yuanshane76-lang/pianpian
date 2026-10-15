@@ -1,7 +1,8 @@
-import { ExternalLink, Eye, EyeOff, KeyRound, LoaderCircle, Settings2, Trash2, X } from "lucide-react";
+import { CheckCircle2, ExternalLink, Eye, EyeOff, KeyRound, LoaderCircle, Settings2, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import {
   DEFAULT_SERVICE_SETTINGS,
+  getMissingServiceCredentials,
   toPublicServiceSettings,
   type AiProvider,
   type PublicServiceSettings,
@@ -10,17 +11,24 @@ import {
 import { getDesktopBridge } from "../../platform/electron";
 
 interface Props {
+  required?: boolean;
+  initialSettings?: PublicServiceSettings;
+  readFailed?: boolean;
   onClose: () => void;
   onSaved: (settings: PublicServiceSettings) => void;
 }
 
 const defaultView = toPublicServiceSettings(DEFAULT_SERVICE_SETTINGS);
 
-export function ServiceSettingsDialog({ onClose, onSaved }: Props) {
-  const [current, setCurrent] = useState<PublicServiceSettings>(defaultView);
-  const [provider, setProvider] = useState<AiProvider>("deepseek");
-  const [serviceArea, setServiceArea] = useState<"model" | "parser">("model");
-  const [model, setModel] = useState({ aliyun: "qwen-plus", deepseek: "deepseek-flash" });
+export function ServiceSettingsDialog({ onClose, onSaved, required = false, initialSettings, readFailed = false }: Props) {
+  const [current, setCurrent] = useState<PublicServiceSettings>(initialSettings ?? defaultView);
+  const [loaded, setLoaded] = useState(Boolean(initialSettings));
+  const [readError, setReadError] = useState(readFailed);
+  const [provider, setProvider] = useState<AiProvider>(initialSettings?.aiProvider ?? "deepseek");
+  const [serviceArea, setServiceArea] = useState<"model" | "parser">(
+    required && initialSettings && getMissingServiceCredentials(initialSettings)[0] === "parser" ? "parser" : "model",
+  );
+  const [model, setModel] = useState({ aliyun: initialSettings?.aliyun.model ?? "qwen-plus", deepseek: initialSettings?.deepseek.model ?? "deepseek-flash" });
   const [keys, setKeys] = useState({ aliyun: "", deepseek: "", mineru: "" });
   const [clearKeys, setClearKeys] = useState({ aliyun: false, deepseek: false, mineru: false });
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
@@ -28,6 +36,9 @@ export function ServiceSettingsDialog({ onClose, onSaved }: Props) {
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");
   const desktop = getDesktopBridge();
+  const dialogRef = useRef<HTMLElement>(null);
+  const [focusRequest, setFocusRequest] = useState(0);
+  const missing = getMissingServiceCredentials({ ...current, aiProvider: provider });
   const serviceTabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const providerRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
@@ -51,21 +62,72 @@ export function ServiceSettingsDialog({ onClose, onSaved }: Props) {
   }
 
   useEffect(() => {
-    if (!desktop) return;
+    if (!desktop || initialSettings || readFailed) return;
     let active = true;
     desktop.invoke<PublicServiceSettings>("zhiyan:settings:get").then((settings) => {
       if (!active) return;
       setCurrent(settings);
+      setLoaded(true);
       setProvider(settings.aiProvider);
       setModel({ aliyun: settings.aliyun.model, deepseek: settings.deepseek.model });
+      if (required) setServiceArea(getMissingServiceCredentials(settings)[0] === "parser" ? "parser" : "model");
     }).catch((cause) => {
-      if (active) setError(cause instanceof Error ? cause.message : "无法读取服务配置");
+      if (active) { setReadError(true); setError(cause instanceof Error ? cause.message : "无法读取服务配置"); }
     });
     return () => { active = false; };
   }, [desktop]);
 
-  async function save() {
+  useEffect(() => {
+    if (!required) return;
+    const element = dialogRef.current;
+    const overlay = element?.parentElement;
+    if (!element || !overlay) return;
+    const siblings = [...(overlay.parentElement?.children ?? [])].filter((sibling) => sibling !== overlay);
+    const prior = siblings.map((sibling) => [sibling, sibling.hasAttribute("inert")] as const);
+    for (const sibling of siblings) sibling.setAttribute("inert", "");
+    function constrainFocus(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); return; }
+      if (event.key !== "Tab") return;
+      const controls = [...element!.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href], [tabindex="0"]')];
+      const first = controls[0], last = controls.at(-1);
+      if (!first || !last) { event.preventDefault(); element!.focus(); return; }
+      if (!element!.contains(document.activeElement) || (!event.shiftKey && document.activeElement === last)) {
+        event.preventDefault(); first.focus();
+      } else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    }
+    document.addEventListener("keydown", constrainFocus, true);
+    return () => {
+      document.removeEventListener("keydown", constrainFocus, true);
+      for (const [sibling, wasInert] of prior) if (!wasInert) sibling.removeAttribute("inert");
+    };
+  }, [required]);
+
+  useEffect(() => {
+    if (!required) return;
+    const target = loaded && !readError
+      ? dialogRef.current?.querySelector<HTMLInputElement>(serviceArea === "parser" ? "#mineru-key" : `#${provider}-key`)
+      : dialogRef.current?.querySelector<HTMLElement>("button");
+    (target ?? dialogRef.current)?.focus();
+  }, [required, loaded, readError, focusRequest]);
+
+  async function retryRead() {
     if (!desktop) return;
+    setBusy(true); setError("");
+    try {
+      const settings = await desktop.invoke<PublicServiceSettings>("zhiyan:settings:get");
+      setCurrent(settings); setProvider(settings.aiProvider);
+      setModel({ aliyun: settings.aliyun.model, deepseek: settings.deepseek.model });
+      setReadError(false); setLoaded(true);
+      setServiceArea(getMissingServiceCredentials(settings)[0] === "parser" ? "parser" : "model");
+      setFocusRequest((value) => value + 1);
+      onSaved(settings);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "无法读取服务配置，请重试。");
+    } finally { setBusy(false); }
+  }
+
+  async function save() {
+    if (!desktop || !loaded || readError) return;
     setBusy(true);
     setFeedback("");
     setError("");
@@ -80,7 +142,13 @@ export function ServiceSettingsDialog({ onClose, onSaved }: Props) {
       setCurrent(settings);
       setKeys({ aliyun: "", deepseek: "", mineru: "" });
       setClearKeys({ aliyun: false, deepseek: false, mineru: false });
-      setFeedback("配置已加密保存在本机。");
+      const remaining = getMissingServiceCredentials(settings);
+      if (required && remaining.length) {
+        setServiceArea(remaining[0]);
+        setFocusRequest((value) => value + 1);
+        setFeedback(remaining.length === 2 ? "请填写模型 API Key 和 MinerU Token 后保存。"
+          : remaining[0] === "parser" ? "模型密钥已保存，请继续填写 MinerU Token。" : "MinerU Token 已保存，请继续填写模型 API Key。");
+      } else setFeedback("配置已加密保存在本机。");
       onSaved(settings);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "保存失败");
@@ -145,14 +213,26 @@ export function ServiceSettingsDialog({ onClose, onSaved }: Props) {
   }
 
   return (
-    <div className="settings-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className="settings-dialog" role="dialog" aria-modal="true" aria-label="服务配置">
+    <div className="settings-overlay" onMouseDown={(event) => { if (!required && event.target === event.currentTarget) onClose(); }}>
+      <section ref={dialogRef} tabIndex={-1} className="settings-dialog" role="dialog" aria-modal="true" aria-label="服务配置" aria-describedby={required ? "service-setup-description" : undefined}>
         <header className="settings-header">
           <div><Settings2 size={19} /><h2>服务配置</h2></div>
-          <button className="icon-button" type="button" aria-label="关闭配置" title="关闭配置" onClick={onClose}><X size={18} /></button>
+          {required ? <span className="settings-required-label">使用前需配置</span> : <button className="icon-button" type="button" aria-label="关闭配置" title="关闭配置" onClick={onClose}><X size={18} /></button>}
         </header>
         <div className="settings-body">
           {!desktop ? <p className="settings-notice">密钥只支持在桌面程序中加密保存。请打开 ZIP 内的 Zhiyan.exe 进行配置。</p> : null}
+          {required ? <section className="settings-setup" aria-label="服务配置引导">
+            <div className="settings-setup-heading"><KeyRound size={18} aria-hidden="true" /><strong>完成配置后开始使用</strong>
+              {loaded && !readError ? <span>已完成 {2 - missing.length} / 2</span> : null}</div>
+            <p id="service-setup-description">需要配置一个模型服务的 API Key 和 MinerU Token。支持分步保存，补齐后自动进入工作台。</p>
+            {loaded && !readError ? <ol className="settings-setup-steps">
+              <li data-complete={!missing.includes("model")}><CheckCircle2 size={15} aria-hidden="true" />模型服务 <span>{missing.includes("model") ? "待填写" : "已保存"}</span></li>
+              <li data-complete={!missing.includes("parser")}><CheckCircle2 size={15} aria-hidden="true" />MinerU 解析 <span>{missing.includes("parser") ? "待填写" : "已保存"}</span></li>
+            </ol> : null}
+          </section> : null}
+          {readError ? <div className="settings-notice" role="alert"><p>无法读取已保存的服务配置。请先重新读取，不会覆盖原有密钥。</p><button type="button" className="secondary-button compact" disabled={busy} onClick={retryRead}>重新读取配置</button></div> : null}
+          {!loaded && !readError && desktop ? <p role="status">正在读取服务配置…</p> : null}
+          {(loaded || !desktop) && !readError ? <>
           <div className="settings-service-tabs" role="tablist" aria-label="选择服务配置">
             <button
               type="button"
@@ -248,12 +328,13 @@ export function ServiceSettingsDialog({ onClose, onSaved }: Props) {
               <button type="button" className="secondary-button compact" disabled={busy || (!current.mineru.configured && !keys.mineru.trim()) || clearKeys.mineru} onClick={() => testConnection("mineru")}>检查 MinerU 配置</button>
             </div>
           )}
+          </> : null}
         </div>
         <footer className="settings-footer">
           <span><KeyRound size={14} /> 已保存密钥不会回显</span>
           {error ? <p role="alert" className="settings-error">{error}</p> : null}
           {feedback ? <p role="status" className="settings-success">{feedback}</p> : null}
-          <button className="primary-button" type="button" disabled={busy || !desktop} onClick={save}>
+          <button className="primary-button" type="button" disabled={busy || !desktop || !loaded || readError} onClick={save}>
             {busy ? <LoaderCircle size={15} className="spin" /> : null}保存配置
           </button>
         </footer>
