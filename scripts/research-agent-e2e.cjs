@@ -68,11 +68,14 @@ if (process.versions.electron) {
       } else {
         const fragments = question.includes("滚动验收")
           ? Array.from({ length: 120 }, (_, index) => `第 ${index + 1} 段：这是用于验证流式阅读位置的合成文字，持续输出期间可以向上阅读。\n\n`)
+          : question.includes("序号验收")
+            ? ["消融实验用于评估模型。", "[引用:agent-fixture-evaluation]", "\n\n模型通过注意力选择有效特征。",
+              "[引用:agent-fixture-paragraph]", "实验结果支撑这一判断。", "[引用:agent-fixture-evaluation]"]
           : ["已完成", "论文读取与", "研究任务。", "\n\n依据：", "[引用:agent-fixture-paragraph]"];
         for (const text of fragments) {
           if (response.destroyed) break;
           chunk({ content: text });
-          await new Promise((resolve) => setTimeout(resolve, 60));
+          await new Promise((resolve) => setTimeout(resolve, question.includes("序号验收") ? 180 : 60));
         }
         chunk({}, "stop");
       }
@@ -134,7 +137,7 @@ if (process.versions.electron) {
     page.on("pageerror", (error) => report.errors.push(error.message));
     async function send(question) {
       await page.getByLabel("向研究 Agent 提问").fill(question);
-      await page.getByRole("button", { name: "发送给研究 Agent", exact: true }).click();
+      await page.getByRole("button", { name: "发送给研究 Agent", exact: true }).click({ timeout: 60000 });
     }
     async function capture(name) {
       const image = await electron.evaluate(async ({ BrowserWindow }) =>
@@ -246,10 +249,12 @@ if (process.versions.electron) {
       const fixture = await page.evaluate(async (bytes) => {
         const saved = await window.zhiyan.invoke("zhiyan:documents:save", { name: "research-agent-fixture.pdf", data: new Uint8Array(bytes) });
         const paper = { id: saved.id, originalId: saved.id, title: "Research Agent Fixture", authors: ["Synthetic Team"], year: 2026,
-          sourcePath: `local://${saved.id}`, importedAt: "2026-10-12", tags: [], favorite: false, blocks: 1,
+          sourcePath: `local://${saved.id}`, importedAt: "2026-10-12", tags: [], favorite: false, blocks: 2,
           parseVersion: 2, parseStatus: "ready", pageCount: 1, blockData: [
             { id: "agent-fixture-paragraph", kind: "paragraph", pageNumber: 1, order: 0,
-              text: "The model uses attention to select useful features. An ablation study evaluates the model.", bbox: [.09, .14, .92, .20] },
+              text: "The model uses attention to select useful features.", bbox: [.09, .14, .92, .17] },
+            { id: "agent-fixture-evaluation", kind: "paragraph", pageNumber: 1, order: 1,
+              text: "An ablation study evaluates the model.", bbox: [.09, .17, .92, .20] },
           ] };
         const papers = JSON.parse(localStorage.getItem("zhiyan-workbench.papers.v1"));
         localStorage.setItem("zhiyan-workbench.papers.v1", JSON.stringify([paper, ...papers]));
@@ -263,18 +268,33 @@ if (process.versions.electron) {
       await page.waitForSelector('.pdf-page-stage[data-rendered="true"]');
       await page.getByRole("tab", { name: "研究对话", exact: true }).click();
       await page.getByText("就绪", { exact: true }).waitFor();
-      await send("概括这篇论文");
-      await page.locator(".research-citations button").first().waitFor();
+      await send("概括这篇论文，序号验收");
+      await page.locator(".research-inline-citation").first().waitFor();
+      assert.equal(await page.locator(".research-inline-citation").first().textContent(), "[1]");
       await page.waitForFunction(() => !document.querySelector('[aria-label="停止 Agent"]'));
+      assert.deepEqual(await page.locator(".research-inline-citation").allTextContents(), ["[1]", "[2]", "[1]"]);
+      assert.equal(await page.locator(".research-citations, .research-message-citations, .research-citation-excerpt").count(), 0);
+      assert(!/第\s*\d+\s*页/.test(await page.locator(".research-assistant-panel").innerText()));
+      assert.deepEqual(await page.locator(".research-inline-citation").evaluateAll((buttons) =>
+        buttons.map((button) => button.title)), ["查看原文", "查看原文", "查看原文"]);
+      await capture("08-inline-citations.png");
+      await page.locator(".research-inline-citation").first().click();
+      await page.waitForSelector("#pdf-block-agent-fixture-evaluation.is-focus-flash");
+      await capture("09-citation-target-highlight.png");
+      await page.waitForSelector("#pdf-block-agent-fixture-evaluation.is-focus-flash", { state: "detached" });
+      report.checks.push("Inline citations number first visible mentions as [1], [2], [1] without pages, excerpts or footer lists; clicking highlights the correct same-page source briefly");
       await send("这个实验方法有什么限制？");
       await page.getByRole("button", { name: "发送给研究 Agent" }).waitFor();
       assert.equal(await page.locator(".research-message.is-user").count(), 2);
       assert.equal(await page.locator(".research-message.is-assistant").count(), 2);
-      await page.locator(".research-message.is-assistant .research-inline-citation").last().click();
-      await page.waitForSelector('#pdf-block-agent-fixture-paragraph');
+      const nextCitation = page.locator(".research-message.is-assistant .research-inline-citation").last();
+      assert.equal(await nextCitation.textContent(), "[1]");
+      await nextCitation.focus();
+      await nextCitation.press("Enter");
+      await page.waitForSelector('#pdf-block-agent-fixture-paragraph.is-focus-flash');
       assert(await page.locator('.pdf-page-stage[data-rendered="true"]').isVisible());
       await capture("06-reader-agent.png");
-      report.checks.push("Reader supports two-turn paper conversation and stable block citation navigation with the original PDF visible");
+      report.checks.push("Reader restarts citation numbers in the next answer and supports keyboard-activated block navigation with the original PDF visible");
       assert.deepEqual(report.errors, []);
       assert.equal(await electron.evaluate(() => globalThis.agentRemoteRequests), 0);
       report.status = "passed";

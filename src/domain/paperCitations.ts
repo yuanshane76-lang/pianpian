@@ -2,10 +2,6 @@ import type { PaperRecord } from "./library";
 
 export interface PaperCitation {
   blockId: string;
-  label: string;
-  pageLabel: string;
-  inlineLabel: string;
-  excerpt: string;
 }
 
 /** A reference may navigate only to an existing block of the current paper. */
@@ -19,16 +15,7 @@ export function currentPaperCitations(paper: PaperRecord, candidates: unknown): 
     if (source.paperId !== paper.id || typeof source.blockId !== "string") continue;
     const block = blocks.get(source.blockId);
     if (!block) continue;
-    if (!result.has(block.id)) {
-      const number = result.size + 1;
-      result.set(block.id, {
-        blockId: block.id,
-        label: `引用 ${number}`,
-        pageLabel: `第 ${block.pageNumber} 页`,
-        inlineLabel: `[${number}]`,
-        excerpt: block.text.slice(0, 180),
-      });
-    }
+    if (!result.has(block.id)) result.set(block.id, { blockId: block.id });
   }
   return [...result.values()];
 }

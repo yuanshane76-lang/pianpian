@@ -23,7 +23,7 @@ interface Props {
   onSelectText: (block: DocumentBlock, text: string, pageNumber?: number, regionId?: string) => void;
   onAnalyzeParagraph?: (block: DocumentBlock, pageNumber?: number, regionId?: string) => void;
   onAnalyzeChart?: (block: DocumentBlock, pageNumber?: number, regionId?: string) => void;
-  focusTarget?: { id: string; requestId: number; pageNumber?: number; regionId?: string };
+  focusTarget?: { id: string; requestId: number; pageNumber?: number; regionId?: string; flash?: boolean };
   onVisibleBlock?: (block: DocumentBlock, pageNumber?: number, regionId?: string) => void;
 }
 type PdfDocument = Awaited<ReturnType<typeof openPdf>>;
@@ -42,6 +42,7 @@ export function PdfPreview(props: Props) {
   const { originalId, page, onPage, onReimport, blocks, activeBlockId, onSelect, onSelectText, navigationTarget, focusTarget } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollTimer = useRef<ReturnType<typeof setTimeout>>();
+  const focusFlashTimer = useRef<ReturnType<typeof setTimeout>>();
   const propsRef = useRef(props);
   propsRef.current = props;
   const loadedId = useRef<string>();
@@ -60,6 +61,7 @@ export function PdfPreview(props: Props) {
   const [availableWidth, setAvailableWidth] = useState(0);
   const [renderRange, setRenderRange] = useState({ start: 1, end: 3 });
   const [readyPages, setReadyPages] = useState<Record<number, boolean>>({});
+  const [focusFlashRegionId, setFocusFlashRegionId] = useState<string | null>(null);
   const pages = source && source.id === originalId ? source.pages : EMPTY_PAGES;
   const sizes = source && source.id === originalId ? source.sizes : [];
   const layout = useMemo(() => buildPdfPageLayout(sizes, zoom, availableWidth, fitWidth), [sizes, zoom, availableWidth, fitWidth]);
@@ -164,6 +166,8 @@ export function PdfPreview(props: Props) {
     handledNavigation.current = undefined;
     handledFocus.current = undefined;
     clearTimeout(scrollTimer.current);
+    clearTimeout(focusFlashTimer.current);
+    setFocusFlashRegionId(null);
     if (!originalId) { setBusy(false); return; }
     void (async () => {
       const data = await readOriginalPdf(originalId);
@@ -199,6 +203,8 @@ export function PdfPreview(props: Props) {
     })().catch((cause) => { if (active) { setError(String(cause?.message ?? cause)); setBusy(false); } });
     return () => { active = false; loader?.dispose(); clearTimeout(scrollTimer.current); void document?.destroy(); };
   }, [originalId]);
+
+  useEffect(() => () => clearTimeout(focusFlashTimer.current), []);
 
   useEffect(() => {
     const current = sourceRef.current;
@@ -259,6 +265,17 @@ export function PdfPreview(props: Props) {
     handledFocus.current = focusTarget.requestId;
     element.scrollIntoView?.({ behavior: "auto", block: "center" });
     updateViewportRef.current(false);
+    clearTimeout(focusFlashTimer.current);
+    if (!focusTarget.flash) {
+      setFocusFlashRegionId(null);
+      return;
+    }
+    const regionId = getPageBlockRegionId(block);
+    setFocusFlashRegionId(regionId);
+    focusFlashTimer.current = setTimeout(() => {
+      setFocusFlashRegionId(null);
+      focusFlashTimer.current = undefined;
+    }, 1600);
   }, [focusIsLatest, focusTarget, layout, blocks, readyPages]);
 
   if (!originalId) return <div className="pdf-missing">
@@ -294,7 +311,7 @@ export function PdfPreview(props: Props) {
           style={{ width: item.width, height: item.height }}>
           {item.pageNumber === pendingPage || (item.pageNumber >= renderRange.start && item.pageNumber <= renderRange.end)
             ? <PdfPageCanvas pdfPage={pages[item.pageNumber - 1]} layout={item} blocks={pageBlocks.get(item.pageNumber) ?? []}
-              activeBlockId={activeBlockId} onSelect={(block) => {
+              activeBlockId={activeBlockId} focusFlashRegionId={focusFlashRegionId} onSelect={(block) => {
                 const canonical = canonicalBlocks.get(block.id)!;
                 onSelect(canonical, ...regionLocation(block, canonical));
               }} onSelectText={(block, text) => {

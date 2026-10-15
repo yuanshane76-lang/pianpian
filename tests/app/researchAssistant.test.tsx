@@ -12,7 +12,7 @@ const paper = { id: "p1", title: "Paper", authors: [], year: 2024, sourcePath: "
     { id: "b1", pageNumber: 1, order: 0, kind: "paragraph" as const, text: "Evidence." },
   ] };
 
-async function mount(available = true) {
+async function mount(available = true, currentPaper = paper) {
   const invoke = vi.fn(async (channel: string): Promise<any> => channel === "zhiyan:agent:start" ? { sessionId: "s1" } : channel === "zhiyan:agent:skills" ? [] : channel === "zhiyan:agent:approve" ? true : undefined);
   window.zhiyan = { invoke: invoke as any, on: (_channel, handler) => { emit = handler as any; return () => {}; } };
   container = document.createElement("div");
@@ -20,9 +20,9 @@ async function mount(available = true) {
   root = createRoot(container);
   const onAddPaper = vi.fn(() => ({ id: "added", duplicate: false }));
   const onJump = vi.fn();
-  await act(async () => root.render(<ResearchAssistant paper={paper} library={[paper]} onAddPaper={onAddPaper} onJump={onJump} available={available} onOpenSettings={vi.fn()} />));
+  await act(async () => root.render(<ResearchAssistant paper={currentPaper} library={[currentPaper]} onAddPaper={onAddPaper} onJump={onJump} available={available} onOpenSettings={vi.fn()} />));
   return { invoke, onAddPaper, onJump, rerender: async (id: string) => {
-    await act(async () => root.render(<ResearchAssistant paper={{ ...paper, id }} library={[paper]} onAddPaper={onAddPaper} onJump={onJump} available={available} onOpenSettings={vi.fn()} />));
+    await act(async () => root.render(<ResearchAssistant paper={{ ...currentPaper, id }} library={[currentPaper]} onAddPaper={onAddPaper} onJump={onJump} available={available} onOpenSettings={vi.fn()} />));
   } };
 }
 
@@ -68,16 +68,83 @@ describe("research assistant", () => {
     expect(container.querySelector('[aria-label="保存 Markdown 文档"]')).not.toBeNull();
   });
 
-  it("renders message citations as jumpable article references", async () => {
+  it("renders only an inline number that jumps to the verified source", async () => {
     const { onJump } = await mount();
     await act(async () => emit({ type: "message_end", message: {
-      id: "m1", role: "assistant", content: "结论见原文。", citations: [{ paperId: "p1", blockId: "b1", pageNumber: 1, label: "第 1 页 · 原文" }],
+      id: "m1", role: "assistant", content: "结论见原文[引用:b1]。", citations: [{ paperId: "p1", blockId: "b1", pageNumber: 1, label: "第 1 页 · 原文" }],
     } }));
-    const citation = container.querySelector<HTMLButtonElement>(".research-message-citations button");
-    expect(citation?.textContent).toContain("引用 1");
-    expect(citation?.textContent).toContain("第 1 页");
+    const citation = container.querySelector<HTMLButtonElement>(".research-message-content .research-inline-citation");
+    expect(citation?.textContent).toBe("[1]");
+    expect(container.querySelector(".research-message-citations")).toBeNull();
+    expect(container.textContent).not.toContain("第 1 页");
+    expect(container.textContent).not.toContain("Evidence.");
+    expect(citation?.getAttribute("title")).toBe("查看原文");
+    expect(citation?.getAttribute("aria-label")).toBe("查看引用 1 的原文");
     await act(async () => citation?.click());
     expect(onJump).toHaveBeenCalledWith("b1");
+  });
+
+  it("distinguishes same-page blocks, reuses repeated citations and restarts numbering for each answer", async () => {
+    const citationPaper = { ...paper, blockData: [
+      { id: "b1", pageNumber: 1, order: 0, kind: "paragraph" as const, text: "First passage supports the claim." },
+      { id: "b2", pageNumber: 1, order: 1, kind: "paragraph" as const, text: "Second passage gives a different result." },
+    ] };
+    const { onJump } = await mount(true, citationPaper);
+    await act(async () => emit({ type: "message_end", message: {
+      id: "m2", role: "assistant", content: "证据见[引用:b1]和[引用:b2]，再次[引用:b1]。", citations: [
+        { paperId: "p1", blockId: "b1", label: "第 1 页 · 原文" },
+        { paperId: "p1", blockId: "b2", label: "第 1 页 · 原文" },
+      ],
+    } }));
+    const citations = [...container.querySelectorAll<HTMLButtonElement>(".research-inline-citation")];
+    expect(citations.map((citation) => citation.textContent)).toEqual(["[1]", "[2]", "[1]"]);
+    expect(container.textContent).not.toContain("第 1 页");
+    expect(container.textContent).not.toContain("First passage");
+    expect(container.querySelector(".research-message-citations")).toBeNull();
+    await act(async () => citations[1].click());
+    expect(onJump).toHaveBeenCalledWith("b2");
+    await act(async () => emit({ type: "message_end", message: {
+      id: "m3", role: "assistant", content: "下一条回答[引用:b2]。", citations: [
+        { paperId: "p1", blockId: "b2", label: "第 1 页" },
+      ],
+    } }));
+    expect([...container.querySelectorAll(".research-inline-citation")].map((citation) => citation.textContent))
+      .toEqual(["[1]", "[2]", "[1]", "[1]"]);
+  });
+
+  it("does not add citation lists below completed read tools or uncited answers", async () => {
+    await mount();
+    await act(async () => emit({ type: "tool_start", tool: { id: "read", name: "read_current_paper",
+      label: "读取当前论文", status: "running", input: { page: 1 } } }));
+    expect(container.querySelector(".research-tool-summary")?.textContent).toBe("读取论文原文");
+    await act(async () => {
+      emit({ type: "tool_end", tool: { id: "read", name: "read_current_paper", label: "读取当前论文",
+        status: "completed", input: {}, output: { paper: { id: "p1", blocks: paper.blockData },
+          citations: [{ paperId: "p1", blockId: "b1", label: "第 1 页" }] } } });
+      emit({ type: "message_end", message: { id: "answer", role: "assistant", content: "无需引用的回答。",
+        citations: [{ paperId: "p1", blockId: "b1", label: "第 1 页" }] } });
+    });
+    expect(container.querySelector(".research-citations, .research-message-citations, .research-inline-citation")).toBeNull();
+    expect(container.textContent).not.toContain("第 1 页");
+  });
+
+  it("keeps first-mention numbers stable between streaming and the completed answer", async () => {
+    const other = { ...paper.blockData[0], id: "b2", pageNumber: 9, order: 1 };
+    const { onJump } = await mount(true, { ...paper, blockData: [paper.blockData[0], other] });
+    await act(async () => {
+      emit({ type: "tool_end", tool: { id: "read", name: "read_current_paper", label: "读取当前论文",
+        status: "completed", input: {}, output: { paper: { id: "p1", blocks: [paper.blockData[0], other] } } } });
+      emit({ type: "message_delta", messageId: "answer", delta: "先引用后读到的块[引用:b2]，再引用[引用:b1]。" });
+    });
+    const labels = () => [...container.querySelectorAll(".research-inline-citation")].map((button) => button.textContent);
+    expect(labels()).toEqual(["[1]", "[2]"]);
+    await act(async () => emit({ type: "message_end", message: { id: "answer", role: "assistant",
+      content: "先引用后读到的块[引用:b2]，再引用[引用:b1]。", citations: [
+        { paperId: "p1", blockId: "b2", label: "第 9 页" }, { paperId: "p1", blockId: "b1", label: "第 1 页" },
+      ] } }));
+    expect(labels()).toEqual(["[1]", "[2]"]);
+    await act(async () => container.querySelector<HTMLButtonElement>(".research-inline-citation")!.click());
+    expect(onJump).toHaveBeenCalledWith("b2");
   });
 
   it("renders citations during streaming from read blocks and rejects foreign or missing blocks", async () => {

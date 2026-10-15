@@ -6,6 +6,7 @@ interface BlockListProps {
   blocks: DocumentBlock[];
   activeBlockId: string | null;
   hoveredBlockId?: string | null;
+  focusFlashRegionId?: string | null;
   onSelect: (block: DocumentBlock) => void;
   onAnalyzeParagraph?: (block: DocumentBlock) => void;
   onAnalyzeChart?: (block: DocumentBlock) => void;
@@ -13,7 +14,7 @@ interface BlockListProps {
 
 const labels = { heading: "标题", paragraph: "段落", equation: "公式", image: "图表", table: "表格" };
 
-export function BlockList({ blocks, activeBlockId, hoveredBlockId, onSelect, onAnalyzeParagraph, onAnalyzeChart }: BlockListProps) {
+export function BlockList({ blocks, activeBlockId, hoveredBlockId, focusFlashRegionId, onSelect, onAnalyzeParagraph, onAnalyzeChart }: BlockListProps) {
   return <div className="pdf-block-layer">
     {blocks.filter(hasPageBounds).map((block) => {
       const [left, top, right, bottom] = block.bbox!;
@@ -26,7 +27,7 @@ export function BlockList({ blocks, activeBlockId, hoveredBlockId, onSelect, onA
           key={regionId}
           id={`pdf-block-${regionId}`}
           data-block-id={block.id}
-          className={`pdf-block-hit-area pdf-block-${block.kind} ${activeBlockId === block.id ? "is-active" : ""} ${hoveredBlockId === block.id ? "is-hovered" : ""}`}
+          className={`pdf-block-hit-area pdf-block-${block.kind} ${activeBlockId === block.id ? "is-active" : ""} ${hoveredBlockId === block.id ? "is-hovered" : ""} ${focusFlashRegionId === regionId ? "is-focus-flash" : ""}`}
           style={{ left: `${left * 100}%`, top: `${top * 100}%`, width: `${(right - left) * 100}%`, height: `${(bottom - top) * 100}%` }}
           onClick={(event) => { if (event.detail < 2) onSelect(block); }}
           onDoubleClick={(event) => {

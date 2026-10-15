@@ -190,6 +190,33 @@ describe("continuous PDF page geometry", () => {
     expect(scrollIntoView).toHaveBeenCalledOnce();
   });
 
+  it("briefly highlights an explicit jump target and lets a new jump replace it", async () => {
+    vi.useFakeTimers();
+    try {
+      const { container, rerender } = await mount([paragraph, nextParagraph]);
+      await rerender({ focusTarget: { id: paragraph.id, requestId: 1, flash: true } });
+      const target = container.querySelector<HTMLElement>(`[id="pdf-block-${paragraph.id}"]`)!;
+      const next = container.querySelector<HTMLElement>(`[id="pdf-block-${nextParagraph.id}"]`)!;
+      expect(target.classList.contains("is-focus-flash")).toBe(true);
+      await act(async () => vi.advanceTimersByTime(800));
+      await rerender({ focusTarget: { id: nextParagraph.id, requestId: 2, flash: true } });
+      expect(target.classList.contains("is-focus-flash")).toBe(false);
+      expect(next.classList.contains("is-focus-flash")).toBe(true);
+      await act(async () => vi.advanceTimersByTime(900));
+      expect(next.classList.contains("is-focus-flash")).toBe(true);
+      await act(async () => vi.advanceTimersByTime(800));
+      expect(next.classList.contains("is-focus-flash")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not flash a restored reading position", async () => {
+    const { container } = await mount([paragraph], { focusTarget: { id: paragraph.id, requestId: 1 } });
+    expect(scrollIntoView).toHaveBeenCalledOnce();
+    expect(container.querySelector(".is-focus-flash")).toBeNull();
+  });
+
   it("loads and centers a remote outline target after its deferred canvas completes", async () => {
     let finish!: () => void;
     const far = { ...paragraph, id: "far-outline", pageNumber: 20 };

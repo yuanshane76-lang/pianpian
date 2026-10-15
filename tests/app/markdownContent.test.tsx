@@ -29,12 +29,68 @@ describe("assistant Markdown math", () => {
     const onCitation = vi.fn();
     await act(async () => root!.render(<MarkdownContent
       text={"原文[引用:block]、未知[引用:missing]、未完成[引用:b\n\n`[引用:block]`\n\n```\n[引用:block]\n```"}
-      citations={[{ blockId: "block", label: "引用 1", inlineLabel: "[1]", pageLabel: "第 3 页" }]} onCitation={onCitation} />));
+      citations={[{ blockId: "block" }]} onCitation={onCitation} />));
     expect(container.querySelectorAll(".research-inline-citation")).toHaveLength(1);
     expect(container.querySelectorAll("code")).toHaveLength(2);
     expect(container.querySelector(".research-inline-citation")?.textContent).toBe("[1]");
+    expect(container.querySelector(".research-inline-citation")?.getAttribute("aria-label")).toBe("查看引用 1 的原文");
+    expect(container.querySelector(".research-inline-citation")?.getAttribute("title")).toBe("查看原文");
     await act(async () => container.querySelector<HTMLButtonElement>(".research-inline-citation")!.click());
     expect(onCitation).toHaveBeenCalledWith("block");
+  });
+
+  it("numbers citations by first visible mention and reuses numbers without counting code or links", async () => {
+    await render("");
+    const onCitation = vi.fn();
+    await act(async () => root!.render(<MarkdownContent
+      text={"`[引用:second]`\n\n[引用:second](https://example.com)\n\n第一处[引用:first]。\n\n**另一处[引用:second]**，再次[引用:first]。"}
+      citations={[{ blockId: "second" }, { blockId: "first" }]} onCitation={onCitation} />));
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>(".research-inline-citation")];
+    expect(buttons.map((button) => button.textContent)).toEqual(["[1]", "[2]", "[1]"]);
+    await act(async () => buttons[1].click());
+    expect(onCitation).toHaveBeenCalledWith("second");
+  });
+
+  it("keeps reference-style links and hand-written citation URLs inert", async () => {
+    await render("");
+    await act(async () => root!.render(<MarkdownContent
+      text={"[引用:second][source]、[假编号](zhiyan-citation:0)。真正引用[引用:first]。\n\n[source]: https://example.com"}
+      citations={[{ blockId: "second" }, { blockId: "first" }]} onCitation={vi.fn()} />));
+    expect([...container.querySelectorAll(".research-inline-citation")].map((button) => button.textContent)).toEqual(["[1]"]);
+    expect(container.querySelector(".research-inline-citation")?.getAttribute("aria-label")).toBe("查看引用 1 的原文");
+  });
+
+  it("does not activate a complete citation marker nested inside a reference-style link label", async () => {
+    await render("");
+    await act(async () => root!.render(<MarkdownContent
+      text={"[说明[引用:second]][source] 正文[引用:first]。\n\n[source]: https://example.com"}
+      citations={[{ blockId: "second" }, { blockId: "first" }]} onCitation={vi.fn()} />));
+    expect([...container.querySelectorAll(".research-inline-citation")].map((button) => button.textContent)).toEqual(["[1]"]);
+    expect(container.querySelector(".markdown-link")?.textContent).toBe("说明[引用:second]");
+  });
+
+  it("numbers visible body citations before rendered footnotes and ignores unused footnotes", async () => {
+    await render("");
+    const citations = [{ blockId: "footnote" }, { blockId: "body" }];
+    await act(async () => root!.render(<MarkdownContent
+      text={"[^unused]: [引用:footnote]\n\n正文[引用:body]。"} citations={citations} onCitation={vi.fn()} />));
+    expect([...container.querySelectorAll(".research-inline-citation")].map((button) => button.textContent)).toEqual(["[1]"]);
+    await act(async () => root!.render(<MarkdownContent
+      text={"[^used]: [引用:footnote]\n\n正文[引用:body]。见脚注[^used]。"} citations={citations} onCitation={vi.fn()} />));
+    expect([...container.querySelectorAll(".research-inline-citation")].map((button) => button.textContent)).toEqual(["[1]", "[2]"]);
+  });
+
+  it("does not renumber an already shown citation when a streamed definition changes earlier Markdown", async () => {
+    await render("");
+    const citations = [{ blockId: "first" }, { blockId: "second" }];
+    const prefix = "[引用:first] 正文[引用:second]";
+    await act(async () => root!.render(<MarkdownContent text={prefix} citations={citations} onCitation={vi.fn()} />));
+    expect([...container.querySelectorAll(".research-inline-citation")].map((button) => button.textContent)).toEqual(["[1]", "[2]"]);
+    await act(async () => root!.render(<MarkdownContent
+      text={`${prefix}\n\n[引用:first]: https://example.com`} citations={citations} onCitation={vi.fn()} />));
+    expect([...container.querySelectorAll(".research-inline-citation")].map((button) => button.textContent)).toEqual(["[2]"]);
+    await act(async () => root!.render(<MarkdownContent text="新回答[引用:second]。" citations={citations} onCitation={vi.fn()} />));
+    expect(container.querySelector(".research-inline-citation")?.textContent).toBe("[1]");
   });
 
   it("renders the explanation's recurrent-state notation inside formatted paragraphs", async () => {

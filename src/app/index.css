@@ -1403,6 +1403,14 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
 .pdf-block-layer { position: absolute; inset: 0; }
 .pdf-block-hit-area { position: absolute; box-sizing: border-box; padding: 0; margin: 0; min-width: 0; border: 1px solid transparent; border-radius: 2px; background: transparent; cursor: pointer; pointer-events: auto; transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease; }
 .pdf-block-hit-area:hover, .pdf-block-hit-area.is-hovered, .pdf-block-hit-area.is-active { background: rgba(50, 126, 255, 0.10); border-color: rgba(38, 111, 238, 0.86); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.42) inset; }
+.pdf-block-hit-area.is-focus-flash { border-color: var(--teal); background: rgba(16, 132, 126, 0.22); box-shadow: 0 0 0 3px rgba(16, 132, 126, 0.24), 0 0 16px rgba(16, 132, 126, 0.28); animation: pdf-block-focus-flash 1.6s ease-out; }
+@keyframes pdf-block-focus-flash {
+  0%, 100% { background: rgba(16, 132, 126, 0.08); }
+  28% { background: rgba(16, 132, 126, 0.32); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pdf-block-hit-area.is-focus-flash { animation: none; }
+}
 .pdf-block-hit-area:focus-visible { outline: 2px solid #246fee; outline-offset: 2px; }
 .pdf-block-hover-label { position: absolute; top: -22px; left: -1px; display: none; padding: 3px 6px; border-radius: 3px 3px 0 0; color: white; background: #246fee; font-size: 10px; line-height: 16px; white-space: nowrap; pointer-events: none; }
 .pdf-block-hit-area:hover .pdf-block-hover-label, .pdf-block-hit-area.is-hovered .pdf-block-hover-label, .pdf-block-hit-area.is-active .pdf-block-hover-label { display: block; }
@@ -2320,13 +2328,9 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
 .research-document-card > div { display: flex; align-items: flex-start; gap: 7px; font-size: 11px; line-height: 1.6; }
 .research-document-card > div > svg { color: var(--teal); flex-shrink: 0; margin-top: 2px; }
 .research-document-card > button { justify-self: start; font-size: 10px; }
-.research-citations { display: flex; gap: 6px; flex-wrap: wrap; margin: -3px 0 14px; }
-.research-citations button { display: inline-flex; align-items: baseline; gap: 5px; background: var(--surface-raised); color: var(--teal-dark); border: 1px solid var(--accent-line); border-radius: 5px; padding: 4px 7px; font-size: 10px; }
-.research-citations button small, .research-message-citations button small { color: var(--muted); font-size: 10px; }
-.research-message-citations { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.research-message-citations button { display: inline-flex; align-items: baseline; gap: 5px; padding: 4px 7px; color: var(--teal-dark); background: var(--accent-wash); border: 1px solid var(--accent-line); border-radius: 5px; font-size: 10px; }
-.research-message-citations button:hover { background: var(--teal-soft); }
 .research-inline-citation { display: inline-flex; align-items: center; margin: 0 2px; padding: 1px 5px; color: var(--teal-dark); background: var(--teal-soft); border: 1px solid var(--accent-line); border-radius: 4px; font: inherit; font-size: .9em; cursor: pointer; }
+.research-inline-citation:hover { background: var(--accent-wash); }
+.research-inline-citation:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .research-agent-composer { flex-shrink: 0; padding: 12px 14px 14px; border-top: 1px solid var(--line); background: var(--surface); }
 .research-save-notice { margin-bottom: 8px; color: var(--teal-dark); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 .research-config-hint { width: 100%; padding: 0; margin-bottom: 9px; border: 0; background: transparent; color: var(--muted); font-size: 10px; line-height: 1.6; text-align: left; }

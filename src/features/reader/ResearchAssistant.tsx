@@ -78,7 +78,7 @@ function ToolCard({ tool, approvalPaper, onApprove, onReject, onSaveDocument }: 
   const Icon = tool.name === "read_current_paper" ? BookOpen : tool.name.includes("search") ? Search
     : tool.name === "read_research_skill" ? Sparkles : tool.name === "create_document" ? FileText : Wrench;
   const summary = tool.name === "read_current_paper" ? output?.paper?.blocks
-    ? `已读取 ${output.paper.blocks.length} 个原文块${tool.input.query ? ` · ${tool.input.query}` : ""}` : tool.input.page ? `第 ${tool.input.page} 页` : "读取论文原文"
+    ? `已读取 ${output.paper.blocks.length} 个原文块${tool.input.query ? ` · ${tool.input.query}` : ""}` : "读取论文原文"
     : tool.name === "read_research_skill" ? output?.title ?? "选择研究流程"
     : tool.name.includes("search") ? `${tool.input.query ?? ""}${papers.length ? ` · ${papers.length} 篇结果` : ""}`
     : document?.title ?? tool.input.title ?? "";
@@ -383,9 +383,9 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
         {timeline.map((item) => {
           if (item.type === "tool") {
             const approval = approvalByToolId[item.tool.id];
-            const output = isRecord(item.tool.output) ? item.tool.output : undefined;
-            const references = currentPaperCitations(paper, output?.citations);
-            return <div key={`tool-${item.tool.id}`}><ToolCard tool={item.tool} approvalPaper={approval?.paper} onApprove={() => void approve(item.tool.id, true)} onReject={() => void approve(item.tool.id, false)} onSaveDocument={(draft) => void saveDocument(draft)} />{references.length ? <div className="research-citations">{references.slice(0, 4).map((citation) => <button key={citation.blockId} type="button" title={citation.excerpt} aria-label={`打开${citation.label}，${citation.pageLabel}`} onClick={() => onJump(citation.blockId)}><span>{citation.label}</span><small>{citation.pageLabel}</small></button>)}</div> : null}</div>;
+            return <ToolCard key={`tool-${item.tool.id}`} tool={item.tool} approvalPaper={approval?.paper}
+              onApprove={() => void approve(item.tool.id, true)} onReject={() => void approve(item.tool.id, false)}
+              onSaveDocument={(draft) => void saveDocument(draft)} />;
           }
           const content = streaming[item.message.id] ?? item.message.content;
           const references = item.message.role === "assistant" ? currentPaperCitations(paper, item.message.citations) : [];
@@ -394,10 +394,6 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
             <div className="research-message-content">{content ? <MarkdownContent text={content}
               citations={item.message.role === "assistant" ? streaming[item.message.id] !== undefined ? readSources : references : []}
               onCitation={onJump} /> : <span className="research-placeholder">正在组织回答…</span>}</div>
-            {references.length ? <div className="research-message-citations" aria-label="回答引用">
-              {references.slice(0, 8).map((citation) =>
-                <button key={citation.blockId} type="button" title={citation.excerpt} aria-label={`打开${citation.label}，${citation.pageLabel}`} onClick={() => onJump(citation.blockId)}><span>{citation.label}</span><small>{citation.pageLabel}</small></button>)}
-            </div> : null}
           </article>;
         })}
         {error ? <div className="research-agent-error" role="alert"><span>{error}</span>{lastQuestion.current ? <button type="button" disabled={busy} onClick={() => void submit(lastQuestion.current)}><RotateCcw size={14} />重试问题</button> : null}</div> : null}
