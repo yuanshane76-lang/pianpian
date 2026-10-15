@@ -23,6 +23,7 @@ describe("service settings", () => {
       aliyun: { apiKey: "", model: "qwen-max", baseUrl: "https://example.com/v1" },
       deepseek: { apiKey: "", model: "deepseek-flash", baseUrl: "https://api.deepseek.com" },
       mineru: { apiKey: "" },
+      semanticScholar: { apiKey: "" },
     };
 
     const merged = mergeServiceSettings({
@@ -36,12 +37,29 @@ describe("service settings", () => {
         apiKey: "deepseek-secret",
       },
       mineru: { ...DEFAULT_SERVICE_SETTINGS.mineru, apiKey: "mineru-secret" },
+      semanticScholar: { ...DEFAULT_SERVICE_SETTINGS.semanticScholar, apiKey: "s2-secret" },
     }, input);
 
     expect(merged.aliyun.apiKey).toBe("aliyun-secret");
     expect(merged.deepseek.apiKey).toBe("deepseek-secret");
     expect(merged.mineru.apiKey).toBe("mineru-secret");
+    expect(merged.semanticScholar.apiKey).toBe("s2-secret");
     expect(merged.aliyun.model).toBe("qwen-max");
+  });
+
+  it("falls back to the anonymous literature pool when the key is empty", () => {
+    const merged = mergeServiceSettings(DEFAULT_SERVICE_SETTINGS, {
+      aiProvider: "deepseek",
+      aliyun: { apiKey: "", model: "qwen-plus", baseUrl: "" },
+      deepseek: { apiKey: "", model: "deepseek-flash", baseUrl: "" },
+      mineru: { apiKey: "" },
+      semanticScholar: { apiKey: "" },
+    });
+    expect(merged.semanticScholar.apiKey).toBe("");
+    expect(toPublicServiceSettings(merged).semanticScholar).toMatchObject({
+      configured: false,
+      endpoint: "https://api.semanticscholar.org",
+    });
   });
 
   it("never exposes secret values in the public settings view", () => {
@@ -50,11 +68,13 @@ describe("service settings", () => {
       aliyun: { ...DEFAULT_SERVICE_SETTINGS.aliyun, apiKey: "secret" },
       deepseek: { ...DEFAULT_SERVICE_SETTINGS.deepseek, apiKey: "secret" },
       mineru: { ...DEFAULT_SERVICE_SETTINGS.mineru, apiKey: "secret" },
+      semanticScholar: { ...DEFAULT_SERVICE_SETTINGS.semanticScholar, apiKey: "secret" },
     });
 
     expect(JSON.stringify(publicSettings)).not.toContain("secret");
     expect(publicSettings.aliyun.configured).toBe(true);
     expect(publicSettings.deepseek.configured).toBe(true);
     expect(publicSettings.mineru.configured).toBe(true);
+    expect(publicSettings.semanticScholar.configured).toBe(true);
   });
 });

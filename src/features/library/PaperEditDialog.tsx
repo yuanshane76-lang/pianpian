@@ -1,6 +1,6 @@
 import { Save, X } from "lucide-react";
 import { useState } from "react";
-import type { PaperMetadataPatch, PaperRecord } from "../../domain/library";
+import { isValidDoi, normalizeDoi, type PaperMetadataPatch, type PaperRecord } from "../../domain/library";
 
 interface PaperEditDialogProps {
   paper: PaperRecord;
@@ -17,6 +17,7 @@ export function PaperEditDialog({ paper, onClose, onSave }: PaperEditDialogProps
   const [authors, setAuthors] = useState(paper.authors.join(", "));
   const [year, setYear] = useState(paper.year ? String(paper.year) : "");
   const [tags, setTags] = useState(paper.tags.join(", "));
+  const [doi, setDoi] = useState(paper.doi ?? "");
   const [error, setError] = useState("");
 
   function save() {
@@ -30,11 +31,17 @@ export function PaperEditDialog({ paper, onClose, onSave }: PaperEditDialogProps
       setError("年份请填写 0 到 3000 之间的整数。");
       return;
     }
+    const trimmedDoi = doi.trim();
+    if (trimmedDoi && !isValidDoi(trimmedDoi)) {
+      setError("DOI 格式不正确，应形如 10.1145/3592433。");
+      return;
+    }
     onSave({
       title: normalizedTitle,
       authors: splitValues(authors),
       year: normalizedYear,
       tags: splitValues(tags),
+      doi: normalizeDoi(trimmedDoi),
     });
     onClose();
   }
@@ -52,6 +59,7 @@ export function PaperEditDialog({ paper, onClose, onSave }: PaperEditDialogProps
           <label className="settings-field" htmlFor="paper-authors">作者 <span>用逗号或换行分隔</span><input id="paper-authors" value={authors} onChange={(event) => setAuthors(event.target.value)} /></label>
           <label className="settings-field" htmlFor="paper-year">年份<input id="paper-year" inputMode="numeric" placeholder="例如 2024" value={year} onChange={(event) => setYear(event.target.value)} /></label>
           <label className="settings-field" htmlFor="paper-tags">标签 <span>用逗号或换行分隔</span><input id="paper-tags" placeholder="例如 Transformer, NLP" value={tags} onChange={(event) => setTags(event.target.value)} /></label>
+          <label className="settings-field" htmlFor="paper-doi">DOI <span>选填，用于查找相似论文</span><input id="paper-doi" placeholder="例如 10.1145/3592433" value={doi} onChange={(event) => { setDoi(event.target.value); setError(""); }} /></label>
           {error ? <p className="settings-error" role="alert">{error}</p> : null}
         </div>
         <footer className="settings-footer">

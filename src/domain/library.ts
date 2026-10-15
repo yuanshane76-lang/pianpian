@@ -1,5 +1,22 @@
 import type { DocumentBlock } from "./documentBlocks";
 
+const MAX_DOI = 500;
+
+/** Accepts a bare DOI, a `doi:` prefix or a doi.org URL; returns a lowercase bare DOI. */
+export function normalizeDoi(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value
+    .slice(0, MAX_DOI)
+    .replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, "")
+    .replace(/^doi:\s*/i, "")
+    .trim()
+    .toLocaleLowerCase();
+}
+
+export function isValidDoi(value: unknown): boolean {
+  return /^10\.\d{4,9}\/\S+$/.test(normalizeDoi(value));
+}
+
 export interface PaperRecord {
   recordType?: "reference";
   doi?: string;
@@ -29,6 +46,8 @@ export interface PaperMetadataPatch {
   authors: string[];
   year: number | null;
   tags: string[];
+  /** `undefined` keeps the stored DOI, an empty string clears it. */
+  doi?: string;
 }
 
 export function updatePaperMetadata(
@@ -38,13 +57,17 @@ export function updatePaperMetadata(
 ): PaperRecord[] {
   return papers.map((paper) => {
     if (paper.id !== paperId) return paper;
-    return {
+    const next: PaperRecord = {
       ...paper,
       title: patch.title.trim() || paper.title,
       authors: [...new Set(patch.authors.map((author) => author.trim()).filter(Boolean))],
       year: patch.year,
       tags: [...new Set(patch.tags.map((tag) => tag.trim()).filter(Boolean))],
     };
+    const doi = patch.doi === undefined ? paper.doi : normalizeDoi(patch.doi) || undefined;
+    if (doi) next.doi = doi;
+    else delete next.doi;
+    return next;
   });
 }
 

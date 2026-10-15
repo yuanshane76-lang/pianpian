@@ -18,6 +18,9 @@ export interface StoredServiceSettings {
     apiKey: string;
     endpoint: string;
   };
+  semanticScholar: {
+    apiKey: string;
+  };
 }
 
 export interface ServiceSettingsInput {
@@ -39,6 +42,10 @@ export interface ServiceSettingsInput {
     endpoint?: string;
     clearApiKey?: boolean;
   };
+  semanticScholar: {
+    apiKey?: string;
+    clearApiKey?: boolean;
+  };
 }
 
 export interface PublicServiceSettings {
@@ -56,6 +63,10 @@ export interface PublicServiceSettings {
     baseUrl: string;
   };
   mineru: {
+    configured: boolean;
+    endpoint: string;
+  };
+  semanticScholar: {
     configured: boolean;
     endpoint: string;
   };
@@ -79,7 +90,12 @@ export const DEFAULT_SERVICE_SETTINGS: StoredServiceSettings = {
     apiKey: "",
     endpoint: "https://mineru.net",
   },
+  semanticScholar: {
+    apiKey: "",
+  },
 };
+
+export const SEMANTIC_SCHOLAR_ENDPOINT = "https://api.semanticscholar.org";
 
 function keepOrReplace(previous: string, next: string | undefined, clear: boolean | undefined): string {
   if (clear) return "";
@@ -108,6 +124,9 @@ export function mergeServiceSettings(
       apiKey: keepOrReplace(previous.mineru.apiKey, input.mineru.apiKey, input.mineru.clearApiKey),
       endpoint: input.mineru.endpoint?.trim() || previous.mineru.endpoint,
     },
+    semanticScholar: {
+      apiKey: keepOrReplace(previous.semanticScholar.apiKey, input.semanticScholar.apiKey, input.semanticScholar.clearApiKey),
+    },
   };
 }
 
@@ -130,6 +149,10 @@ export function toPublicServiceSettings(settings: StoredServiceSettings): Public
       configured: Boolean(settings.mineru.apiKey),
       endpoint: settings.mineru.endpoint,
     },
+    semanticScholar: {
+      configured: Boolean(settings.semanticScholar.apiKey),
+      endpoint: SEMANTIC_SCHOLAR_ENDPOINT,
+    },
   };
 }
 
@@ -138,6 +161,7 @@ export function normalizeStoredServiceSettings(value: unknown): StoredServiceSet
   const aliyun: Partial<StoredServiceSettings["aliyun"]> = source.aliyun ?? {};
   const deepseek: Partial<StoredServiceSettings["deepseek"]> = source.deepseek ?? {};
   const mineru: Partial<StoredServiceSettings["mineru"]> = source.mineru ?? {};
+  const semanticScholar: Partial<StoredServiceSettings["semanticScholar"]> = source.semanticScholar ?? {};
   const aiProvider = source.aiProvider === "aliyun" || source.aiProvider === "deepseek"
     ? source.aiProvider
     : DEFAULT_SERVICE_SETTINGS.aiProvider;
@@ -159,6 +183,9 @@ export function normalizeStoredServiceSettings(value: unknown): StoredServiceSet
     mineru: {
       apiKey: typeof mineru.apiKey === "string" ? mineru.apiKey : DEFAULT_SERVICE_SETTINGS.mineru.apiKey,
       endpoint: typeof mineru.endpoint === "string" && mineru.endpoint ? mineru.endpoint : DEFAULT_SERVICE_SETTINGS.mineru.endpoint,
+    },
+    semanticScholar: {
+      apiKey: typeof semanticScholar.apiKey === "string" ? semanticScholar.apiKey : DEFAULT_SERVICE_SETTINGS.semanticScholar.apiKey,
     },
   };
 }

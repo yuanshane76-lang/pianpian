@@ -11,6 +11,7 @@ const { registerAiStreamHandlers } = require("./ai-stream-ipc.cjs");
 const { createDocumentStore } = require("./document-store.cjs");
 const { createDocumentTasks } = require("./document-tasks.cjs");
 const { registerResearchAgentHandlers } = require("./research-agent-ipc.cjs");
+const semanticScholar = require("./semantic-scholar.cjs");
 
 const isDev = !app.isPackaged;
 const distDirectory = path.join(__dirname, "..", "dist");
@@ -58,7 +59,8 @@ function createWindow() {
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    const allowed = ["https://mineru.net/", "https://help.aliyun.com/", "https://bailian.console.aliyun.com/", "https://platform.deepseek.com/"];
+    const allowed = ["https://mineru.net/", "https://help.aliyun.com/", "https://bailian.console.aliyun.com/", "https://platform.deepseek.com/",
+      "https://doi.org/", "https://www.semanticscholar.org/"];
     if (allowed.some((prefix) => url.startsWith(prefix))) shell.openExternal(url);
     return { action: "deny" };
   });
@@ -119,6 +121,14 @@ app.whenReady().then(() => {
   });
   secureHandle("zhiyan:mineru:start", (id) => documentTasks.start(id));
   secureHandle("zhiyan:mineru:status", (id) => documentTasks.status(id));
+  const radar = semanticScholar.createClient({ readApiKey: () => readSettings().semanticScholar.apiKey });
+  secureHandle("zhiyan:radar:related", (input) => {
+    if (!input || typeof input !== "object") throw new Error("相似文献检索参数无效");
+    const title = typeof input.title === "string" ? input.title : "";
+    const doi = typeof input.doi === "string" ? input.doi : undefined;
+    if (!title.trim() && !doi) throw new Error("当前论文缺少标题和 DOI，无法检索相似工作");
+    return radar.findRelatedPapers({ seed: { title, doi }, limit: input.limit });
+  });
   secureHandle("zhiyan:settings:get", () => summary(readSettings()));
   secureHandle("zhiyan:settings:save", (input) => {
     const next = update(readSettings(), input);

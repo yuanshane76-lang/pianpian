@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld("zhiyan", {
       "zhiyan:documents:states",
       "zhiyan:mineru:start",
       "zhiyan:mineru:status",
+      "zhiyan:radar:related",
       "zhiyan:agent:start",
       "zhiyan:agent:skills",
       "zhiyan:agent:update-context",
