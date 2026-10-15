@@ -1,4 +1,6 @@
 import { createRequire } from "node:module";
+import { readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const require = createRequire(import.meta.url);
@@ -34,6 +36,23 @@ describe("portable package contents", () => {
     expect(ignored("dist/assets/KaTeX_Math-Italic-123.woff")).toBe(false);
     expect(ignored("dist/assets/KaTeX_Size1-Regular-123.ttf")).toBe(false);
     expect(ignored("dist/standard_fonts/FoxitSans.pfb")).toBe(false);
+  });
+
+  it("ships both sides of the Pi worker boundary", () => {
+    expect(ignored("electron/pi-worker-session.cjs")).toBe(false);
+    expect(ignored("electron/pi-agent-worker.cjs")).toBe(false);
+  });
+
+  it("includes every local module required by the shipped Electron modules", () => {
+    for (const name of readdirSync(path.resolve("electron"))) {
+      const file = `electron/${name}`;
+      if (!name.endsWith(".cjs") || ignored(file)) continue;
+      const source = readFileSync(path.resolve(file), "utf8");
+      for (const match of source.matchAll(/require\(["'](\.\.?\/[^"']+)["']\)/g)) {
+        const dependency = path.posix.normalize(path.posix.join("electron", match[1]));
+        expect(ignored(dependency), `${file} requires ${dependency}`).toBe(false);
+      }
+    }
   });
 
   it("excludes secrets, documents, tests, caches, and unexpected build files", () => {
