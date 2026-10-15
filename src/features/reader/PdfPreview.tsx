@@ -273,7 +273,7 @@ export function PdfPreview(props: Props) {
     const regionId = getPageBlockRegionId(block);
     setFocusFlashRegionId(regionId);
     focusFlashTimer.current = setTimeout(() => {
-      setFocusFlashRegionId(null);
+      setFocusFlashRegionId((current) => current === regionId ? null : current);
       focusFlashTimer.current = undefined;
     }, 1600);
   }, [focusIsLatest, focusTarget, layout, blocks, readyPages]);

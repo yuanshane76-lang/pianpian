@@ -85,7 +85,7 @@ describe("reader assistant layout", () => {
     await act(async () => vocabularyTab.click());
     expect(container.querySelector(".vocabulary-card")).toBeNull();
     expect(container.querySelector(".vocabulary-intro")?.textContent).toContain("双击段落后自动精选");
-    expect(container.querySelector(".vocabulary-intro button")?.textContent).toContain("AI 精选本段词汇");
+    expect(container.querySelector(".vocabulary-intro button")?.textContent).toContain("生成本段词汇");
   });
 
   it("mounts research only after its tab is visited and keeps it mounted across tab changes", async () => {
