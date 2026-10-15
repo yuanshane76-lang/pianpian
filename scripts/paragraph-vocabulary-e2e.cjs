@@ -170,7 +170,9 @@ if (process.versions.electron) {
       assert.equal(await page.locator(".vocabulary-card").count(), 0, "Vocabulary remains empty before AI selection");
       assert.equal(await page.locator(".vocabulary-panel").getByText("hypothesis", { exact: true }).count(), 0);
       assert.equal(await electron.evaluate(() => globalThis.vocabularyE2e.requests.length), 0);
-      await page.getByRole("button", { name: "AI 精选本段词汇", exact: true }).click();
+      assert.equal(await page.locator(".vocabulary-panel").getByText("AI 精选本段词汇", { exact: true }).count(), 1);
+      assert.equal(await page.locator(".vocabulary-heading").getByText(/第\s*\d+\s*页/).count(), 0);
+      await page.getByRole("button", { name: "生成本段词汇", exact: true }).click();
       await page.waitForSelector(".vocabulary-intro .spin");
       const request = await electron.evaluate(() => globalThis.vocabularyE2e.requests[0]);
       assert.equal(request.operation, "vocabulary");
@@ -311,7 +313,7 @@ if (process.versions.electron) {
       assert.equal(await page.locator(".assistant-insight").getAttribute("aria-busy"), "true");
       await page.screenshot({ path: path.join(output, "07-bundle-streaming-insight.png") });
       await page.getByRole("tab", { name: /学术词汇/ }).click();
-      await page.getByText("正在挑选段落词汇…", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "正在挑选段落词汇…", exact: true }).waitFor();
       await page.screenshot({ path: path.join(output, "08-bundle-vocabulary-running.png") });
       await emit(job("vocabulary"), '{"overview":"本段关注假设、推理与估计。","terms":[{"term":"hypothesis","translation":"假设","definition":"支撑推理的前提。"}]}', true);
       await page.getByText("本段词汇已生成", { exact: true }).waitFor();
