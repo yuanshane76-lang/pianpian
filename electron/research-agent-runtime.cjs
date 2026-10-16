@@ -4,7 +4,7 @@ const { createPiSession, safeError } = require("./pi-agent.cjs");
 const { listBundledResearchSkills } = require("./research-skills.cjs");
 const { resolveMessageCitations } = require("./research-citations.cjs");
 
-function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSessionFactory = createPiSession } = {}) {
+function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSessionFactory = createPiSession, readLibraryPaper } = {}) {
   if (typeof emit !== "function") throw new Error("Agent 事件发送器无效");
   let context;
   let sessionId = null;
@@ -60,9 +60,9 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
     busy = false;
     sessionId = null;
     citationEvidence.clear();
-    clearPendingApprovals("研究助手已关闭");
+    clearPendingApprovals("篇篇对话已关闭");
     piSession = null;
-    publish({ type: "agent_error", message: "研究助手工作线程已退出，请重新连接后重试", recoverable: false });
+    publish({ type: "agent_error", message: "篇篇对话工作线程已退出，请重新连接后重试", recoverable: false });
   }
 
   function approve(input) {
@@ -94,11 +94,12 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
   async function runTool(name, input = {}, toolCallId, signal) {
     const toolGeneration = generation;
     const toolContextRevision = contextRevision;
-    const toolPaperId = context?.paper.id;
+    const toolPaperId = context?.paper?.id;
     const definition = createToolDefinitions({
       getContext: () => context,
       emitApproval: (request) => approvalRequest(request, signal),
       fetchImpl,
+      readLibraryPaper,
     }).find((candidate) => candidate.name === name);
     if (!definition) throw new Error(`未注册工具：${name}`);
     if (signal?.aborted || aborted) throw new Error("请求已停止");
@@ -109,10 +110,12 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
       const result = await definition.execute(id, input, signal, undefined, {});
       if (toolGeneration !== generation || toolContextRevision !== contextRevision || signal?.aborted || aborted) throw new Error("请求已停止");
       const output = result?.structuredContent ?? result?.content?.map((item) => item.text).join("") ?? result;
-      if (name === "read_current_paper" && output?.paper?.id === toolPaperId && toolContextRevision === contextRevision) {
+      if (name === "read_current_paper" && (context.scope === "library" || output?.paper?.id === toolPaperId) && toolContextRevision === contextRevision) {
         for (const block of output.paper.blocks) {
-          citationEvidence.set(block.id, {
-            paperId: toolPaperId, blockId: block.id, pageNumber: block.pageNumber,
+          const referenceId = context.scope === "library" ? `${output.paper.id}::${block.id}` : block.id;
+          if (context.scope === "library") block.referenceId = referenceId;
+          citationEvidence.set(referenceId, {
+            paperId: output.paper.id, blockId: block.id, ...(context.scope === "library" ? { referenceId } : {}), pageNumber: block.pageNumber,
             label: `第 ${block.pageNumber} 页`,
           });
         }
@@ -125,7 +128,7 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
         if (!exists) context.library = [{
           id: output.result?.id || randomUUID(), title: added.title,
           authors: added.authors || [], year: added.year ?? null, doi: added.doi,
-        }, ...context.library].slice(0, 500);
+        }, ...context.library].slice(0, 5000);
       }
       const completed = { ...tool, status: output?.status === "rejected" ? "rejected" : "completed", output, finishedAt: new Date().toISOString() };
       toolEvent("tool_end", completed);
@@ -138,7 +141,7 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
     }
   }
 
-  async function start(nextContext, settings = {}) {
+  async function start(nextContext, settings = {}, history = []) {
     await abort();
     if (disposed) throw new Error("Agent 已关闭");
     piSession?.dispose();
@@ -156,11 +159,13 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
     const startController = new AbortController();
     startingController = startController;
     serviceKey = service.apiKey;
-    const tools = createToolDefinitions({ getContext: () => context, emitApproval: approvalRequest, fetchImpl });
+    const tools = createToolDefinitions({ getContext: () => context, emitApproval: approvalRequest, fetchImpl, readLibraryPaper });
     let nextSession;
     try {
       nextSession = await piSessionFactory({
         service,
+        history,
+        scope: context.scope,
         signal: startController.signal,
         onFailure: (reason) => handleSessionFailure(reason, startLifecycle),
         emit: (event) => {
@@ -219,9 +224,10 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
   }
 
   function updateContext(nextContext) {
-    if (disposed || !sessionId) throw new Error("Agent 会话不存在");
+    if (disposed || !sessionId) throw new Error("对话会话不存在");
     const next = normalizeContext(nextContext);
-    if (next.paper.id !== context.paper.id || JSON.stringify(next.paper.blocks) !== JSON.stringify(context.paper.blocks)) {
+    if (next.scope !== context.scope || next.paper?.id !== context.paper?.id) throw new Error("不能更改当前对话的论文范围，请新建或切换对话");
+    if (JSON.stringify(next.paper?.blocks) !== JSON.stringify(context.paper?.blocks)) {
       contextRevision += 1;
       citationEvidence.clear();
     }

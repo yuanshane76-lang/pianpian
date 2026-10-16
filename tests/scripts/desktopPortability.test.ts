@@ -10,7 +10,7 @@ describe("desktop verification portability", () => {
     expect(source).toContain('require("playwright")');
     if (file === "packaged-research-skills-e2e.cjs") {
       expect(source).toContain('const executable = path.resolve(process.argv[2]');
-      expect(source).toContain('path.basename(executable) === "Zhiyan.exe"');
+      expect(source).toContain('path.basename(executable) === "Pianpian.exe"');
       expect(source).toContain("executablePath: executable");
     } else {
       expect(source).toContain('executablePath: require("electron")');

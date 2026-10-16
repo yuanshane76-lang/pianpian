@@ -1,9 +1,18 @@
 import { createDocumentBlocks, type DocumentBlock } from "../domain/documentBlocks";
-import { sortPapers, type PaperRecord } from "../domain/library";
+import {
+  DEFAULT_GROUP_ID,
+  DEFAULT_GROUP_NAME,
+  groupIdForName,
+  normalizeGroupName,
+  sortPapers,
+  type LibraryGroup,
+  type PaperRecord,
+} from "../domain/library";
 import { extractPdfBlocks, openPdf } from "./document";
 import { saveOriginalPdf } from "./originalPdf";
 
 const PAPERS_KEY = "zhiyan-workbench.papers.v1";
+const GROUPS_KEY = "zhiyan-workbench.groups.v1";
 const LEGACY_PAPERS_KEYS = ["paperquay-rebuild.papers.v5"];
 
 function getStorage(): Storage | null {
@@ -25,22 +34,86 @@ function clearLegacyStorage(storage: Storage): void {
   }
 }
 
-function parseStoredPapers(value: string | null): PaperRecord[] {
+interface LegacyStoredPaper extends Omit<PaperRecord, "groupId"> {
+  groupId?: string;
+  tags?: string[];
+}
+
+function parseStoredPapers(value: string | null): LegacyStoredPaper[] {
   if (!value) return [];
   try {
-    const parsed = JSON.parse(value) as PaperRecord[];
+    const parsed = JSON.parse(value) as LegacyStoredPaper[];
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
 }
 
-function paperSourceKey(paper: PaperRecord): string {
+function parseStoredGroups(value: string | null): LibraryGroup[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as LibraryGroup[];
+    return Array.isArray(parsed)
+      ? parsed.filter((group) => group && typeof group.id === "string" && typeof group.name === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function getLegacyGroupNames(papers: LegacyStoredPaper[]): string[] {
+  return papers
+    .flatMap((paper) => Array.isArray(paper.tags) ? [paper.tags[0]] : [])
+    .map((name) => normalizeGroupName(name || ""))
+    .filter(Boolean);
+}
+
+function normalizeGroups(groups: LibraryGroup[], legacyNames: string[] = []): LibraryGroup[] {
+  const normalized: LibraryGroup[] = [];
+  const seen = new Set<string>();
+  const add = (group: LibraryGroup) => {
+    const name = normalizeGroupName(group.name);
+    if (!name || seen.has(name)) return;
+    seen.add(name);
+    normalized.push({ id: group.id || groupIdForName(name), name, createdAt: group.createdAt || "" });
+  };
+  add({ id: DEFAULT_GROUP_ID, name: DEFAULT_GROUP_NAME, createdAt: "" });
+  for (const group of groups) add(group);
+  for (const name of legacyNames) add({ id: groupIdForName(name), name, createdAt: "" });
+  return normalized;
+}
+
+export function loadGroups(): LibraryGroup[] {
+  const storage = getStorage();
+  if (!storage) return [{ id: DEFAULT_GROUP_ID, name: DEFAULT_GROUP_NAME, createdAt: "" }];
+  try {
+    const legacyPapers = parseStoredPapers(storage.getItem(PAPERS_KEY));
+    const groups = normalizeGroups(parseStoredGroups(storage.getItem(GROUPS_KEY)), getLegacyGroupNames(legacyPapers));
+    if (storage.getItem(GROUPS_KEY) !== JSON.stringify(groups)) storage.setItem(GROUPS_KEY, JSON.stringify(groups));
+    return groups;
+  } catch {
+    return [{ id: DEFAULT_GROUP_ID, name: DEFAULT_GROUP_NAME, createdAt: "" }];
+  }
+}
+
+export function saveGroups(groups: LibraryGroup[]): boolean {
+  const storage = getStorage();
+  if (!storage) return false;
+  try {
+    storage.setItem(GROUPS_KEY, JSON.stringify(normalizeGroups(groups)));
+    return true;
+  } catch (error) {
+    console.warn("无法持久化分组，当前会话仍可继续使用。", error);
+    return false;
+  }
+}
+
+function paperSourceKey(paper: Pick<PaperRecord, "sourcePath" | "title" | "blocks">): string {
   return paper.sourcePath || `${paper.title}:${paper.blocks}`;
 }
 
-function dedupePapers(papers: PaperRecord[]): PaperRecord[] {
-  const bySource = new Map<string, PaperRecord>();
+function dedupePapers<T extends Pick<PaperRecord, "sourcePath" | "title" | "blocks" | "importedAt">>(papers: T[]): T[] {
+  const bySource = new Map<string, T>();
   for (const paper of papers) {
     const sourceKey = paperSourceKey(paper);
     const previous = bySource.get(sourceKey);
@@ -56,14 +129,29 @@ export function loadPapers(): PaperRecord[] {
   if (!storage) return [];
   try {
     clearLegacyStorage(storage);
-    return sortPapers(dedupePapers(parseStoredPapers(storage.getItem(PAPERS_KEY))).map((paper) => {
-      if (paper.parseVersion === 2 || !paper.blockData?.length) return paper;
+    const groups = loadGroups();
+    const groupIds = new Set(groups.map((group) => group.id));
+    const papers = dedupePapers(parseStoredPapers(storage.getItem(PAPERS_KEY))).map((paper) => {
+      const legacyName = normalizeGroupName(paper.tags?.[0] || "");
+      const groupId = paper.groupId && groupIds.has(paper.groupId)
+        ? paper.groupId
+        : legacyName ? groupIdForName(legacyName) : DEFAULT_GROUP_ID;
+      const { tags: _legacyTags, ...withoutLegacyTags } = paper;
+      const migratedPaper: PaperRecord = { ...withoutLegacyTags, groupId };
+      if (paper.parseVersion === 2 || !paper.blockData?.length) return migratedPaper;
       const pages = [...new Set(paper.blockData.map((block) => block.pageNumber))].map((pageNumber) => ({
         pageNumber, lines: paper.blockData!.filter((block) => block.pageNumber === pageNumber).map((block) => block.text),
       }));
       const blockData = createDocumentBlocks(pages);
-      return { ...paper, blockData, blocks: blockData.length, parseVersion: 2 };
-    }));
+      return { ...migratedPaper, blockData, blocks: blockData.length, parseVersion: 2 };
+    }).map((paper) => {
+      if (paper.groupId) return paper;
+      return { ...paper, groupId: DEFAULT_GROUP_ID };
+    });
+    const sorted = sortPapers(papers);
+    const serialized = JSON.stringify(sorted);
+    if (storage.getItem(PAPERS_KEY) !== serialized) storage.setItem(PAPERS_KEY, serialized);
+    return sorted;
   } catch {
     return [];
   }
@@ -136,7 +224,7 @@ export async function importPdfFile(file: File): Promise<PaperRecord> {
     year: null,
     sourcePath: `local://${fingerprint}`,
     importedAt: new Date().toISOString(),
-    tags: ["待整理"],
+    groupId: DEFAULT_GROUP_ID,
     favorite: false,
     blocks: blocks.length,
     blockData: blocks,
@@ -160,7 +248,7 @@ export async function preparePdfFile(file: File): Promise<{ paper: PaperRecord; 
       paper: {
         id: saved.id, originalId: saved.id, sourcePath: `local://${saved.id}`,
         title: title && title.length > 4 && !/^(untitled|microsoft|latex)/i.test(title) ? title : file.name.replace(/\.pdf$/i, "").replaceAll("_", " "),
-        authors: [], year: null, importedAt: new Date().toISOString(), tags: ["待整理"],
+        authors: [], year: null, importedAt: new Date().toISOString(), groupId: DEFAULT_GROUP_ID,
         favorite: false, blocks: 0, blockData: [], pageCount: document.numPages,
         parseStatus: "pending", parseVersion: 2, readingPosition: { mode: "pdf", page: 1 },
       },

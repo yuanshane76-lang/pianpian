@@ -2,7 +2,7 @@ const { randomUUID } = require("node:crypto");
 const { searchLiterature } = require("./literature-search.cjs");
 const { readBundledResearchSkill } = require("./research-skills.cjs");
 
-const LIMITS = { blocks: 800, blockText: 6000, library: 500, query: 300 };
+const LIMITS = { blocks: 800, blockText: 6000, library: 5000, query: 300 };
 
 function text(value, max) {
   if (typeof value !== "string") return "";
@@ -21,11 +21,13 @@ function normalizeLandingUrl(value) {
 }
 
 function normalizeContext(value) {
-  if (JSON.stringify(value ?? {}).length > 2_000_000) throw new Error("论文上下文过大");
+  if (JSON.stringify(value ?? {}).length > 8_000_000) throw new Error("论文上下文过大");
   const source = value && typeof value === "object" ? value : {};
-  const paper = source.paper && typeof source.paper === "object" ? source.paper : null;
-  if (!paper || !text(paper.id, 200) || !text(paper.title, 500)) throw new Error("当前论文上下文无效");
-  const blocks = Array.isArray(paper.blocks) ? paper.blocks : [];
+  if (Array.isArray(source.library) && source.library.length > LIMITS.library) throw new Error("文献库超过当前 5000 篇检索上限，请缩小范围");
+  const scope = source.scope === "library" ? "library" : "paper";
+  const paper = scope === "paper" && source.paper && typeof source.paper === "object" ? source.paper : null;
+  if (scope === "paper" && (!paper || !text(paper.id, 200) || !text(paper.title, 500))) throw new Error("当前论文上下文无效");
+  const blocks = Array.isArray(paper?.blocks) ? paper.blocks : [];
   if (blocks.length > LIMITS.blocks) throw new Error("阅读块数量超过限制");
   const normalizedBlocks = blocks.map((block, index) => ({
     id: text(block?.id, 200) || `block-${index + 1}`,
@@ -34,19 +36,21 @@ function normalizeContext(value) {
   })).filter((block) => block.text);
   const library = Array.isArray(source.library) ? source.library.slice(0, LIMITS.library).map((item) => ({
     id: text(item?.id, 200),
+    originalId: text(item?.originalId, 200) || undefined,
     title: text(item?.title, 500),
     authors: Array.isArray(item?.authors) ? item.authors.slice(0, 20).map((author) => text(author, 120)).filter(Boolean) : [],
     year: Number.isInteger(item?.year) ? item.year : null,
     doi: text(item?.doi, 500) || undefined,
   })).filter((item) => item.id && item.title) : [];
   return {
-    paper: {
+    scope,
+    paper: paper ? {
       id: text(paper.id, 200),
       title: text(paper.title, 500),
       authors: Array.isArray(paper.authors) ? paper.authors.slice(0, 20).map((author) => text(author, 120)).filter(Boolean) : [],
       year: Number.isInteger(paper.year) ? paper.year : null,
       blocks: normalizedBlocks,
-    },
+    } : null,
     library,
   };
 }
@@ -64,32 +68,51 @@ function toolResult(textContent, structuredContent) {
     details: structuredContent, ...(structuredContent === undefined ? {} : { structuredContent }) };
 }
 
-function createToolDefinitions({ getContext, emitApproval, fetchImpl }) {
+function createToolDefinitions({ getContext, emitApproval, fetchImpl, readLibraryPaper }) {
   const tool = (name, label, description, execute) => ({ name, label, description, parameters: { type: "object", properties: {}, additionalProperties: false }, execute });
   return [
-    tool("read_research_skill", "读取预置研究技能", "按名称读取随纸研安装的研究流程说明；不接受文件路径。", async (_id, params) => {
+    tool("read_research_skill", "读取预置研究技能", "按名称读取随篇篇安装的阅读流程说明；不接受文件路径。", async (_id, params) => {
       const skill = readBundledResearchSkill(params?.name);
       return toolResult(`已读取预置研究技能「${skill.title}」。`, skill);
     }),
-    tool("read_current_paper", "读取当前论文", "按关键词或页码读取当前论文；空参数返回前 60 个块，可按关键词查找其他段落。", async (_id, params) => {
+    tool("read_current_paper", "读取论文正文", "单篇会话读取当前论文；全库会话必须传入检索结果中的 paperId。支持关键词和页码，最多返回 60 个块。", async (_id, params) => {
       const context = getContext();
+      let paper = context.paper;
+      if (context.scope === "library") {
+        const item = context.library.find((x) => x.id === params?.paperId);
+        if (!params?.paperId) throw new Error("请先检索并指定要读取的论文 paperId");
+        if (!item) throw new Error("指定论文不在当前文献库中");
+        paper = await readLibraryPaper?.(item);
+        if (!paper?.blocks?.length) throw new Error("该论文尚无可用的解析正文，请先完成 PDF 导入与解析");
+      } else if (params?.paperId && params.paperId !== paper.id) throw new Error("单篇会话只能读取当前论文");
       let remaining = 24000;
-      const selected = context.paper.blocks.filter((block) => (!params?.page || block.pageNumber === params.page) &&
+      const selected = paper.blocks.filter((block) => (!params?.page || block.pageNumber === params.page) &&
         (!params?.query || block.text.toLocaleLowerCase().includes(params.query.toLocaleLowerCase())))
         .slice(0, 60).map((block) => {
           const text = block.text.slice(0, Math.max(0, remaining));
           remaining -= text.length;
           return { ...block, text };
         }).filter((block) => block.text);
-      return toolResult(`读取《${context.paper.title}》：返回 ${selected.length} / ${context.paper.blocks.length} 个阅读块。`, {
-        paper: { ...context.paper, blocks: selected }, totalBlocks: context.paper.blocks.length, truncated: remaining <= 0,
-        citations: selected.slice(0, 8).map((block) => ({ paperId: context.paper.id, blockId: block.id, pageNumber: block.pageNumber, label: `第 ${block.pageNumber} 页` })),
+      return toolResult(`读取《${paper.title}》：返回 ${selected.length} / ${paper.blocks.length} 个阅读块。`, {
+        paper: { ...paper, blocks: selected }, totalBlocks: paper.blocks.length, truncated: remaining <= 0,
+        citations: selected.slice(0, 8).map((block) => ({ paperId: paper.id, blockId: block.id, pageNumber: block.pageNumber, label: `第 ${block.pageNumber} 页` })),
       });
     }),
-    tool("search_library", "搜索本地文献库", "只搜索当前会话传入的本地论文元数据。", async (_id, params) => {
+    tool("search_library", "搜索本地文献库", "全库会话检索本地论文标题、作者及已解析正文，返回相关段落摘要；单篇会话只搜索文献元数据。", async (_id, params, signal) => {
       const query = text(params?.query, LIMITS.query);
       if (!query) throw new Error("本地文献检索关键词无效");
-      const matches = getContext().library.filter((item) => matchesQuery(item, query));
+      const context = getContext();
+      const matches = [];
+      for (const item of context.library) {
+        if (signal?.aborted) throw new Error("本地检索已取消");
+        const parsed = context.scope === "library" ? await readLibraryPaper?.(item) : null;
+        const snippets = (parsed?.blocks || []).filter((block) => matchesQuery({ title: block.text }, query)).slice(0, 3).map((block) => {
+          const index = block.text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
+          const start = Math.max(0, index - 100);
+          return { blockId: block.id, pageNumber: block.pageNumber, text: block.text.slice(start, start + 600) };
+        });
+        if (matchesQuery(item, query) || snippets.length) matches.push({ ...item, parsed: Boolean(parsed?.blocks?.length), snippets });
+      }
       const papers = [];
       let remaining = 40000;
       for (const paper of matches) {

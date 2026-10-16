@@ -4,7 +4,7 @@ import type { PaperRecord } from "../../src/domain/library";
 
 const paper: PaperRecord = {
   id: "paper", title: "Paper", authors: [], year: null, sourcePath: "local://paper",
-  originalId: "original", importedAt: "2026-10-11", tags: [], favorite: false, blocks: 1,
+  originalId: "original", importedAt: "2026-10-11", groupId: "group-inbox", favorite: false, blocks: 1,
   parseStatus: "ready", blockData: [{ id: "b", kind: "paragraph", text: "Body",
     pageNumber: 1, order: 0, bbox: [.1, .1, .9, .2] }],
 };

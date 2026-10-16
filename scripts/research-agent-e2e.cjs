@@ -3,7 +3,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 if (process.versions.electron) {
-  const { app, dialog } = require("electron");
+  const { app, dialog, ipcMain } = require("electron");
   app.setPath("userData", process.env.ZHIYAN_AGENT_USER_DATA);
   app.setPath("sessionData", path.join(process.env.ZHIYAN_AGENT_USER_DATA, "session"));
   Object.defineProperty(app, "isPackaged", { value: true });
@@ -17,6 +17,15 @@ if (process.versions.electron) {
   };
   globalThis.agentRemoteRequests = 0;
   globalThis.agentTestRequests = [];
+  globalThis.agentLifecycle = [];
+  const nativeHandle = ipcMain.handle.bind(ipcMain);
+  ipcMain.handle = (channel, handler) => nativeHandle(channel, async (...args) => {
+    if (!["zhiyan:agent:start", "zhiyan:agent:abort"].includes(channel)) return handler(...args);
+    const entry = { channel, startedAt: Date.now() };
+    globalThis.agentLifecycle.push(entry);
+    try { return await handler(...args); }
+    finally { entry.completedAt = Date.now(); }
+  });
   const nativeFetch = globalThis.fetch;
   globalThis.fetch = async (url, options) => {
     if (String(url).startsWith("http://127.0.0.1:")) return nativeFetch(url, options);
@@ -34,7 +43,7 @@ if (process.versions.electron) {
     request.on("data", (chunk) => { raw += chunk; });
     request.on("end", async () => {
       const body = JSON.parse(raw);
-      globalThis.agentTestRequests.push(body.messages.map((message) => ({ role: message.role, content: message.role === "user" ? message.content : undefined, tool_call_id: message.tool_call_id })));
+      globalThis.agentTestRequests.push(body.messages.map((message) => ({ role: message.role, content: ["user", "assistant"].includes(message.role) ? message.content : undefined, tool_call_id: message.tool_call_id })));
       const userIndex = body.messages.findLastIndex((message) => message.role === "user");
       const rawQuestion = body.messages[userIndex]?.content;
       const question = Array.isArray(rawQuestion)
@@ -44,14 +53,24 @@ if (process.versions.electron) {
         message.role === "tool" || message.role === "toolResult" || message.tool_call_id);
       const related = { title: "Synthetic attention paper", authors: ["Synthetic Team"], year: 2025,
         doi: "10.1234/attention", landingUrl: "https://doi.org/10.1234/attention", source: "Crossref" };
-      const taskCalls = question.includes("滚动验收") ? [] : question.includes("加入")
+      const globalScope = body.messages.some((message) => message.role === "system" && String(message.content).includes("当前会话范围：整个本地文献库"));
+      let retrievedPaperId;
+      for (const message of toolMessages) {
+        try {
+          const result = JSON.parse(typeof message.content === "string" ? message.content : message.content?.map((part) => part.text || "").join(""));
+          if (result.papers?.[0]?.id) retrievedPaperId = result.papers[0].id;
+        } catch { /* Synthetic non-search tool output. */ }
+      }
+      const taskCalls = question.includes("全库检索验收") ? [{ name: "search_library", arguments: '{"query":"ablation"}' },
+        { name: "read_current_paper", arguments: JSON.stringify({ paperId: retrievedPaperId || "missing" }) }]
+        : question.includes("滚动验收") ? [] : question.includes("加入")
         ? [{ name: "add_paper_to_library", arguments: JSON.stringify(related) }]
         : question.includes("文档")
           ? [{ name: "read_current_paper", arguments: "{}" },
             { name: "create_document", arguments: JSON.stringify({ title: "阅读笔记", markdown: "# 阅读笔记\n\nThe model uses attention. [第 1 页]" }) }]
           : question.includes("查找")
-            ? [{ name: "read_current_paper", arguments: "{}" }, { name: "search_literature", arguments: '{"query":"attention","limit":2}' }]
-            : [{ name: "read_current_paper", arguments: "{}" }];
+            ? [{ name: globalScope ? "search_library" : "read_current_paper", arguments: globalScope ? '{"query":"attention"}' : "{}" }, { name: "search_literature", arguments: '{"query":"attention","limit":2}' }]
+            : globalScope ? [{ name: "search_library", arguments: '{"query":"attention"}' }] : [{ name: "read_current_paper", arguments: "{}" }];
       const skillName = question.includes("文档") ? "literature-comparison-notes"
         : question.includes("查找") ? "literature-search-review" : "paper-deep-reading";
       const calls = question.includes("加入") || question.includes("滚动验收") ? taskCalls
@@ -66,7 +85,8 @@ if (process.versions.electron) {
         chunk({ role: "assistant", tool_calls: [{ index: 0, id: require("node:crypto").randomUUID(), type: "function", function: call }] });
         chunk({}, "tool_calls");
       } else {
-        const fragments = question.includes("滚动验收")
+        const fragments = question.includes("全库检索验收") ? [`本地消融实验证据[引用:${retrievedPaperId}::agent-fixture-evaluation]。`]
+          : question.includes("滚动验收")
           ? Array.from({ length: 120 }, (_, index) => `第 ${index + 1} 段：这是用于验证流式阅读位置的合成文字，持续输出期间可以向上阅读。\n\n`)
           : question.includes("序号验收")
             ? ["消融实验用于评估模型。", "[引用:agent-fixture-evaluation]", "\n\n模型通过注意力选择有效特征。",
@@ -86,14 +106,18 @@ if (process.versions.electron) {
   app.once("before-quit", () => server.close());
   const adapter = require("../electron/pi-agent.cjs");
   const createPiSession = adapter.createPiSession;
-  adapter.createPiSession = (options) => createPiSession({
-    ...options, service: { ...options.service, baseUrl: `http://127.0.0.1:${server.address().port}/v1` },
-  });
+  adapter.createPiSession = async (options) => {
+    const entry = { channel: "pi:initialize", startedAt: Date.now() };
+    globalThis.agentLifecycle.push(entry);
+    try { return await createPiSession({
+      ...options, service: { ...options.service, baseUrl: `http://127.0.0.1:${server.address().port}/v1` },
+    }); } finally { entry.completedAt = Date.now(); }
+  };
   app.whenReady().then(() => require("../electron/secret-store.cjs").createEncryptedSecretStore({
     filePath: path.join(app.getPath("userData"), "service-settings.enc.json"),
     safeStorage: require("electron").safeStorage,
   }).write(require("../electron/settings.cjs").normalize({
-    aiProvider: "deepseek", deepseek: { apiKey: "synthetic-test-placeholder", model: "synthetic" },
+    aiProvider: "deepseek", mineru: { apiKey: "synthetic-mineru-placeholder" }, deepseek: { apiKey: "synthetic-test-placeholder", model: "synthetic" },
   })));
   dialog.showSaveDialog = async () => ({ canceled: false, filePath: process.env.ZHIYAN_AGENT_DOCUMENT_OUTPUT });
   require("../electron/main.cjs");
@@ -101,7 +125,7 @@ if (process.versions.electron) {
   const { _electron } = require("playwright");
   const assert = require("node:assert/strict");
   const root = path.resolve(__dirname, "..");
-  const output = path.join(root, "out", "research-agent-checks");
+  const output = path.join(root, "out", "research-agent-checks", process.argv.includes("--dark") ? "dark" : "light");
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), "zhiyan-agent-"));
   const savedDocument = path.join(userData, "reading-note.md");
   fs.mkdirSync(output, { recursive: true });
@@ -126,44 +150,62 @@ if (process.versions.electron) {
     return [...Buffer.from(data)];
   }
   (async () => {
-    const electron = await _electron.launch({
+    const launchOptions = {
       executablePath: require("electron"),
       args: [__filename, "--force-device-scale-factor=1", "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding"],
       cwd: root,
       env: { ...process.env, ZHIYAN_AGENT_USER_DATA: userData, ZHIYAN_AGENT_DOCUMENT_OUTPUT: savedDocument },
-    });
-    const page = await electron.firstWindow();
+    };
+    let electron = await _electron.launch(launchOptions);
+    let page = await electron.firstWindow();
     page.setDefaultTimeout(15000);
     page.on("pageerror", (error) => report.errors.push(error.message));
     async function send(question) {
-      await page.getByLabel("向研究 Agent 提问").fill(question);
-      await page.getByRole("button", { name: "发送给研究 Agent", exact: true }).click({ timeout: 60000 });
+      await page.getByLabel("向篇篇提问").fill(question);
+      await page.getByRole("button", { name: "发送给篇篇", exact: true }).click({ timeout: 60000 });
+    }
+    async function waitReady() {
+      // A fresh real Pi worker imports its SDK; loaded Windows CI machines can
+      // exceed the ordinary interaction timeout without an application error.
+      await page.getByText("就绪", { exact: true }).waitFor({ timeout: 60000 });
     }
     async function capture(name) {
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       const image = await electron.evaluate(async ({ BrowserWindow }) =>
         (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString("base64"));
       fs.writeFileSync(path.join(output, name), Buffer.from(image, "base64"));
     }
     try {
       await page.waitForSelector(".workspace-shell");
+      assert.equal(await page.title(), "篇篇");
+      assert.equal(await electron.evaluate(({ app }) => app.getName()), "篇篇");
+      assert.equal(path.resolve(await electron.evaluate(({ app }) => app.getPath("userData"))).toLowerCase(), path.resolve(userData).toLowerCase());
+      await page.waitForFunction(() => [...document.querySelectorAll("img.pianpian")].every((image) => image.complete && image.naturalWidth > 0));
+      report.checks.push("Pianpian desktop identity, isolated userData and generated mascot resources load correctly");
       if (process.argv.includes("--dark")) {
         await page.getByRole("button", { name: "切换为深色模式", exact: true }).click();
         assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
         report.checks.push("Research workflow runs in the user-selected dark theme");
       }
-      await page.getByRole("button", { name: "打开研究助手", exact: true }).click();
-      await page.getByText("从这篇论文开始研究", { exact: true }).waitFor();
-      await page.locator(".research-skills summary").waitFor();
-      await page.locator(".research-skills summary").click();
+      await page.getByRole("button", { name: "问问篇篇", exact: true }).click();
+      await page.getByText("你的文献，我们一起理一理。", { exact: true }).waitFor();
+      assert((await page.locator(".research-conversation-toolbar").boundingBox()).height <= 56);
+      const conversationBounds = await page.locator(".research-agent-scroll").boundingBox();
+      await capture("00-global-empty.png");
+      await page.getByRole("button", { name: "篇篇的拿手活", exact: true }).click();
       assert.equal(await page.locator(".research-skills-list button").count(), 3);
+      assert.deepEqual(await page.locator(".research-agent-scroll").boundingBox(), conversationBounds);
+      await capture("00-global-skills.png");
       await page.getByRole("button", { name: "论文精读", exact: true }).click();
-      assert((await page.getByLabel("向研究 Agent 提问").inputValue()).includes("精读当前论文"));
+      assert((await page.getByLabel("向篇篇提问").inputValue()).includes("精读当前论文"));
+      assert.equal(await page.locator(".research-skills-list").count(), 0);
       await capture("01-research-workspace.png");
-      report.checks.push("Three bundled skills are discoverable and populate their Chinese workflow prompts");
+      report.checks.push("One 52px toolbar replaces stacked headers; skills float without moving the conversation and close after populating the composer");
       await send("查找相关论文");
-      await page.locator('[aria-label="工具：检索公开文献"] .research-tool-heading').click();
+      await page.locator('[aria-label="工具：查找相关论文"] .research-tool-heading').click();
       await page.locator(".research-result-item").first().waitFor();
-      await page.getByRole("button", { name: "发送给研究 Agent" }).waitFor();
+      await page.locator('[aria-label="停止回答"]').waitFor({ state: "detached" });
+      await page.getByRole("button", { name: "发送给篇篇", exact: true }).waitFor();
       assert.equal(await page.locator(".research-message.is-user").count(), 1);
       assert.equal(await page.locator(".research-result-item").count(), 2);
       await capture("02-tool-chain.png");
@@ -174,27 +216,54 @@ if (process.versions.electron) {
       await page.getByRole("button", { name: "确认加入", exact: true }).scrollIntoViewIfNeeded();
       await capture("03-confirmation.png");
       await page.getByRole("button", { name: "确认加入", exact: true }).click();
-      await page.getByRole("button", { name: "发送给研究 Agent" }).waitFor();
+      await page.locator('[aria-label="停止回答"]').waitFor({ state: "detached" });
+      await page.getByRole("button", { name: "发送给篇篇", exact: true }).waitFor();
       const entries = await page.evaluate(() => JSON.parse(localStorage.getItem("zhiyan-workbench.papers.v1")));
       assert.equal(entries.length, 1);
       assert.equal(entries[0].recordType, "reference");
       report.checks.push("Confirmed tool writes one reference record to the real local library");
 
+      await page.getByRole("button", { name: "历史对话", exact: true }).click();
+      await page.getByRole("button", { name: /重命名对话/ }).first().click();
+      await page.getByLabel("对话标题", { exact: true }).fill("全库主题研究");
+      await page.locator(".research-history form").getByRole("button", { name: "保存", exact: true }).click();
+      await page.getByRole("button", { name: "新建", exact: true }).click();
+      await page.getByText("你的文献，我们一起理一理。", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "历史对话", exact: true }).click();
+      await page.locator(".research-history-select").filter({ hasText: "全库主题研究" }).click();
+      await page.locator(".research-message.is-user").filter({ hasText: "查找相关论文" }).waitFor();
+      await waitReady();
+      await send("查找更多相关论文");
+      await page.waitForFunction(() => !document.querySelector('[aria-label="停止回答"]'));
+      const restoredRequest = await electron.evaluate(() => globalThis.agentTestRequests.at(-1));
+      assert(restoredRequest.some((item) => item.role === "user" && String(item.content).includes("查找相关论文")));
+      assert(restoredRequest.some((item) => item.role === "assistant" && JSON.stringify(item.content).includes("已完成")));
+      await capture("10-conversation-history.png");
+      report.checks.push("History supports rename, new and one-click restore; restored user AND assistant messages reach the real Pi model request without replaying tools");
+      await page.getByRole("button", { name: "新建", exact: true }).click();
+      await page.getByText("你的文献，我们一起理一理。", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "历史对话", exact: true }).click();
+      await page.getByRole("button", { name: /删除对话：全库主题研究/ }).click();
+      await page.getByRole("button", { name: "确认删除", exact: true }).click();
+      await page.locator(".research-history-select").filter({ hasText: "全库主题研究" }).waitFor({ state: "detached" });
+      await page.getByRole("button", { name: "历史对话", exact: true }).click();
+      report.checks.push("Delete is confirmed and removes the persisted history without replaying pending actions");
+
       await send("把第1篇加入文献库");
       await page.getByRole("button", { name: "拒绝", exact: true }).click();
-      await page.getByRole("button", { name: "发送给研究 Agent" }).waitFor();
+      await page.getByRole("button", { name: "发送给篇篇" }).waitFor();
       assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("zhiyan-workbench.papers.v1")).length), 1);
       report.checks.push("Rejected write leaves the library unchanged");
 
       await send("把第1篇加入文献库");
       await page.getByRole("button", { name: "确认加入", exact: true }).waitFor();
-      await page.getByRole("button", { name: "停止 Agent", exact: true }).click();
-      await page.getByRole("button", { name: "发送给研究 Agent" }).waitFor();
+      await page.getByRole("button", { name: "停止回答", exact: true }).click();
+      await page.getByRole("button", { name: "发送给篇篇" }).waitFor();
       report.checks.push("Stop cancels a pending approval without hanging");
 
       await send("生成一份阅读笔记文档");
       await page.getByRole("button", { name: "保存 Markdown 文档", exact: true }).click();
-      await page.waitForFunction(() => !document.querySelector('[aria-label="停止 Agent"]'));
+      await page.waitForFunction(() => !document.querySelector('[aria-label="停止回答"]'));
       assert(fs.readFileSync(savedDocument, "utf8").includes("# 阅读笔记"));
       await capture("04-document.png");
       report.checks.push("Generated Markdown is saved through Electron's native save boundary");
@@ -224,7 +293,12 @@ if (process.versions.electron) {
         element.scrollTop = element.scrollHeight;
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       });
-      await page.getByRole("button", { name: "发送给研究 Agent" }).waitFor();
+      await page.locator('[aria-label="停止回答"]').waitFor({ state: "detached" });
+      await page.getByRole("button", { name: "发送给篇篇", exact: true }).waitFor();
+      await page.waitForFunction(() => {
+        const element = document.querySelector(".research-agent-scroll");
+        return element.scrollHeight - element.clientHeight - element.scrollTop < 3;
+      });
       const tailGap = await page.locator(".research-agent-scroll").evaluate((element) =>
         element.scrollHeight - element.clientHeight - element.scrollTop);
       assert(tailGap < 3);
@@ -249,7 +323,7 @@ if (process.versions.electron) {
       const fixture = await page.evaluate(async (bytes) => {
         const saved = await window.zhiyan.invoke("zhiyan:documents:save", { name: "research-agent-fixture.pdf", data: new Uint8Array(bytes) });
         const paper = { id: saved.id, originalId: saved.id, title: "Research Agent Fixture", authors: ["Synthetic Team"], year: 2026,
-          sourcePath: `local://${saved.id}`, importedAt: "2026-10-12", tags: [], favorite: false, blocks: 2,
+          sourcePath: `local://${saved.id}`, importedAt: "2026-10-12", groupId: "group-inbox", favorite: false, blocks: 2,
           parseVersion: 2, parseStatus: "ready", pageCount: 1, blockData: [
             { id: "agent-fixture-paragraph", kind: "paragraph", pageNumber: 1, order: 0,
               text: "The model uses attention to select useful features.", bbox: [.09, .14, .92, .17] },
@@ -264,14 +338,49 @@ if (process.versions.electron) {
       await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 950));
       await page.reload();
       await page.locator(".paper-row").filter({ hasText: "Research Agent Fixture" }).click();
+      await page.getByRole("button", { name: "编辑文献", exact: true }).click();
+      const editDialog = page.getByRole("dialog", { name: "编辑文献", exact: true });
+      const yearBounds = await page.locator("#paper-year").boundingBox();
+      const groupBounds = await page.locator("#paper-group").boundingBox();
+      assert.equal(yearBounds.height, groupBounds.height);
+      assert(Math.abs(yearBounds.y - groupBounds.y) < 2);
+      assert(groupBounds.width > 200);
+      await capture("13-paper-edit.png");
+      await page.getByRole("button", { name: "在编辑文献中创建分组", exact: true }).click();
+      assert.equal(await page.getByRole("dialog").count(), 1);
+      await page.getByRole("textbox", { name: "新分组名称", exact: true }).fill("研究方法");
+      assert.equal((await page.getByRole("button", { name: "确认创建分组", exact: true }).boundingBox()).height, yearBounds.height);
+      assert.equal((await page.getByRole("button", { name: "取消创建分组", exact: true }).boundingBox()).height, yearBounds.height);
+      await capture("14-inline-group.png");
+      await page.getByRole("button", { name: "确认创建分组", exact: true }).click();
+      assert.equal(await page.locator("#paper-group option:checked").innerText(), "研究方法");
+      await page.getByRole("button", { name: "保存文献", exact: true }).click();
+      await editDialog.waitFor({ state: "detached" });
+      assert.equal(await page.getByRole("button", { name: "分组：研究方法", exact: true }).count(), 1);
+      report.checks.push("Paper editor aligns year and group controls at 42px; inline group creation selects and persists the group without a second dialog");
       await page.getByRole("button", { name: "打开阅读", exact: true }).click();
       await page.waitForSelector('.pdf-page-stage[data-rendered="true"]');
-      await page.getByRole("tab", { name: "研究对话", exact: true }).click();
-      await page.getByText("就绪", { exact: true }).waitFor();
+      await page.getByRole("tab", { name: "聊聊", exact: true }).click();
+      await waitReady();
+      assert((await page.locator(".research-conversation-toolbar").boundingBox()).height <= 56);
+      const readerBounds = await page.locator(".research-agent-scroll").boundingBox();
+      await capture("15-reader-empty.png");
+      await page.getByRole("button", { name: "篇篇的拿手活", exact: true }).click();
+      assert.deepEqual(await page.locator(".research-agent-scroll").boundingBox(), readerBounds);
+      const pickerBounds = await page.locator(".research-skills").boundingBox();
+      assert(pickerBounds.x + pickerBounds.width <= await page.evaluate(() => innerWidth));
+      await capture("16-reader-skills.png");
+      await page.keyboard.press("Escape");
+      assert.equal(await page.getByRole("button", { name: "篇篇的拿手活", exact: true }).evaluate((button) => document.activeElement === button), true);
+      await page.getByRole("button", { name: "篇篇的拿手活", exact: true }).click();
+      await page.getByRole("tab", { name: "读懂这段", exact: true }).click();
+      await page.getByRole("tab", { name: "聊聊", exact: true }).click();
+      assert.equal(await page.locator(".research-skills").count(), 0);
+      report.checks.push("Reader floating pickers stay within the sidebar, return focus on Escape, and dismiss when switching tabs without restarting the Agent");
       await send("概括这篇论文，序号验收");
       await page.locator(".research-inline-citation").first().waitFor();
       assert.equal(await page.locator(".research-inline-citation").first().textContent(), "[1]");
-      await page.waitForFunction(() => !document.querySelector('[aria-label="停止 Agent"]'));
+      await page.waitForFunction(() => !document.querySelector('[aria-label="停止回答"]'));
       assert.deepEqual(await page.locator(".research-inline-citation").allTextContents(), ["[1]", "[2]", "[1]"]);
       assert.equal(await page.locator(".research-citations, .research-message-citations, .research-citation-excerpt").count(), 0);
       assert(!/第\s*\d+\s*页/.test(await page.locator(".research-assistant-panel").innerText()));
@@ -284,7 +393,7 @@ if (process.versions.electron) {
       await page.waitForSelector("#pdf-block-agent-fixture-evaluation.is-focus-flash", { state: "detached" });
       report.checks.push("Inline citations number first visible mentions as [1], [2], [1] without pages, excerpts or footer lists; clicking highlights the correct same-page source briefly");
       await send("这个实验方法有什么限制？");
-      await page.getByRole("button", { name: "发送给研究 Agent" }).waitFor();
+      await page.getByRole("button", { name: "发送给篇篇" }).waitFor();
       assert.equal(await page.locator(".research-message.is-user").count(), 2);
       assert.equal(await page.locator(".research-message.is-assistant").count(), 2);
       const nextCitation = page.locator(".research-message.is-assistant .research-inline-citation").last();
@@ -295,13 +404,55 @@ if (process.versions.electron) {
       assert(await page.locator('.pdf-page-stage[data-rendered="true"]').isVisible());
       await capture("06-reader-agent.png");
       report.checks.push("Reader restarts citation numbers in the next answer and supports keyboard-activated block navigation with the original PDF visible");
+      const paperHistory = await page.evaluate((paperId) => window.zhiyan.invoke("zhiyan:agent:conversations:list", { scope: "paper", paperId }), fixture.id);
+      assert.equal(paperHistory.length, 1);
+      assert.equal(paperHistory[0].messageCount, 4);
+      await page.reload();
+      await page.locator(".paper-row").filter({ hasText: "Research Agent Fixture" }).click();
+      await page.getByRole("button", { name: "问问篇篇", exact: true }).click();
+      assert.equal(await page.locator(".research-message.is-user").filter({ hasText: "概括这篇论文" }).count(), 0);
+      await send("全库检索验收：从已解析正文查找消融实验");
+      await page.waitForFunction(() => !document.querySelector('[aria-label="停止回答"]'));
+      await page.locator(".research-message.is-assistant .research-inline-citation").last().waitFor();
+      await page.getByRole("button", { name: "历史对话", exact: true }).click();
+      await page.getByLabel("搜索历史对话").fill("全库检索验收");
+      await page.waitForFunction(() => document.querySelectorAll(".research-history-select").length === 1);
+      await capture("11-global-local-retrieval.png");
+      await page.locator(".research-message.is-assistant .research-inline-citation").last().click();
+      await page.waitForSelector("#pdf-block-agent-fixture-evaluation.is-focus-flash");
+      await page.getByRole("tab", { name: "聊聊", exact: true }).click();
+      await waitReady();
+      assert.equal(await page.locator(".research-message.is-user").count(), 2);
+      assert.equal(await page.locator(".research-message.is-user").filter({ hasText: "全库检索验收" }).count(), 0);
+      report.checks.push("Reload retains paper history; homepage stays global despite a selected paper, searches parsed body, and navigates a paper-qualified citation while keeping both histories isolated");
       assert.deepEqual(report.errors, []);
       assert.equal(await electron.evaluate(() => globalThis.agentRemoteRequests), 0);
+      await electron.close();
+      electron = await _electron.launch(launchOptions);
+      page = await electron.firstWindow();
+      page.setDefaultTimeout(15000);
+      page.on("pageerror", (error) => report.errors.push(error.message));
+      await page.waitForSelector(".workspace-shell");
+      await page.getByRole("button", { name: "问问篇篇", exact: true }).click();
+      await page.locator(".research-message.is-user").filter({ hasText: "全库检索验收" }).waitFor();
+      await waitReady();
+      await send("重启后继续查找相关论文");
+      await page.waitForFunction(() => !document.querySelector('[aria-label="停止回答"]'));
+      const restartedRequest = await electron.evaluate(() => globalThis.agentTestRequests.at(-1));
+      assert(restartedRequest.some((item) => item.role === "user" && String(item.content).includes("全库检索验收")));
+      assert(restartedRequest.some((item) => item.role === "assistant" && JSON.stringify(item.content).includes("本地消融实验证据")));
+      assert.deepEqual(report.errors, []);
+      assert.equal(await electron.evaluate(() => globalThis.agentRemoteRequests), 0);
+      await capture("12-restarted-history.png");
+      report.checks.push("Closing and relaunching the real Electron process retains history and restores previous user and assistant text into the next model request");
       report.status = "passed";
+      report.lifecycle = await electron.evaluate(() => globalThis.agentLifecycle);
       console.log(JSON.stringify(report, null, 2));
     } catch (error) {
       report.status = "failed";
       report.error = error.message;
+      report.stack = error.stack;
+      report.lifecycle = await electron.evaluate(() => globalThis.agentLifecycle);
       report.requests = await electron.evaluate(() => globalThis.agentTestRequests);
       await capture("failure.png");
       console.error(error.message);

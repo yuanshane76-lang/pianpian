@@ -1,6 +1,6 @@
 # 参与开发
 
-这是纸研工作台的私有开发仓库。开始之前，请先阅读 [AGENTS.md](AGENTS.md)。
+这是篇篇的私有开发仓库。开始之前，请先阅读 [AGENTS.md](AGENTS.md)。
 
 仓库所有者本机的正式路径为 `D:\Desktop\grade4\workspace\zhiyan`。协作者可以克隆到自己的任意目录，源码和验证脚本不得依赖维护者电脑上的绝对路径。
 
@@ -67,8 +67,8 @@ git worktree add -b fix/pdf-selection ../zhiyan-pdf-selection origin/main
 | `npm run check:credentials` | 检查常见凭据格式及当前分支历史，不打印密钥 |
 | `npm run check` | 凭据检查、测试、TypeScript 检查和前端构建 |
 | `npm run test:pi-agent:smoke` | 真实 Pi SDK、本地合成 SSE 和文献元数据，验证预置 Skill 按需读取与产品工具调用；禁止外部请求 |
-| `npm run test:research-agent:e2e` | 隔离 Electron、本地合成 SSE，验证预置技能入口、工具确认、文档导出、长文流式滚动和窗口尺寸变化 |
-| `node scripts/packaged-research-skills-e2e.cjs <解压后的 Zhiyan.exe 路径>` | 验证 Windows 压缩包内的三个 Skill、已打包 Pi 工具循环及无密钥的中文技能入口；使用隔离用户目录与合成服务 |
+| `npm run test:research-agent:e2e` | 隔离 Electron、本地合成 SSE，验证紧凑工具栏与技能浮层、编辑文献内嵌分组创建、历史增删改查/恢复模型上下文、双范围隔离、引用定位、工具确认、文档导出和流式滚动；追加 `-- --dark` 验证深色界面，截图按 light/dark 分别保存 |
+| `node scripts/packaged-research-skills-e2e.cjs <解压后的 Pianpian.exe 路径>` | 验证 Windows 压缩包内的三个 Skill、已打包 Pi 工具循环及无密钥的中文技能入口；使用隔离用户目录与合成服务 |
 | `npm run make:win` | 验证后生成 Windows x64 免安装压缩包 |
 
 启动 `npm run dev` 后，可另开终端执行桌面检查：
@@ -77,7 +77,7 @@ git worktree add -b fix/pdf-selection ../zhiyan-pdf-selection origin/main
 | --- | --- |
 | `node scripts/mineru-gate-e2e.cjs` | 隔离文献库、合成 PDF 和模拟 MinerU：验证强制解析门禁、真实阶段进度、下载持久化与重启恢复，不调用真实服务 |
 | `node scripts/desktop-e2e.cjs` | 临时空用户目录：验证中文壳、配置和 IPC；无需密钥和论文，禁止外部服务请求 |
-| `node scripts/theme-e2e.cjs` | 构建后使用合成 PDF 和隔离桌面目录，验证深浅主题、重启保留、新配置与研究助手界面、PDF 白底；禁止外部请求 |
+| `node scripts/theme-e2e.cjs` | 构建后使用合成 PDF 和隔离桌面目录，验证深浅主题、重启保留、新配置与篇篇界面、PDF 白底；禁止外部请求 |
 | `npm run test:library-viewport:e2e` | 隔离桌面目录和合成文献条目，验证启动窗口适配工作区、多种窗口尺寸下配置与主题入口可见可点击，以及列表、标签与详情独立滚动；禁止外部请求 |
 | `node scripts/research-agent-e2e.cjs --dark` | 构建后在深色界面验证真实 Pi SDK 的多轮工具链、确认写入、Markdown 导出、流式滚动与原文引用；模型及检索使用本地合成响应，不调用外部服务 |
 | `npm run test:paragraph-vocabulary:e2e` | 合成 PDF、模拟 SSE 与隔离桌面用户目录：验证段落词汇、单词表、Markdown、摘要和图表流式显示、定位提示及多种窗口尺寸；不调用真实模型服务 |

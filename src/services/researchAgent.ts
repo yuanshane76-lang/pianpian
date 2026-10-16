@@ -3,20 +3,23 @@ import { getDesktopBridge } from "../platform/electron";
 import { normalizeResearchAgentEvent, normalizeResearchAgentSkills, type ResearchAgentEvent, type ResearchAgentMessage, type ResearchAgentPaperSummary, type ResearchAgentSkill } from "./researchAgentProtocol";
 
 export interface ResearchAgentContext {
+  scope?: "paper" | "library";
+  conversationId?: string;
   paper: {
     id: string;
     title: string;
     authors: string[];
     year: number | null;
     blocks: Array<{ id: string; pageNumber: number; text: string }>;
-  };
-  library: Array<{ id: string; title: string; authors: string[]; year: number | null; doi?: string }>;
+  } | null;
+  library: Array<{ id: string; originalId?: string; title: string; authors: string[]; year: number | null; doi?: string }>;
 }
 
-export function createResearchAgentContext(paper: PaperRecord, library: PaperRecord[]): ResearchAgentContext {
+export function createResearchAgentContext(paper: PaperRecord, library: PaperRecord[], scope: "paper" | "library" = "paper"): ResearchAgentContext {
   let remaining = 500_000;
   return {
-    paper: {
+    scope,
+    paper: scope === "paper" ? {
       id: paper.id,
       title: paper.title,
       authors: paper.authors,
@@ -26,9 +29,10 @@ export function createResearchAgentContext(paper: PaperRecord, library: PaperRec
         remaining -= text.length;
         return { id: block.id, pageNumber: block.pageNumber, text };
       }).filter((block) => block.text),
-    },
-    library: library.slice(0, 500).map((item) => ({
+    } : null,
+    library: library.map((item) => ({
       id: item.id,
+      originalId: item.originalId,
       title: item.title,
       authors: item.authors,
       year: item.year,
@@ -46,7 +50,10 @@ export function subscribeToResearchAgent(onEvent: (event: ResearchAgentEvent) =>
   if (!bridge?.on) return () => undefined;
   return bridge.on("zhiyan:agent:event", (payload) => {
     let event: ResearchAgentEvent;
-    try { event = normalizeResearchAgentEvent(payload); }
+    try {
+      event = normalizeResearchAgentEvent(payload);
+      if (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).conversationId === "string") event.conversationId = (payload as { conversationId: string }).conversationId;
+    }
     catch {
       const source = payload && typeof payload === "object" ? payload as Record<string, any> : {};
       const id = source.tool?.id ?? source.toolCallId;
@@ -66,7 +73,7 @@ export function subscribeToResearchAgent(onEvent: (event: ResearchAgentEvent) =>
 
 export async function startResearchAgent(context: ResearchAgentContext): Promise<{ sessionId: string }> {
   const bridge = getDesktopBridge();
-  if (!bridge?.on) throw new Error("研究 Agent 需要在纸研桌面端中使用");
+  if (!bridge?.on) throw new Error("篇篇对话需要在桌面端中使用");
   return bridge.invoke("zhiyan:agent:start", context);
 }
 
@@ -88,11 +95,38 @@ export async function updateResearchAgentContext(context: ResearchAgentContext):
   await bridge.invoke("zhiyan:agent:update-context", context);
 }
 
-export async function abortResearchAgent(): Promise<void> {
+export async function abortResearchAgent(conversationId?: string): Promise<void> {
   const bridge = getDesktopBridge();
   if (!bridge) return;
-  await bridge.invoke("zhiyan:agent:abort");
+  if (conversationId) await bridge.invoke("zhiyan:agent:abort", { conversationId });
+  else await bridge.invoke("zhiyan:agent:abort");
 }
+
+export type ConversationScope = { scope: "library" } | { scope: "paper"; paperId: string; paperTitle?: string };
+export type ResearchTimelineItem = { type: "message"; message: ResearchAgentMessage } | { type: "tool"; tool: import("./researchAgentProtocol").ResearchAgentToolCall };
+export interface ConversationSummary {
+  id: string; scope: "paper" | "library"; paperId?: string; title: string; updatedAt: number; messageCount: number; preview: string;
+}
+export interface ResearchConversation extends ConversationSummary { timeline: ResearchTimelineItem[] }
+async function historyCall<T>(action: string, input: unknown): Promise<T> {
+  const bridge = getDesktopBridge();
+  if (!bridge) throw new Error("对话历史需要在篇篇桌面端中使用");
+  return bridge.invoke<T>(`zhiyan:agent:conversations:${action}`, input);
+}
+function normalizeConversation(value: ResearchConversation): ResearchConversation {
+  if (!value || typeof value.id !== "string" || !Array.isArray(value.timeline)) throw new Error("对话历史格式无效");
+  return { ...value, timeline: value.timeline.map((item) => {
+    const event = normalizeResearchAgentEvent(item.type === "message" ? { type: "message_end", message: item.message } : { type: "tool_end", tool: item.tool });
+    if (event.type === "message_end") return { type: "message", message: event.message };
+    if (event.type === "tool_end") return { type: "tool", tool: event.tool };
+    throw new Error("对话历史条目无效");
+  }) };
+}
+export const listResearchConversations = (scope: ConversationScope, query = "") => historyCall<ConversationSummary[]>("list", { ...scope, query });
+export const createResearchConversation = async (scope: ConversationScope) => normalizeConversation(await historyCall<ResearchConversation>("create", { ...scope, reuseEmpty: true }));
+export const getResearchConversation = async (id: string) => normalizeConversation(await historyCall<ResearchConversation>("get", id));
+export const renameResearchConversation = (id: string, title: string) => historyCall<ConversationSummary>("rename", { id, title });
+export const deleteResearchConversation = (id: string) => historyCall<boolean>("delete", id);
 
 export async function approveResearchAgent(input: {
   approvalId: string;

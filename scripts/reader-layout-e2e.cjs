@@ -158,7 +158,7 @@ if (process.versions.electron) {
       await page.evaluate(() => window.getSelection().removeAllRanges());
 
       const left = page.getByRole("separator", { name: "调整目录宽度" });
-      const right = page.getByRole("separator", { name: "调整研究助手宽度" });
+      const right = page.getByRole("separator", { name: "调整篇篇侧栏宽度" });
       await drag(left, 80);
       await drag(right, -80);
       const bounds = await expectFit(1440);

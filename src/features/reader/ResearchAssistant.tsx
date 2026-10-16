@@ -1,5 +1,5 @@
-import { BookOpen, Check, ChevronDown, FileText, LoaderCircle, RotateCcw, Search, Send, Sparkles, Square, Wrench, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { BookOpen, Check, ChevronDown, FileText, History, LoaderCircle, Plus, Pencil, Trash2, RotateCcw, Search, Send, Sparkles, Square, Wrench, X } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { PaperRecord } from "../../domain/library";
 import { currentPaperCitations } from "../../domain/paperCitations";
 import {
@@ -11,12 +11,15 @@ import {
   startResearchAgent,
   subscribeToResearchAgent,
   updateResearchAgentContext,
+  listResearchConversations, createResearchConversation, getResearchConversation, renameResearchConversation, deleteResearchConversation,
+  type ConversationSummary, type ConversationScope,
 } from "../../services/researchAgent";
 import type { ResearchAgentEvent, ResearchAgentMessage, ResearchAgentPaperSummary, ResearchAgentSkill, ResearchAgentToolCall } from "../../services/researchAgentProtocol";
 import { getDesktopBridge } from "../../platform/electron";
 import { MarkdownContent } from "./MarkdownContent";
 import { useConversationScroll } from "./useConversationScroll";
 import "./ResearchAssistant.css";
+import { Pianpian } from "../../brand/Pianpian";
 
 interface ResearchDocument {
   title: string;
@@ -24,14 +27,17 @@ interface ResearchDocument {
 }
 
 interface ResearchAssistantProps {
+  scope?: "paper" | "library";
   paper: PaperRecord;
   library: PaperRecord[];
   onAddPaper: (paper: ResearchAgentPaperSummary) => { id: string; duplicate: boolean } | void;
   onJump: (blockId: string) => void;
+  onJumpPaper?: (paperId: string, blockId: string) => void;
   onSaveDocument?: (document: ResearchDocument) => void;
   available: boolean;
   configurationRevision?: string;
   onOpenSettings: () => void;
+  active?: boolean;
 }
 
 type TimelineItem =
@@ -39,12 +45,12 @@ type TimelineItem =
   | { type: "tool"; tool: ResearchAgentToolCall };
 
 const toolLabels: Record<string, string> = {
-  read_research_skill: "读取预置研究技能",
-  read_current_paper: "读取当前论文",
-  search_library: "搜索本地文献库",
-  search_literature: "检索公开文献",
-  add_paper_to_library: "请求加入文献库",
-  create_document: "生成 Markdown 文档",
+  read_research_skill: "选择阅读方法",
+  read_current_paper: "阅读论文原文",
+  search_library: "在文献库里找线索",
+  search_literature: "查找相关论文",
+  add_paper_to_library: "确认加入文献库",
+  create_document: "整理阅读笔记",
 };
 
 function toolStatus(status: ResearchAgentToolCall["status"]) {
@@ -84,7 +90,7 @@ function ToolCard({ tool, approvalPaper, onApprove, onReject, onSaveDocument }: 
     : document?.title ?? tool.input.title ?? "";
 
   return (
-    <article className={`research-tool-card is-${tool.status}`} aria-label={`工具：${tool.label}`}>
+    <article className={`research-tool-card is-${tool.status}`} aria-label={`工具：${toolLabels[tool.name] ?? tool.label}`}>
       <button className="research-tool-heading" type="button" onClick={() => setExpanded((current) => !current)} aria-expanded={expanded}>
         <span className="research-tool-icon">{tool.status === "running" ? <LoaderCircle className="spin" size={14} />
           : tool.status === "completed" ? <Check size={14} /> : tool.status === "failed" ? <X size={14} /> : <Icon size={14} />}</span>
@@ -137,7 +143,7 @@ function updateTimeline(items: TimelineItem[], next: TimelineItem): TimelineItem
   return items.map((item, itemIndex) => itemIndex === index ? next : item);
 }
 
-export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDocument, available, onOpenSettings, configurationRevision }: ResearchAssistantProps) {
+export function ResearchAssistant({ paper, library, scope = "paper", onAddPaper, onJump, onJumpPaper, onSaveDocument, available, onOpenSettings, configurationRevision, active = true }: ResearchAssistantProps) {
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [question, setQuestion] = useState("");
   const [busy, setBusy] = useState(false);
@@ -146,11 +152,28 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
   const [approvalByToolId, setApprovalByToolId] = useState<Record<string, { approvalId: string; paper: ResearchAgentPaperSummary }>>({});
   const [streaming, setStreaming] = useState<Record<string, string>>({});
   const [skills, setSkills] = useState<ResearchAgentSkill[]>([]);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [openMenu, setOpenMenu] = useState<"history" | "skills" | null>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const historyButtonRef = useRef<HTMLButtonElement>(null);
+  const skillsButtonRef = useRef<HTMLButtonElement>(null);
+  const questionRef = useRef<HTMLTextAreaElement>(null);
+  const menuId = useId();
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [activeTitle, setActiveTitle] = useState("新对话");
+  const [selection, setSelection] = useState<{ id?: string; fresh?: boolean; sequence: number }>({ sequence: 0 });
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameTitle, setRenameTitle] = useState("");
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const conversationId = useRef<string | undefined>();
+  const conversationScope = useMemo<ConversationScope>(() => scope === "library" ? { scope } : { scope, paperId: paper.id, paperTitle: paper.title }, [scope, paper.id, paper.title]);
   const { scrollRef, contentRef, onScroll, followLatest } = useConversationScroll([timeline, streaming, error]);
   const lastQuestion = useRef("");
-  const paperContext = useMemo(() => createResearchAgentContext(paper, library), [
+  const paperContext = useMemo(() => createResearchAgentContext(paper, library, scope), [
+    scope,
     paper.id, paper.title, paper.authors, paper.year, paper.blockData,
-    library.map((item) => `${item.id}:${item.title}:${item.doi ?? ""}:${item.year ?? ""}`).join("|"),
+    library.map((item) => `${item.id}:${item.title}:${item.doi ?? ""}:${item.year ?? ""}:${item.originalId ?? ""}`).join("|"),
   ]);
   const startedRef = useRef(false);
   const latestContext = useRef(paperContext);
@@ -159,6 +182,52 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
   const sessionEpoch = useRef(0);
   const activeApprovals = useRef(approvalByToolId);
   const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (!openMenu) return;
+    const toolbar = toolbarRef.current;
+    toolbar?.querySelector<HTMLElement>(openMenu === "history" ? 'input[aria-label="搜索历史对话"]' : ".research-skills-list button")?.focus();
+    function dismissOutside(event: PointerEvent) {
+      if (event.target instanceof Node && !toolbar?.contains(event.target)) setOpenMenu(null);
+    }
+    function dismissOnFocus(event: FocusEvent) {
+      if (event.target instanceof Node && !toolbar?.contains(event.target)) setOpenMenu(null);
+    }
+    function dismissOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpenMenu(null);
+      (openMenu === "history" ? historyButtonRef : skillsButtonRef).current?.focus();
+    }
+    document.addEventListener("pointerdown", dismissOutside);
+    document.addEventListener("focusin", dismissOnFocus);
+    document.addEventListener("keydown", dismissOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOutside);
+      document.removeEventListener("focusin", dismissOnFocus);
+      document.removeEventListener("keydown", dismissOnEscape);
+    };
+  }, [openMenu]);
+  useEffect(() => {
+    if (active) return;
+    setOpenMenu(null);
+    if (toolbarRef.current?.contains(document.activeElement)) {
+      (document.activeElement as HTMLElement).blur();
+    }
+  }, [active]);
+  useEffect(() => { setOpenMenu(null); }, [scope, paper.id]);
+  async function refreshHistory(query = historyQuery) {
+    const items = await listResearchConversations(conversationScope, query);
+    setConversations(items);
+    const active = items.find((item) => item.id === conversationId.current);
+    if (active) setActiveTitle(active.title);
+  }
+  useEffect(() => {
+    let disposed = false;
+    const timer = setTimeout(() => { void listResearchConversations(conversationScope, historyQuery).then((items) => {
+      if (!disposed) setConversations(items);
+    }).catch((reason) => { if (!disposed) setError(reason instanceof Error ? reason.message : "历史搜索失败"); }); }, 180);
+    return () => { disposed = true; clearTimeout(timer); };
+  }, [conversationScope, historyQuery]);
 
   useEffect(() => {
     let disposed = false;
@@ -172,14 +241,16 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
     setSavedNotice(null);
     setApprovalByToolId({});
     setStreaming({});
+    setHistoryLoading(true);
     followLatest();
     void getResearchAgentSkills().then((catalogue) => {
       if (!disposed) setSkills(catalogue);
     }).catch(() => {
-      if (!disposed) setError("预置研究技能无法加载，请重新打开研究助手");
+      if (!disposed) setError("篇篇的拿手活无法加载，请重新打开对话");
     });
     const unsubscribe = subscribeToResearchAgent((event: ResearchAgentEvent) => {
       if (disposed) return;
+      if (event.conversationId && event.conversationId !== conversationId.current) return;
       if (event.type === "session_started" && event.skills) setSkills(event.skills);
       if (event.type === "message_start") setTimeline((current) => updateTimeline(current, { type: "message", message: event.message }));
       if (event.type === "message_delta") {
@@ -231,18 +302,37 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
         setApprovalByToolId({});
         setTimeline((current) => current.map((item) => item.type === "tool" && ["queued", "running", "awaiting_approval"].includes(item.tool.status)
           ? { ...item, tool: { ...item.tool, status: "rejected", error: "执行已结束" } } : item));
+        void refreshHistory().catch((reason) => { if (!disposed) setError(reason instanceof Error ? reason.message : "历史刷新失败"); });
       }
     });
-    if (available) void startResearchAgent(paperContext).then(() => {
+    let ownedId: string | undefined;
+    void (async () => {
+      const items = await listResearchConversations(conversationScope);
+      if (disposed) return;
+      const requested = selection.id && items.some((item) => item.id === selection.id) ? selection.id : undefined;
+      const current = items.find((item) => item.id === conversationId.current)?.id;
+      const id = selection.fresh ? undefined : requested ?? current ?? items[0]?.id;
+      if (conversationId.current) await abortResearchAgent(conversationId.current);
+      const record = id ? await getResearchConversation(id) : await createResearchConversation(conversationScope);
+      if (disposed) return;
+      ownedId = record.id;
+      conversationId.current = record.id;
+      setSelection((current) => current.sequence === selection.sequence ? { id: record.id, sequence: current.sequence } : current);
+      setTimeline(record.timeline);
+      setActiveTitle(record.title);
+      setHistoryLoading(false);
+      await refreshHistory();
+      if (!available || disposed) return;
+      await startResearchAgent({ ...latestContext.current, conversationId: record.id });
       if (!disposed) {
         startedRef.current = true;
         setReady(true);
-        void updateResearchAgentContext(latestContext.current).catch((reason) => {
+        void updateResearchAgentContext({ ...latestContext.current, conversationId: record.id }).catch((reason) => {
           if (!disposed) setError(reason instanceof Error ? reason.message : "论文上下文更新失败");
         });
       }
-    }).catch((reason) => {
-      if (!disposed) setError(reason instanceof Error ? reason.message : "研究助手启动失败");
+    })().catch((reason) => {
+      if (!disposed) { setHistoryLoading(false); setError(reason instanceof Error ? reason.message : "篇篇暂时无法连接，请重试"); }
     });
     return () => {
       disposed = true;
@@ -250,26 +340,27 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
       activeApprovals.current = {};
       startedRef.current = false;
       unsubscribe();
-      void abortResearchAgent().catch(() => undefined);
+      if (ownedId) void abortResearchAgent(ownedId).catch(() => undefined);
     };
-  }, [paper.id, paper.blockData, configurationRevision, available]);
+  }, [scope, paper.id, configurationRevision, available, selection.sequence]);
 
   useEffect(() => {
     if (!startedRef.current) return;
-    void updateResearchAgentContext(paperContext).catch((reason) => {
+    void updateResearchAgentContext({ ...paperContext, conversationId: conversationId.current }).catch((reason) => {
       if (reason instanceof Error && !/会话不存在/.test(reason.message)) setError(reason.message);
     });
   }, [paperContext]);
 
   async function reconnect() {
     try {
-      await startResearchAgent(latestContext.current);
+      if (!conversationId.current) throw new Error("请先新建或选择对话");
+      await startResearchAgent({ ...latestContext.current, conversationId: conversationId.current });
       startedRef.current = true;
       setReady(true);
       await updateResearchAgentContext(latestContext.current);
       return true;
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "研究助手重新连接失败，请重试");
+      setError(reason instanceof Error ? reason.message : "篇篇重新连接失败，请重试");
       return false;
     }
   }
@@ -277,6 +368,7 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
   async function submit(retryQuestion?: string) {
     const value = (retryQuestion ?? question).trim();
     if (!value || busy || !available) return;
+    if (historyLoading) return;
     if (!ready && !(await reconnect())) return;
     setQuestion("");
     setError(null);
@@ -329,8 +421,26 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
   async function stop() {
     activeApprovals.current = {};
     setApprovalByToolId({});
-    try { await abortResearchAgent(); }
+    try { await abortResearchAgent(conversationId.current); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "停止失败，请重试"); }
+  }
+
+  function selectConversation(id?: string) {
+    setOpenMenu(null);
+    historyButtonRef.current?.focus();
+    setSelection((current) => ({ id, fresh: !id, sequence: current.sequence + 1 }));
+    setRenaming(null); setDeleting(null);
+  }
+  async function renameConversation(id: string) {
+    try { await renameResearchConversation(id, renameTitle); setRenaming(null); await refreshHistory(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "重命名失败"); }
+  }
+  async function removeConversation(id: string) {
+    try {
+      await deleteResearchConversation(id); setDeleting(null);
+      if (conversationId.current === id) { conversationId.current = undefined; selectConversation(); }
+      await refreshHistory();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "删除失败"); }
   }
 
   async function saveDocument(draft: ResearchDocument) {
@@ -363,23 +473,58 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
   }
 
   const hasConversation = timeline.length > 0;
-  const readSources = useMemo(() => currentPaperCitations(paper, timeline.flatMap((item) => {
+  function verifiedReferences(candidates: unknown) {
+    if (scope === "paper") return currentPaperCitations(paper, candidates);
+    if (!Array.isArray(candidates)) return [];
+    return candidates.flatMap((candidate) => {
+      const target = library.find((item) => item.id === candidate?.paperId);
+      return target ? currentPaperCitations(target, [candidate]).map((source) => ({ blockId: candidate.referenceId || `${target.id}::${source.blockId}` })) : [];
+    });
+  }
+  function jumpToReference(referenceId: string) {
+    if (scope === "paper") { onJump(referenceId); return; }
+    for (const target of library) {
+      const block = target.blockData?.find((item) => `${target.id}::${item.id}` === referenceId);
+      if (block) { onJumpPaper?.(target.id, block.id); return; }
+    }
+  }
+  const readSources = useMemo(() => verifiedReferences(timeline.flatMap((item) => {
     if (item.type !== "tool" || item.tool.name !== "read_current_paper" || item.tool.status !== "completed") return [];
     const output = isRecord(item.tool.output) ? item.tool.output : undefined;
-    if (output?.paper?.id !== paper.id || !Array.isArray(output.paper.blocks)) return [];
-    return output.paper.blocks.map((block: { id: string }) => ({ paperId: paper.id, blockId: block.id }));
-  })), [timeline, paper.id, paper.blockData]);
+    if (!output?.paper?.id || !Array.isArray(output.paper.blocks)) return [];
+    return output.paper.blocks.map((block: { id: string; referenceId?: string }) => ({ paperId: output.paper.id, blockId: block.id, referenceId: block.referenceId }));
+  })), [timeline, scope, paper.id, paper.blockData, library]);
   return (
-    <section className="research-assistant-panel" aria-label="研究 Agent">
-      <div className="research-agent-banner">
-        <div className="research-agent-title"><span className="research-agent-mark"><Sparkles size={15} /></span><div><strong>研究助手</strong><span>阅读原文 · 检索文献 · 整理笔记</span></div></div>
-        <span className={`research-agent-state ${busy ? "is-busy" : ""}`}><span className="status-dot" />{busy ? "工作中" : ready ? "就绪" : available ? "连接中" : "待配置"}</span>
+    <section className="research-assistant-panel" aria-label="篇篇对话">
+      <div className="research-conversation-toolbar" ref={toolbarRef}>
+        <button ref={historyButtonRef} className="research-conversation-select" type="button" aria-label="历史对话" title={`历史对话 · ${activeTitle}`} aria-haspopup="dialog" aria-controls={`${menuId}-history`} aria-expanded={openMenu === "history"} onClick={() => setOpenMenu(openMenu === "history" ? null : "history")}>
+          <History size={15} /><span>{activeTitle}</span><ChevronDown size={13} />
+        </button>
+        <div className="research-toolbar-actions">
+          {skills.length ? <button ref={skillsButtonRef} type="button" aria-label="篇篇的拿手活" title="篇篇的拿手活" aria-haspopup="dialog" aria-controls={`${menuId}-skills`} aria-expanded={openMenu === "skills"} onClick={() => setOpenMenu(openMenu === "skills" ? null : "skills")}><Sparkles size={15} /><span>拿手活</span></button> : null}
+          <button type="button" disabled={historyLoading} onClick={() => selectConversation()} title="新建对话"><Plus size={16} /><span>新建</span></button>
+        </div>
+      {openMenu === "history" ? <section id={`${menuId}-history`} className="research-toolbar-popover research-history" role="dialog" aria-label={scope === "library" ? "全库对话历史" : "当前论文对话历史"}>
+        <div className="research-popover-heading"><strong>历史对话</strong><span>{scope === "library" ? "整个文献库" : "当前论文"}</span></div>
+        <input aria-label="搜索历史对话" placeholder="搜索标题或消息内容" value={historyQuery} onChange={(event) => setHistoryQuery(event.target.value)} />
+        <div className="research-history-list">{conversations.map((item) => <div className={`research-history-item ${item.id === conversationId.current ? "is-active" : ""}`} key={item.id}>
+          {renaming === item.id ? <form onSubmit={(event) => { event.preventDefault(); void renameConversation(item.id); }}><input autoFocus aria-label="对话标题" maxLength={100} value={renameTitle} onChange={(event) => setRenameTitle(event.target.value)} /><button type="submit">保存</button><button type="button" onClick={() => setRenaming(null)}>取消</button></form> : <>
+            <button type="button" className="research-history-select" disabled={historyLoading} aria-current={item.id === conversationId.current ? "true" : undefined} onClick={() => selectConversation(item.id)}><strong>{item.title}</strong><span>{new Date(item.updatedAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })} · {item.messageCount ?? 0} 条消息</span><small>{item.preview}</small></button>
+            <button type="button" aria-label={`重命名对话：${item.title}`} onClick={() => { setRenaming(item.id); setRenameTitle(item.title); }}><Pencil size={13} /></button><button type="button" aria-label={`删除对话：${item.title}`} onClick={() => setDeleting(item.id)}><Trash2 size={13} /></button>
+          </>}
+          {deleting === item.id ? <div className="research-history-confirm"><span>永久删除此对话？</span><button type="button" onClick={() => void removeConversation(item.id)}>确认删除</button><button type="button" onClick={() => setDeleting(null)}>取消</button></div> : null}
+        </div>)}{!conversations.length ? <p>{historyQuery ? "没有匹配的历史对话" : "暂无历史对话"}</p> : null}</div>
+        <small>保存在本机 · 选择对话，接着上次聊</small>
+      </section> : null}
+      {openMenu === "skills" ? <section id={`${menuId}-skills`} className="research-toolbar-popover research-skills" role="dialog" aria-label="篇篇的拿手活">
+        <div className="research-popover-heading"><strong>篇篇的拿手活</strong><span>选一个，一起开始</span></div>
+        <div className="research-skills-list">{skills.map((skill) =>
+          <button key={skill.name} type="button" onClick={() => { setQuestion(skill.prompt); setOpenMenu(null); questionRef.current?.focus(); }}><Sparkles size={15} /><span>{skill.title}</span><Plus size={14} /></button>)}</div>
+      </section> : null}
       </div>
-      {skills.length ? <details className="research-skills"><summary>预置研究技能 · {skills.length} 项</summary><div className="research-skills-list">{skills.map((skill) =>
-        <button key={skill.name} type="button" onClick={() => setQuestion(skill.prompt)}>{skill.title}</button>)}</div></details> : null}
       <div ref={scrollRef} onScroll={onScroll} className="research-agent-scroll">
         <div ref={contentRef} className="research-agent-content">
-        {!hasConversation ? <div className="research-agent-empty"><div className="research-agent-empty-icon"><FileText size={22} /></div><strong>从这篇论文开始研究</strong><p>你可以让我读懂论文、检索相关文献，或者生成一份阅读笔记。</p><div className="research-agent-prompts"><button type="button" onClick={() => setQuestion("概括这篇论文的研究问题、方法和主要结论")}>概括论文</button><button type="button" onClick={() => setQuestion("查找与这篇论文相关的文献")}>查找文献</button><button type="button" onClick={() => setQuestion("生成一份阅读笔记文档")}>生成笔记</button></div></div> : null}
+        {!hasConversation ? <div className="research-agent-empty"><div className="research-agent-empty-icon"><Pianpian variant="reading" /></div><strong>{scope === "library" ? "你的文献，我们一起理一理。" : "这篇论文，我们从哪儿读起？"}</strong><p>{scope === "library" ? "告诉篇篇你关心的问题，一起找论文、比较方法、整理阅读笔记。" : "难懂的段落交给我。也可以一起找文献，把读到的收获记下来。"}</p><div className="research-agent-prompts"><button type="button" onClick={() => setQuestion(scope === "library" ? "检索文献库中与我的研究主题相关的论文，请先问我主题" : "概括这篇论文的研究问题、方法和主要结论")}>{scope === "library" ? "找找文献" : "讲讲重点"}</button><button type="button" onClick={() => setQuestion(scope === "library" ? "帮我比较已有论文的方法，请先问我要比较的主题" : "查找与这篇论文相关的文献")}>{scope === "library" ? "比较方法" : "找相关文献"}</button><button type="button" onClick={() => setQuestion("生成一份阅读笔记文档")}>整理笔记</button></div></div> : null}
         {timeline.map((item) => {
           if (item.type === "tool") {
             const approval = approvalByToolId[item.tool.id];
@@ -388,12 +533,12 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
               onSaveDocument={(draft) => void saveDocument(draft)} />;
           }
           const content = streaming[item.message.id] ?? item.message.content;
-          const references = item.message.role === "assistant" ? currentPaperCitations(paper, item.message.citations) : [];
+          const references = item.message.role === "assistant" ? verifiedReferences(item.message.citations) : [];
           return <article className={`research-message is-${item.message.role}`} key={`message-${item.message.id}`}>
-            <div className="research-message-label">{item.message.role === "user" ? "你" : "研究 Agent"}</div>
+            <div className="research-message-label">{item.message.role === "user" ? "你" : <><Pianpian />篇篇</>}</div>
             <div className="research-message-content">{content ? <MarkdownContent text={content}
               citations={item.message.role === "assistant" ? streaming[item.message.id] !== undefined ? readSources : references : []}
-              onCitation={onJump} /> : <span className="research-placeholder">正在组织回答…</span>}</div>
+              onCitation={jumpToReference} /> : <span className="research-placeholder">正在组织回答…</span>}</div>
           </article>;
         })}
         {error ? <div className="research-agent-error" role="alert"><span>{error}</span>{lastQuestion.current ? <button type="button" disabled={busy} onClick={() => void submit(lastQuestion.current)}><RotateCcw size={14} />重试问题</button> : null}</div> : null}
@@ -401,8 +546,11 @@ export function ResearchAssistant({ paper, library, onAddPaper, onJump, onSaveDo
       </div>
       <div className="research-agent-composer">
         {savedNotice ? <div className="research-save-notice" role="status">{savedNotice}</div> : null}
-        {!available ? <button type="button" className="research-config-hint" onClick={onOpenSettings}>请先配置模型服务，配置后即可启用研究 Agent。</button> : null}
-        <div className="research-input-wrap"><textarea aria-label="向研究 Agent 提问" value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={onKeyDown} placeholder="问问这篇论文，或让 Agent 查找相关文献…" rows={3} /><div className="research-input-actions"><span>Ctrl / ⌘ + Enter 发送</span>{busy ? <button type="button" className="research-stop-button" aria-label="停止 Agent" onClick={() => void stop()}><Square size={14} />停止</button> : <button type="button" className="research-send-button" aria-label="发送给研究 Agent" disabled={!question.trim() || !ready || !available} onClick={() => void submit()}><Send size={15} /></button>}</div></div>
+        {!available ? <button type="button" className="research-config-hint" onClick={onOpenSettings}>请先配置模型服务，再和篇篇一起读论文。</button> : null}
+        <div className="research-input-wrap"><textarea ref={questionRef} aria-label="向篇篇提问" value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={onKeyDown} placeholder={scope === "library" ? "和篇篇一起找论文、比方法、理证据…" : "这篇论文哪里难懂？也可以请篇篇找文献…"} rows={3} /><div className="research-input-actions">
+          <div className="research-composer-meta"><span className={`research-agent-state ${busy ? "is-busy" : ""}`}><span className="status-dot" /><span>{historyLoading ? "恢复中" : busy ? "工作中" : ready ? "就绪" : available ? "连接中" : "待配置"}</span></span><span>{scope === "library" ? "整个文献库" : "当前论文"}</span></div>
+          <div className="research-send-actions"><span title="Ctrl / ⌘ + Enter 发送">Ctrl ↵</span>{busy ? <button type="button" className="research-stop-button" aria-label="停止回答" onClick={() => void stop()}><Square size={14} />停止</button> : <button type="button" className="research-send-button" aria-label="发送给篇篇" disabled={!question.trim() || !ready || !available} onClick={() => void submit()}><Send size={15} /></button>}</div>
+        </div></div>
       </div>
     </section>
   );

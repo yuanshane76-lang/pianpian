@@ -18,6 +18,8 @@ data/
 coverage/
 playwright-report/
 test-results/
+tmp/
+output/
 
 # Local live-test reports and screenshots
 out/iteration-*-checks/

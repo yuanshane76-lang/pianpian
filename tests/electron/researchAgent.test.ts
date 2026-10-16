@@ -12,6 +12,28 @@ const context = {
 };
 
 describe("research Agent", () => {
+  it("passes restored text history to Pi and keeps identical block IDs in different library papers distinct", async () => {
+    const events: any[] = [];
+    const history = [{ type: "message", message: { id: "old", role: "user", content: "旧问题" } }];
+    const factory = vi.fn(async ({ tools, emit }: any) => ({
+      prompt: async () => {
+        const read = tools.find((tool: any) => tool.name === "read_current_paper");
+        const a = await read.execute("r1", { paperId: "p1" });
+        const b = await read.execute("r2", { paperId: "p2" });
+        expect(a.details.paper.blocks[0].referenceId).toBe("p1::same");
+        expect(b.details.paper.blocks[0].referenceId).toBe("p2::same");
+        emit({ type: "message_end", message: { id: "a", role: "assistant", content: "对比[引用:p1::same]与[引用:p2::same]，不采信[引用:same]。" } });
+      }, abort: async () => {}, dispose: () => {},
+    }));
+    const runtime = createResearchAgentRuntime({ emit: (event: any) => events.push(event), piSessionFactory: factory,
+      readLibraryPaper: async (paper: any) => ({ ...paper, blocks: [{ id: "same", pageNumber: 1, text: "Evidence." }] }) });
+    await runtime.start({ scope: "library", library: [{ id: "p1", title: "One" }, { id: "p2", title: "Two" }] },
+      { aiProvider: "deepseek", deepseek: { apiKey: "synthetic-placeholder" } }, history);
+    expect(factory).toHaveBeenCalledWith(expect.objectContaining({ history, scope: "library" }));
+    await runtime.prompt("对比");
+    expect(events.at(-2).message.citations.map((item: any) => [item.paperId, item.referenceId])).toEqual([["p1", "p1::same"], ["p2", "p2::same"]]);
+    runtime.dispose();
+  });
   it("binds final answer references to actually returned blocks and clears evidence after changing context", async () => {
     const events: any[] = [];
     let read = false;

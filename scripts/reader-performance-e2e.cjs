@@ -123,12 +123,12 @@ if (process.versions.electron) {
       fs.writeFileSync(path.join(output, name), Buffer.from(image, "base64"));
     }
     async function waitIdle() {
-      await page.waitForFunction(() => !document.querySelector('[aria-label="停止 Agent"]'), null, { timeout: 180000 });
+      await page.waitForFunction(() => !document.querySelector('[aria-label="停止回答"]'), null, { timeout: 180000 });
       assert.equal(await page.locator(".research-agent-error").count(), 0, "真实Agent调用失败");
     }
     async function send(text) {
-      await page.getByLabel("向研究 Agent 提问").fill(text);
-      await page.getByRole("button", { name: "发送给研究 Agent", exact: true }).click();
+      await page.getByLabel("向篇篇提问").fill(text);
+      await page.getByRole("button", { name: "发送给篇篇", exact: true }).click();
     }
     try {
       await page.addInitScript(() => {
@@ -214,7 +214,7 @@ if (process.versions.electron) {
         console.log("真实段落四项结果完成");
         report.checks.push("双击真实段落触发四项独立请求；词汇生成前空态、生成中、完成与翻译解释通过");
         const mainBeforeAgent = await electron.evaluate(() => globalThis.readerAcceptance.mainGaps.length);
-        await page.getByRole("tab", { name: "研究对话", exact: true }).click();
+        await page.getByRole("tab", { name: "聊聊", exact: true }).click();
         await page.getByText("就绪", { exact: true }).waitFor();
         const initialized = await electron.evaluate(() => globalThis.readerAcceptance);
         assert.equal(initialized.pi.length, 1);
@@ -232,11 +232,11 @@ if (process.versions.electron) {
         assert(await page.locator(".pdf-block-hit-area.is-active").count() > 0, "引用点击应选中原文块");
         await capture("agent-reference-jump.png");
         await send("接着用 search_literature 检索2篇 deep research agent evaluation 相关论文，输出标题、年份和DOI。只检索，不加入文献库。");
-        await page.locator('[aria-label="工具：检索公开文献"]').last().waitFor();
+        await page.locator('[aria-label="工具：查找相关论文"]').last().waitFor();
         await capture("agent-search-execution.png");
         await waitIdle();
         console.log("真实Agent第2轮完成");
-        await page.locator('[aria-label="工具：检索公开文献"] .research-tool-heading').last().click();
+        await page.locator('[aria-label="工具：查找相关论文"] .research-tool-heading').last().click();
         await page.locator(".research-result-item").first().waitFor();
         await capture("agent-search-results.png");
         await send("基于当前论文及刚才的检索，用 create_document 生成中文阅读笔记草稿，约200字。引用原文块，说明检索来源。");

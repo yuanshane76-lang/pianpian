@@ -8,7 +8,7 @@ const { _electron } = require("playwright");
 
 async function main() {
   const executable = path.resolve(process.argv[2] || "");
-  assert(fs.existsSync(executable) && path.basename(executable) === "Zhiyan.exe", "Pass the extracted Zhiyan.exe path");
+  assert(fs.existsSync(executable) && path.basename(executable) === "Pianpian.exe", "Pass the extracted Pianpian.exe path");
   const archive = path.join(path.dirname(executable), "resources", "app.asar");
   const output = path.resolve(__dirname, "..", "out", "packaged-skills-checks");
   fs.mkdirSync(output, { recursive: true });
@@ -21,8 +21,15 @@ async function main() {
     assert(body.length > 200);
   }
   const entries = asar.listPackage(archive).map((entry) => entry.replaceAll("\\", "/"));
+  for (const module of ["pi-worker-session.cjs", "pi-agent-worker.cjs", "research-citations.cjs"]) {
+    assert(entries.includes(`/electron/${module}`), `Packaged runtime module missing: ${module}`);
+  }
   assert(!entries.some((entry) => /^\/(?:tests|scripts|docs|data|documents)\//.test(entry)));
   assert(!entries.includes("/service-settings.enc.json"));
+  for (const asset of ["/brand.json", "/electron/brand.cjs", "/assets/brand/pianpian.ico", "/dist/brand/pianpian-avatar.webp", "/dist/brand/pianpian-reading.webp"]) {
+    assert(entries.includes(asset), `Packaged brand asset missing: ${asset}`);
+  }
+  assert(!entries.some((entry) => /^\/(?:output|tmp)\//.test(entry)));
   report.checks.push("Archive contains the registry and all three complete SKILL.md files, with no product user data or test scripts");
 
   const smoke = spawnSync(executable, [path.join(__dirname, "pi-agent-smoke.cjs")], {
@@ -56,21 +63,61 @@ async function main() {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.waitForSelector(".workspace-shell");
+    assert.equal(await page.title(), "篇篇");
+    assert.equal(await electron.evaluate(({ app }) => app.getName()), "篇篇");
+    await page.waitForFunction(() => [...document.querySelectorAll("img.pianpian")].every((image) => image.complete && image.naturalWidth > 0));
     assert.equal(await page.locator(".paper-row").count(), 0);
     const configured = await page.evaluate(() => window.zhiyan.invoke("zhiyan:settings:get"));
+    assert.equal(configured.aliyun.configured, false);
     assert.equal(configured.deepseek.configured, false);
     assert.equal(configured.mineru.configured, false);
-    await page.getByRole("button", { name: "打开研究助手", exact: true }).click();
-    await page.locator(".research-skills summary").click();
+    assert.equal(new URL(page.url()).protocol, "zhiyan:", "Release must not rely on the Vite server");
+    assert.equal((await page.evaluate(() => window.zhiyan.invoke("zhiyan:ping"))).ok, true);
+    const pdfWorker = await page.evaluate(async () => {
+      const response = await fetch("zhiyan://app/pdf.worker.min.mjs");
+      return { status: response.status, bytes: (await response.arrayBuffer()).byteLength };
+    });
+    assert.equal(pdfWorker.status, 200);
+    assert(pdfWorker.bytes > 100000);
+    await page.screenshot({ path: path.join(output, "01-first-launch.png") });
+    await page.getByRole("dialog", { name: "服务配置" }).waitFor();
+    assert(await page.getByText("完成配置后开始使用", { exact: true }).isVisible());
+    assert.equal(await page.getByRole("dialog").getByRole("button", { name: "关闭配置", exact: true }).count(), 0);
+    await page.getByRole("radio", { name: /DeepSeek 官方/ }).click();
+    assert(await page.locator("#deepseek-key").isVisible());
+    await page.screenshot({ path: path.join(output, "02-model-settings.png") });
+    await page.locator("#deepseek-key").fill("synthetic-model-key");
+    await page.getByRole("button", { name: "保存配置", exact: true }).click();
+    await page.getByText("模型密钥已保存，请继续填写 MinerU Token。", { exact: true }).waitFor();
+    await page.getByRole("tab", { name: /模型服务/ }).click();
+    await page.getByRole("radio", { name: /阿里云百炼/ }).click();
+    assert(await page.locator("#aliyun-key").isVisible());
+    await page.getByRole("radio", { name: /DeepSeek 官方/ }).click();
+    await page.getByRole("tab", { name: /论文解析/ }).click();
+    assert(await page.locator("#mineru-key").isVisible());
+    await page.screenshot({ path: path.join(output, "03-parser-settings.png") });
+    await page.locator("#mineru-key").fill("synthetic-parser-token");
+    await page.getByRole("button", { name: "保存配置", exact: true }).click();
+    await page.getByRole("dialog").waitFor({ state: "detached" });
+    await page.getByRole("button", { name: "切换为深色模式", exact: true }).click();
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
+    await page.screenshot({ path: path.join(output, "04-dark-library.png") });
+    await page.reload();
+    await page.waitForSelector(".workspace-shell");
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
+    await page.getByRole("button", { name: "切换为浅色模式", exact: true }).click();
+    report.checks.push("Packaged app force-guides missing model and MinerU credentials, supports partial save, and unlocks the workspace only after both are saved");
+    await page.getByRole("button", { name: "问问篇篇", exact: true }).click();
+    await page.getByRole("button", { name: "篇篇的拿手活", exact: true }).click();
     assert.equal(await page.locator(".research-skills-list button").count(), 3);
     await page.getByRole("button", { name: "论文精读", exact: true }).click();
-    assert((await page.getByLabel("向研究 Agent 提问").inputValue()).includes("精读当前论文"));
+    assert((await page.getByLabel("向篇篇提问").inputValue()).includes("精读当前论文"));
     const image = await electron.evaluate(async ({ BrowserWindow }) =>
       (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString("base64"));
     fs.writeFileSync(path.join(output, "bundled-skills.png"), Buffer.from(image, "base64"));
     assert.equal(await electron.evaluate(() => globalThis.packagedExternalCalls), 0);
     assert.deepEqual(errors, []);
-    report.checks.push("Extracted Zhiyan.exe opens its Chinese shell and three preset skill entries without model credentials");
+    report.checks.push("Extracted Pianpian.exe opens its Chinese shell and three preset skill entries with synthetic saved credentials and no external calls");
     report.status = "passed";
   } finally {
     await electron.close();

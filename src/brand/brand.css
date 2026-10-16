@@ -1,0 +1,21 @@
+.pianpian { display: inline-block; flex: 0 0 auto; width: 28px; height: 28px; object-fit: contain; user-select: none; vertical-align: middle; }
+.pianpian-reading { width: 112px; height: 112px; }
+.brand-lockup .brand-mark { width: 44px; height: 48px; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.brand-lockup .pianpian { width: 44px; height: 48px; }
+.brand-lockup > div:last-child > strong { font-size: 21px; letter-spacing: 1px; }
+.brand-lockup > div:last-child > span { font-size: 11px; }
+.assistant-title .assistant-icon { width: 36px; height: 38px; padding: 0; background: transparent; }
+.assistant-title .pianpian { width: 34px; height: 38px; }
+.assistant-title > div:last-child { display: grid; gap: 2px; }
+.assistant-title > div:last-child > span { font-size: 10px; font-weight: 400; color: var(--muted); }
+.research-workspace-header .pianpian { width: 30px; height: 32px; }
+.research-workspace-context > .pianpian { width: 96px; height: 96px; margin: 0 0 18px; }
+.research-assistant-panel .research-agent-empty-icon { margin-bottom: 13px; }
+.research-agent-empty-icon > .pianpian-reading { width: 108px; height: 108px; }
+.research-message-label { display: flex; align-items: center; gap: 6px; }
+.research-message-label > .pianpian { width: 20px; height: 22px; }
+.detail-empty > .pianpian { width: 132px; height: 132px; margin-bottom: 6px; }
+.wordbook-button > .pianpian { width: 23px; height: 26px; }
+.settings-setup-heading > .pianpian { width: 32px; height: 36px; }
+.pianpian-welcome { margin: 0 0 14px; }
+.pianpian-welcome > strong { display: block; margin: 7px 0 3px; color: var(--ink); font-size: 16px; }

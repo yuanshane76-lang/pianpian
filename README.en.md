@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/assets/hero.svg" alt="Zhiyan Workbench: keep the paper, understand the research" width="100%">
+  <img src="public/brand/pianpian-reading.webp" alt="Pianpian, your paper-reading companion" width="160">
 </p>
 
-<h1 align="center">Zhiyan Workbench · 纸研工作台</h1>
+<h1 align="center">Pianpian · 篇篇</h1>
 
 <p align="center">
   Understand English papers, find related literature, and prepare Chinese reading notes beside the original PDF.
@@ -16,7 +16,7 @@
   <a href="#screenshots">Screenshots</a> · <a href="#getting-started">Getting started</a> · <a href="#data-and-services">Data and services</a> · <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
-Zhiyan Workbench is a desktop paper reader for Chinese-speaking readers of English research. The **original PDF is the reading surface**: layout, figures, and equations stay intact, with reading assistance alongside each paragraph. Originals, reading progress, vocabulary, and analysis caches are persisted locally.
+Pianpian is a desktop paper reader for Chinese-speaking readers of English research. The **original PDF is the reading surface**: layout, figures, and equations stay intact, with reading assistance alongside each paragraph. Originals, reading progress, vocabulary, and analysis caches are persisted locally.
 
 Current version: `0.3.0` · Primary distribution target: `Windows x64` · Built with `Electron / React / TypeScript`
 
@@ -24,6 +24,8 @@ Current version: `0.3.0` · Primary distribution target: `Windows x64` · Built 
 
 ## Recent updates
 
+- **Meet Pianpian:** The product and reading companion share one name, with a folded-paper character generated using gpt-image-2. Ask Pianpian from the library, chat beside a paper, or request vocabulary for the current paragraph.
+- **More room for reading:** Conversation history, new chat, and reading workflows share a compact toolbar with floating pickers. Create and select a paper group inline in the metadata editor.
 - **Smoother long-paper startup:** PDF pages load on demand. Research sessions start when first opened, and Pi runs in a worker thread.
 - **Clearer tool progress:** A compact timeline shows status, task summaries, and search results. Details expand on demand, and library writes require confirmation.
 - **Clickable source references:** References in answers navigate to the corresponding PDF page and reading block.
@@ -40,8 +42,8 @@ Double-click a paragraph to start translation, explanation, summary with context
 <table>
   <tr>
     <td width="50%">
-      <img src="docs/assets/library.png" alt="Paper library with search, favorites, tags, and preparation status" width="100%">
-      <p><strong>Organize your papers</strong><br>Search, favorites, tags, metadata editing, and preparation progress in one library.</p>
+      <img src="docs/assets/library.png" alt="Paper library with search, favorites, groups, and preparation status" width="100%">
+      <p><strong>Organize your papers</strong><br>Search, favorites, groups, metadata editing, and preparation progress in one library.</p>
     </td>
     <td width="50%">
       <img src="docs/assets/wordbook.png" alt="Personal wordbook with meanings, source sentences, and paper links" width="100%">
@@ -50,7 +52,7 @@ Double-click a paragraph to start translation, explanation, summary with context
   </tr>
 </table>
 
-<sub>These are real desktop interface screenshots made with author-created synthetic papers and simulated model responses. They contain no user papers or credentials. A fresh installation starts with an empty library. See <a href="docs/assets/README.md">asset provenance</a>.</sub>
+<sub>The reader, library, and wordbook images above illustrate features before the rebrand. The conversation images below show Pianpian on October 16, 2026. All use synthetic papers and simulated responses, with no user papers or credentials. A fresh installation starts with an empty library. See <a href="docs/assets/README.md">asset provenance</a>.</sub>
 
 ## Features
 
@@ -62,18 +64,20 @@ Double-click a paragraph to start translation, explanation, summary with context
 | Learn academic language | Double-click a paragraph to generate AI-selected vocabulary, or generate it manually. No initial term cards appear before generation. Only terms grounded in that paragraph are displayed; the wordbook keeps meanings, source sentences, and links. |
 | Research around a paper | Pi-powered conversations across multiple turns; read the current paper, click answer references to navigate to source blocks, search the local library and Crossref, expand compact tool rows, and confirm adding paper metadata to the library. |
 | Prepare reading notes | Generate Chinese Markdown drafts, preview them, and choose an export location; three bundled workflows cover close reading, literature search and screening, and literature comparison with notes. |
-| Manage a personal library | Import, search, favorites, tags, metadata editing, deletion, and saved reading positions. |
+| Manage a personal library | Import, search, favorites, groups, metadata editing, deletion, and saved reading positions. |
 | Adjust the reading environment | Switch between light and dark interfaces in the library sidebar or reader toolbar; keep the preference after restart while original PDF pages, figures, and equation images retain their appearance. |
 
-### Research assistant
+### Chat with Pianpian
 
-Open the dedicated research workspace from the library, or select **研究对话** (Research conversation) beside the current paper. Ask follow-up questions, search for related papers, confirm additions to the library, and generate reading notes. Bundled research skills are read on demand. Tool status, results, page citations, and answers appear in one timeline. Scrolling up during a streamed answer preserves your reading position; returning to the bottom or sending a new question resumes following the output.
+Choose **问问篇篇** (Ask Pianpian) in the library, or select **聊聊** (Chat) beside the current paper. Ask follow-up questions, search for related papers, confirm additions to the library, and generate reading notes. Bundled research skills are read on demand. Tool status, results, page citations, and answers appear in one timeline. Scrolling up during a streamed answer preserves your reading position; returning to the bottom or sending a new question resumes following the output.
 
 Click a source reference in an answer to load its PDF page and locate the paragraph. References use stable reading-block IDs returned by a reading tool, rather than guessing from page numbers. Opening a PDF does not start a hidden research session; Pi initialization runs in a worker thread when the research tab is first visited.
 
-![Dedicated research workspace and three bundled research skills](docs/screenshots/research-bundled-skills.png)
+![Pianpian workspace and three bundled reading workflows](docs/screenshots/pianpian-workspace.png)
 
-![Compact tool progress and clickable references beside the original PDF](docs/screenshots/research-block-citations.png)
+![Compact tool progress and clickable references beside the original PDF](docs/screenshots/pianpian-reader-light.png)
+
+![Pianpian in dark mode with tool progress and source navigation](docs/screenshots/research-reader-dark.png)
 
 <sub>The reference preview uses a synthetic paper and simulated streaming responses in an isolated desktop profile. It illustrates the interface and contains no user papers, credentials, or live-service output. See <a href="docs/assets/README.md">asset provenance</a>.</sub>
 
@@ -83,7 +87,7 @@ A three-turn workflow can start with:
 2. “Find two related papers and list their titles, years, and DOIs.”
 3. “Use the paper and search results to draft Chinese reading notes.”
 
-Literature search currently uses **Crossref's public scholarly metadata**, with coverage determined by that source. Adding a candidate saves metadata; reading its full text still requires importing its PDF and completing MinerU parsing. Documents export as Markdown. Conversations stay on the current page and are not restored after leaving it or restarting. Model context length is limited for long papers.
+Literature search currently uses **Crossref's public scholarly metadata**, with coverage determined by that source. Adding a candidate saves metadata; reading its full text still requires importing its PDF and completing MinerU parsing. Documents export as Markdown. Library-wide and paper-specific conversations are stored locally and can be restored, searched, renamed, or deleted. Model context length is limited for long papers.
 
 ## Reading workflow
 
@@ -103,8 +107,8 @@ The reader first creates lightweight placeholders for the whole paper, then load
 Install Git, **Node.js 24.x**, and npm. Access to this repository is required.
 
 ```powershell
-git clone https://github.com/yuanshane76-lang/zhiyan-workbench.git
-cd zhiyan-workbench
+git clone https://github.com/yuanshane76-lang/pianpian.git
+cd pianpian
 npm ci
 npm run desktop:dev
 ```
@@ -122,10 +126,10 @@ npm run make:win
 This runs the quality checks and builds a Windows x64 ZIP. The current output is:
 
 ```text
-out/make/zip/win32/x64/纸研工作台-win32-x64-0.3.0.zip
+out/make/zip/win32/x64/篇篇-win32-x64-0.3.0.zip
 ```
 
-Extract the **entire directory** and launch `Zhiyan.exe`; Node.js is not needed on the recipient's machine. Unsigned builds may trigger a Windows security prompt. Source execution and local builds are the current entry points. ZIP users still configure their own service credentials.
+Extract the **entire directory** and launch `Pianpian.exe`; Node.js is not needed on the recipient's machine. Unsigned builds may trigger a Windows security prompt. Source execution and local builds are the current entry points. ZIP users still configure their own service credentials.
 
 ## Data and services
 
@@ -148,11 +152,22 @@ Deleting a paper removes its original, parsed assets, and analysis caches. Expli
 npm run check
 ```
 
-This checks common credential formats and the current branch history, runs automated tests, checks TypeScript, and builds the frontend. GitHub's [Quality checks (Windows)](https://github.com/yuanshane76-lang/zhiyan-workbench/actions/workflows/quality.yml) uses the same command without real model or MinerU calls.
+This checks common credential formats and the current branch history, runs automated tests, checks TypeScript, and builds the frontend. GitHub's [Quality checks (Windows)](https://github.com/yuanshane76-lang/pianpian/actions/workflows/quality.yml) uses the same command without real model or MinerU calls.
 
 For long-canvas changes, also verify that opening a long paper renders only pages near the viewport, page navigation loads the destination on demand, and coordinate hit testing, outline navigation, and zoom anchors keep working.
 
 ### Validation record
+
+On October 16, 2026, the Pianpian brand and conversation interface passed local Windows validation:
+
+| Scope | Result |
+| --- | --- |
+| Automated checks | `npm run check`: 61 test files, 488 tests, credential checks, TypeScript, and production build passed. |
+| Light and dark desktop flows | Real Electron and Pi SDK with synthetic papers and local SSE fixtures: multi-turn tools, approvals, cancellation, note export, streaming scroll, source navigation, persistent history, keyboard popovers, and group editing. |
+| Windows ZIP | Built, extracted, and launched `Pianpian.exe`; checked bundled Pi and three workflows, brand assets, mandatory model/MinerU setup, partial save, and retained theme preference. |
+| External services | This desktop and ZIP regression used no live model or MinerU calls. Brand artwork was generated separately with gpt-image-2. |
+
+The existing local data directory is preserved across the rename. A signed installer and automatic updates were not validated. The historical live-service and performance record below was not repeated for this change.
 
 On October 14, 2026, feature commit `f838be9` was validated locally on Windows:
 
@@ -165,7 +180,7 @@ On October 14, 2026, feature commit `f838be9` was validated locally on Windows:
 
 The two papers' first-page times in the live-service run were 543ms and 553ms. Each open read the original PDF once; no main-process heartbeat interval exceeded 100ms, and no native window “unresponsive” event was recorded. These are local samples; results depend on papers, hardware, and the runtime environment.
 
-The additional re-upload → MinerU reparse → first-read acceptance was not completed, so prepared-paper results do not establish that flow as passed. The Windows ZIP was not revalidated for this change. Real papers, service settings, and raw acceptance screenshots stay in ignored local directories.
+The additional re-upload → MinerU reparse → first-read acceptance was not completed on October 14 or repeated on October 16, so prepared-paper results do not establish that flow as passed. Real papers, service settings, and raw acceptance screenshots stay in ignored local directories.
 
 ### Reproduce desktop acceptance
 
@@ -201,4 +216,4 @@ The detailed contributor and architecture documents are currently in Chinese:
 - [Research assistant PRD](docs/PRD-研究助手.md) and [technical decisions](docs/技术选型-研究助手.md): Pi conversations, literature search, controlled tools, and note drafts.
 - [Collaboration rules](AGENTS.md): product boundaries, file ownership, and security.
 - [Private GitHub collaboration](docs/GitHub私有协作配置.md): permissions and branch conventions.
-- [Report an issue](https://github.com/yuanshane76-lang/zhiyan-workbench/issues): include reproduction steps, version, and expected behavior; exclude credentials and papers you are not authorized to share.
+- [Report an issue](https://github.com/yuanshane76-lang/pianpian/issues): include reproduction steps, version, and expected behavior; exclude credentials and papers you are not authorized to share.

@@ -25,6 +25,7 @@ export interface ResearchAgentPaperSummary {
 }
 
 export interface ResearchAgentCitation {
+  referenceId?: string;
   paperId?: string;
   blockId?: string;
   pageNumber?: number;
@@ -63,7 +64,7 @@ export interface ResearchAgentSkill {
   prompt: string;
 }
 
-export type ResearchAgentEvent =
+type ResearchAgentEventPayload =
   | { type: "session_started"; sessionId: string; skills?: ResearchAgentSkill[] }
   | { type: "message_start"; message: ResearchAgentMessage }
   | { type: "message_delta"; messageId: string; delta: string }
@@ -74,6 +75,7 @@ export type ResearchAgentEvent =
   | ({ type: "approval_required" } & ResearchAgentApproval)
   | { type: "agent_end"; messageId?: string }
   | { type: "agent_error"; message: string; recoverable: boolean };
+export type ResearchAgentEvent = ResearchAgentEventPayload & { conversationId?: string };
 
 const TOOL_STATUSES = new Set<ResearchAgentToolStatus>([
   "queued",
@@ -193,6 +195,7 @@ function normalizeMessage(value: unknown): ResearchAgentMessage {
             return {
               ...(typeof item.paperId === "string" ? { paperId: item.paperId } : {}),
               ...(typeof item.blockId === "string" ? { blockId: item.blockId } : {}),
+              ...(typeof item.referenceId === "string" ? { referenceId: item.referenceId } : {}),
               ...(typeof item.pageNumber === "number" ? { pageNumber: item.pageNumber } : {}),
               label: requiredText(item.label, "引用标签", 200),
             };

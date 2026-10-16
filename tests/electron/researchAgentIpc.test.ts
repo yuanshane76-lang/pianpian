@@ -23,6 +23,77 @@ function createIpcMain() {
 }
 
 describe("research Agent IPC", () => {
+  it("registers only one window-close listener across repeated history restores", async () => {
+    const ipcMain = createIpcMain();
+    const event = createEvent();
+    const once = vi.fn();
+    Object.assign(event.sender, { once });
+    const runtime = { start: vi.fn(async () => ({})), abort: vi.fn(async () => undefined), dispose: vi.fn() };
+    registerResearchAgentHandlers({ ipcMain, isDev: true, readSettings: () => ({}), createRuntime: () => runtime });
+    for (let index = 0; index < 12; index++) {
+      await ipcMain.handlers.get("zhiyan:agent:start")!(event, { paper: { id: "p1", title: "Paper", blocks: [] }, library: [] });
+    }
+    expect(once).toHaveBeenCalledOnce();
+  });
+  it("retries unsaved events in order and flushes the final delta on application shutdown", async () => {
+    const ipcMain = createIpcMain();
+    const conversation = { id: "history-1", scope: "library", timeline: [] };
+    const persisted: any[] = [];
+    let failWrites = true;
+    const conversationStore = { get: vi.fn(async () => conversation), record: vi.fn(async (_id, payload) => {
+      if (failWrites) throw new Error("disk unavailable");
+      persisted.push(payload);
+    }) };
+    let publish: (payload: any) => void = () => {};
+    const runtime = { start: vi.fn(async () => ({})), dispose: vi.fn(), abort: vi.fn(async () => {
+      publish({ type: "message_delta", messageId: "a", delta: "结束前的增量" });
+    }), prompt: vi.fn(async () => {
+      publish({ type: "message_start", message: { id: "u", role: "user", content: "问题" } });
+      publish({ type: "message_delta", messageId: "a", delta: "第一段" });
+    }) };
+    const dispose = registerResearchAgentHandlers({ ipcMain, isDev: true, readSettings: () => ({}), conversationStore,
+      createRuntime: ({ emit }: any) => { publish = emit; return runtime; } });
+    const event = createEvent();
+    await ipcMain.handlers.get("zhiyan:agent:start")!(event, { conversationId: conversation.id, scope: "library", library: [] });
+    await expect(ipcMain.handlers.get("zhiyan:agent:prompt")!(event, "问题")).rejects.toThrow("尚未安全保存");
+    expect(persisted).toEqual([]);
+    expect(event.sender.send).toHaveBeenCalledWith("zhiyan:agent:event", expect.objectContaining({ type: "agent_error", conversationId: conversation.id }));
+    failWrites = false;
+    await dispose();
+    expect(persisted.map((payload) => payload.type)).toEqual(["message_start", "message_delta", "message_delta"]);
+    expect(persisted.filter((payload) => payload.type === "message_delta").map((payload) => payload.delta).join("")).toBe("第一段结束前的增量");
+    expect(runtime.dispose).toHaveBeenCalledOnce();
+  });
+  it("flushes coalesced stream text to the bound conversation before returning prompt or history", async () => {
+    const ipcMain = createIpcMain();
+    const record = { id: "history-1", scope: "library", timeline: [] };
+    const conversationStore = { get: vi.fn(async () => record), record: vi.fn(async () => undefined), list: vi.fn(async () => [record]) };
+    let publish: (payload: any) => void = () => {};
+    const runtime = { start: vi.fn(async () => ({})), dispose: vi.fn(), abort: vi.fn(), prompt: vi.fn(async () => {
+      publish({ type: "message_delta", messageId: "a", delta: "第一部分" });
+      publish({ type: "message_delta", messageId: "a", delta: "第二部分" });
+    }) };
+    registerResearchAgentHandlers({ ipcMain, isDev: true, readSettings: () => ({}), conversationStore, createRuntime: ({ emit }: any) => { publish = emit; return runtime; } });
+    const event = createEvent();
+    await ipcMain.handlers.get("zhiyan:agent:start")!(event, { conversationId: record.id, scope: "library", library: [] });
+    await ipcMain.handlers.get("zhiyan:agent:prompt")!(event, "问");
+    expect(conversationStore.record).toHaveBeenCalledWith(record.id, { type: "message_delta", messageId: "a", delta: "第一部分第二部分" });
+    expect(event.sender.send).toHaveBeenCalledWith("zhiyan:agent:event", expect.objectContaining({ conversationId: record.id }));
+    await ipcMain.handlers.get("zhiyan:agent:abort")!(event, { conversationId: "other" });
+    expect(runtime.abort).not.toHaveBeenCalled();
+  });
+  it("restores persisted messages server-side and rejects cross-scope restoration", async () => {
+    const ipcMain = createIpcMain();
+    const record = { id: "history-1", scope: "paper", paperId: "p1", timeline: [{ type: "message", message: { id: "u", role: "user", content: "之前的问题" } }] };
+    const conversationStore = { get: vi.fn(async () => record), record: vi.fn(async () => undefined), list: vi.fn(async () => [record]), create: vi.fn(), remove: vi.fn(), rename: vi.fn() };
+    const runtime = { start: vi.fn(async () => ({ sessionId: "s" })), abort: vi.fn(), dispose: vi.fn(), prompt: vi.fn() };
+    registerResearchAgentHandlers({ ipcMain, isDev: true, readSettings: () => ({}), conversationStore, createRuntime: () => runtime });
+    await ipcMain.handlers.get("zhiyan:agent:start")!(createEvent(), { conversationId: "history-1", paper: { id: "p1", title: "Paper", blocks: [] }, library: [] });
+    expect(runtime.start).toHaveBeenCalledWith(expect.anything(), {}, record.timeline);
+    await expect(ipcMain.handlers.get("zhiyan:agent:start")!(createEvent(), { conversationId: "history-1", scope: "library", library: [] })).rejects.toThrow("范围");
+    const stranger = createEvent(); stranger.senderFrame = { url: "https://untrusted.example/" };
+    await expect(ipcMain.handlers.get("zhiyan:agent:conversations:list")!(stranger, { scope: "library" })).rejects.toThrow();
+  });
   it("lists shipped skills before any model is configured and rejects an untrusted sender", async () => {
     const ipcMain = createIpcMain();
     const readSettings = vi.fn();
@@ -80,6 +151,6 @@ describe("research Agent IPC", () => {
     const owner = createEvent(1);
     const stranger = createEvent(2);
     await ipcMain.handlers.get("zhiyan:agent:start")!(owner, { paper: { id: "p1", title: "Paper", blocks: [] }, library: [] });
-    await expect(ipcMain.handlers.get("zhiyan:agent:prompt")!(stranger, "越权")).rejects.toThrow("Agent 会话不存在");
+    await expect(ipcMain.handlers.get("zhiyan:agent:prompt")!(stranger, "越权")).rejects.toThrow("对话会话不存在");
   });
 });

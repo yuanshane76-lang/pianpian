@@ -6,6 +6,7 @@ const STREAM_EVENT_CHANNEL = "zhiyan:ai:stream:event";
 const AGENT_EVENT_CHANNEL = "zhiyan:agent:event";
 
 contextBridge.exposeInMainWorld("zhiyan", {
+  isDesktop: true,
   invoke(channel, payload) {
     const allowedChannels = new Set([
       "zhiyan:ping",
@@ -22,6 +23,11 @@ contextBridge.exposeInMainWorld("zhiyan", {
       "zhiyan:mineru:status",
       "zhiyan:agent:start",
       "zhiyan:agent:skills",
+      "zhiyan:agent:conversations:list",
+      "zhiyan:agent:conversations:create",
+      "zhiyan:agent:conversations:get",
+      "zhiyan:agent:conversations:rename",
+      "zhiyan:agent:conversations:delete",
       "zhiyan:agent:update-context",
       "zhiyan:agent:prompt",
       "zhiyan:agent:abort",

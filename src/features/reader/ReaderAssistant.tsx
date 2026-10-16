@@ -1,5 +1,6 @@
-import { BookOpen, Bot, Check, Copy, Languages, LoaderCircle, MessageSquareText, RotateCcw, Send, Sparkles, Settings2 } from "lucide-react";
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { BookOpen, MessageCircle, Check, Copy, Languages, LoaderCircle, MessageSquareText, RotateCcw, Send, Sparkles, Settings2 } from "lucide-react";
+import { Pianpian } from "../../brand/Pianpian";
+import { cloneElement, isValidElement, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
 import type { DocumentBlock } from "../../domain/documentBlocks";
 import type { AcademicTerm } from "../../domain/vocabulary";
 import { VocabularyPanel } from "./VocabularyPanel";
@@ -71,6 +72,9 @@ export function ReaderAssistant({
   const vocabularyLoading = pendingAction === "vocabulary" || pendingParagraphActions.includes("vocabulary");
   const displayedInsight = paragraphInsightText !== undefined ? previewParagraphInsight(paragraphInsightText)
     : insight ?? (streamingOutput?.operation === "insight" ? previewParagraphInsight(streamingOutput.text) : null);
+  const activeResearchPanel = researchPanel && isValidElement(researchPanel) && typeof researchPanel.type !== "string"
+    ? cloneElement(researchPanel as ReactElement<{ active?: boolean }>, { active: tab === "research" })
+    : researchPanel;
   useEffect(() => {
     if (paragraphAnalysisRequestId === undefined) return;
     setTab("assist");
@@ -175,15 +179,15 @@ export function ReaderAssistant({
     setQuestion("");
   }
 
-  return <aside className="reader-assistant" aria-label="研究助手">
+  return <aside className="reader-assistant" aria-label="篇篇阅读伙伴">
     <div className="assistant-heading">
-      <div className="assistant-title"><div className="assistant-icon"><Bot size={18} /></div><strong>研究助手</strong></div>
+      <div className="assistant-title"><div className="assistant-icon"><Pianpian /></div><div><strong>篇篇</strong><span>陪你把论文读明白</span></div></div>
       <button className={`assistant-service ${!aiAvailable ? "is-unavailable" : ""}`} type="button" onClick={onOpenSettings} title={aiAvailable ? `${serviceLabel} · ${serviceModel} · 服务配置` : "配置 AI 服务"} aria-label="助手服务配置"><span className="status-dot" /><span>{serviceLabel}</span><Settings2 size={13} /></button>
     </div>
-    <div className="assistant-tabs" role="tablist" aria-label="研究助手视图">
+    <div className="assistant-tabs" role="tablist" aria-label="篇篇阅读视图">
       <button ref={(element) => { tabsRef.current[0] = element; }} id={`${id}-assist-tab`} aria-controls={`${id}-assist-panel`} tabIndex={tab === "assist" ? 0 : -1} className={tab === "assist" ? "is-active" : ""} role="tab" aria-selected={tab === "assist"} onKeyDown={(event) => changeTab(event, 0)} onClick={() => setTab("assist")} type="button"><BookOpen size={15} />{visual ? "读图表" : "读懂这段"}</button>
       <button ref={(element) => { tabsRef.current[1] = element; }} id={`${id}-vocabulary-tab`} aria-controls={`${id}-vocabulary-panel`} tabIndex={tab === "vocabulary" ? 0 : -1} className={tab === "vocabulary" ? "is-active" : ""} role="tab" aria-selected={tab === "vocabulary"} onKeyDown={(event) => changeTab(event, 1)} onClick={() => setTab("vocabulary")} type="button">{vocabularyLoading ? <LoaderCircle className="spin" size={15} /> : <Languages size={15} />}学术词汇 <span>{vocabulary.length}</span></button>
-      {researchPanel ? <button ref={(element) => { tabsRef.current[2] = element; }} id={`${id}-research-tab`} aria-controls={`${id}-research-panel`} tabIndex={tab === "research" ? 0 : -1} className={tab === "research" ? "is-active" : ""} role="tab" aria-selected={tab === "research"} onKeyDown={(event) => changeTab(event, 2)} onClick={openResearch} type="button"><Bot size={15} />研究对话</button> : null}
+      {researchPanel ? <button ref={(element) => { tabsRef.current[2] = element; }} id={`${id}-research-tab`} aria-controls={`${id}-research-panel`} tabIndex={tab === "research" ? 0 : -1} className={tab === "research" ? "is-active" : ""} role="tab" aria-selected={tab === "research"} onKeyDown={(event) => changeTab(event, 2)} onClick={openResearch} type="button"><MessageCircle size={15} />聊聊</button> : null}
     </div>
     <div ref={scrollRef} hidden={tab === "research"} className="assistant-scroll" id={`${id}-${tab === "research" ? "assist" : tab}-panel`} role="tabpanel" aria-labelledby={`${id}-${tab === "research" ? "assist" : tab}-tab`} tabIndex={0}>
       {tab === "vocabulary" ? <VocabularyPanel key={vocabularyBlock?.id ?? selectedBlock?.id ?? "none"} terms={vocabulary} onJump={onJump} onGuide={onGuide} aiAvailable={aiAvailable} busy={isBusy} enriched={Boolean(guide)} guideOverview={guide?.overview}
@@ -231,9 +235,9 @@ export function ReaderAssistant({
         </section> : null}
       </>}
     </div>
-    {researchPanel && researchMounted ? <div hidden={tab !== "research"} className="research-tab-panel" id={`${id}-research-panel`} role="tabpanel" aria-labelledby={`${id}-research-tab`}>{researchPanel}</div> : null}
+    {activeResearchPanel && researchMounted ? <div hidden={tab !== "research"} className="research-tab-panel" id={`${id}-research-panel`} role="tabpanel" aria-labelledby={`${id}-research-tab`}>{activeResearchPanel}</div> : null}
     {researchPanel && actionError && tab !== "research" ? <div className="assistant-action-error" role="alert">{actionError}<button type="button" className="text-button" onClick={onOpenSettings}><Settings2 size={13} />检查配置</button></div> : null}
-    {researchPanel ? tab !== "research" ? <button type="button" className="research-entry-button" onClick={openResearch}><MessageSquareText size={16} /><span>向论文提问 · 查找相关文献</span><Send size={14} /></button> : null : <div className="assistant-composer">
+    {researchPanel ? tab !== "research" ? <button type="button" className="research-entry-button" onClick={openResearch}><MessageCircle size={16} /><span>问问篇篇 · 读论文、找文献</span><Send size={14} /></button> : null : <div className="assistant-composer">
       <div className="assistant-composer-heading"><label htmlFor={`${id}-question`}>论文问答</label><MessageSquareText size={14} /></div>
       <div className="question-box"><textarea id={`${id}-question`} aria-label="向论文提问" value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (!event.nativeEvent.isComposing && (event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); submitQuestion(); } }} placeholder="这篇论文的核心贡献是什么？" rows={2} /><button aria-label="发送问题" className="send-button" disabled={!question.trim() || isBusy || !aiAvailable} onClick={submitQuestion} title="发送问题 (Ctrl / Command + Enter)" type="button">{pendingAction === "qa" ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}</button></div>
       {actionError ? <div className="assistant-action-error" role="alert">{actionError}<button type="button" className="text-button" onClick={onOpenSettings}><Settings2 size={13} />检查配置</button></div> : null}

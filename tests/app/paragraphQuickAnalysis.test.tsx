@@ -40,7 +40,7 @@ Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
 const paper = {
   id: "quick-analysis-paper", title: "Quick Analysis", authors: [], year: null,
   sourcePath: "local://quick-analysis", originalId: "quick-analysis-document", pageCount: 1,
-  importedAt: "2026-10-09", tags: [], favorite: false, blocks: 2, parseVersion: 2,
+  importedAt: "2026-10-09", groupId: "group-inbox", favorite: false, blocks: 2, parseVersion: 2,
   blockData: [
     { id: "paragraph-a", kind: "paragraph", pageNumber: 1, order: 0,
       text: "The model uses attention. It works well.", bbox: [0.1, 0.1, 0.9, 0.2] },

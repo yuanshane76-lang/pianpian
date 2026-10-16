@@ -8,12 +8,18 @@ let root: Root;
 let container: HTMLDivElement;
 let emit: (event: unknown) => void;
 const paper = { id: "p1", title: "Paper", authors: [], year: 2024, sourcePath: "local://p1",
-  importedAt: "2026-10-12", tags: [], favorite: false, blocks: 1, blockData: [
+  importedAt: "2026-10-12", groupId: "group-inbox", favorite: false, blocks: 1, blockData: [
     { id: "b1", pageNumber: 1, order: 0, kind: "paragraph" as const, text: "Evidence." },
   ] };
 
-async function mount(available = true, currentPaper = paper) {
-  const invoke = vi.fn(async (channel: string): Promise<any> => channel === "zhiyan:agent:start" ? { sessionId: "s1" } : channel === "zhiyan:agent:skills" ? [] : channel === "zhiyan:agent:approve" ? true : undefined);
+async function mount(available = true, currentPaper = paper, skills = false) {
+  const invoke = vi.fn(async (channel: string, input?: any): Promise<any> => {
+    if (channel === "zhiyan:agent:start") return { sessionId: "s1" };
+    if (channel === "zhiyan:agent:skills") return skills ? [{ name: "reading", title: "论文精读", prompt: "请精读当前论文" }] : [];
+    if (channel === "zhiyan:agent:conversations:list") return [];
+    if (channel === "zhiyan:agent:conversations:create") return { id: `history-${input.paperId || "library"}`, scope: input.scope, title: "新对话", timeline: [] };
+    if (channel === "zhiyan:agent:approve") return true;
+  });
   window.zhiyan = { invoke: invoke as any, on: (_channel, handler) => { emit = handler as any; return () => {}; } };
   container = document.createElement("div");
   document.body.append(container);
@@ -21,7 +27,9 @@ async function mount(available = true, currentPaper = paper) {
   const onAddPaper = vi.fn(() => ({ id: "added", duplicate: false }));
   const onJump = vi.fn();
   await act(async () => root.render(<ResearchAssistant paper={currentPaper} library={[currentPaper]} onAddPaper={onAddPaper} onJump={onJump} available={available} onOpenSettings={vi.fn()} />));
-  return { invoke, onAddPaper, onJump, rerender: async (id: string) => {
+  return { invoke, onAddPaper, onJump, setActive: async (active: boolean) => {
+    await act(async () => root.render(<ResearchAssistant paper={currentPaper} library={[currentPaper]} onAddPaper={onAddPaper} onJump={onJump} available={available} active={active} onOpenSettings={vi.fn()} />));
+  }, rerender: async (id: string) => {
     await act(async () => root.render(<ResearchAssistant paper={{ ...currentPaper, id }} library={[currentPaper]} onAddPaper={onAddPaper} onJump={onJump} available={available} onOpenSettings={vi.fn()} />));
   } };
 }
@@ -34,6 +42,108 @@ afterEach(async () => {
 });
 
 describe("research assistant", () => {
+  it("starts global conversations without a selected paper and restores history through CRUD controls", async () => {
+    const records: any[] = [{ id: "old", scope: "library", title: "旧的主题对比", updatedAt: Date.now(), messageCount: 2, preview: "原来的答案", timeline: [
+      { type: "message", message: { id: "u-old", role: "user", content: "原来的问题" } },
+      { type: "message", message: { id: "a-old", role: "assistant", content: "原来的答案" } },
+    ] }];
+    const invoke = vi.fn(async (channel: string, input?: any): Promise<any> => {
+      if (channel === "zhiyan:agent:skills") return [];
+      if (channel.endsWith("conversations:list")) return records.filter((item) => !input.query || item.title.includes(input.query));
+      if (channel.endsWith("conversations:get")) return records.find((item) => item.id === input);
+      if (channel.endsWith("conversations:create")) { const empty = records.find((item) => item.timeline.length === 0); if (empty) return empty; const item = { id: `new-${records.length}`, scope: "library", title: "新对话", timeline: [], updatedAt: Date.now() }; records.push(item); return item; }
+      if (channel.endsWith("conversations:rename")) { Object.assign(records.find((item) => item.id === input.id), { title: input.title }); return records[0]; }
+      if (channel.endsWith("conversations:delete")) { records.splice(records.findIndex((item) => item.id === input), 1); return true; }
+      if (channel === "zhiyan:agent:start") return { sessionId: "s" };
+    });
+    window.zhiyan = { invoke: invoke as any, on: (_channel, handler) => { emit = handler as any; return () => {}; } };
+    container = document.createElement("div"); document.body.append(container); root = createRoot(container);
+    await act(async () => root.render(<ResearchAssistant scope="library" paper={paper} library={[paper]} available onAddPaper={vi.fn()} onJump={vi.fn()} onOpenSettings={vi.fn()} />));
+    expect(container.textContent).toContain("原来的答案");
+    expect(invoke).toHaveBeenCalledWith("zhiyan:agent:start", expect.objectContaining({ scope: "library", paper: null, conversationId: "old" }));
+    const click = async (text: string) => act(async () => { const button = [...container.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === text); expect(button).toBeTruthy(); button!.click(); });
+    const openHistory = async () => act(async () => container.querySelector<HTMLButtonElement>('[aria-label="历史对话"]')!.click());
+    await openHistory();
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="重命名对话：旧的主题对比"]')!.click());
+    await act(async () => {
+      const input = container.querySelector<HTMLInputElement>('[aria-label="对话标题"]')!;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "我的对比研究");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(records[0].title).toBe("我的对比研究");
+    await click("新建");
+    expect(container.querySelector(".research-agent-content")?.textContent).not.toContain("原来的答案");
+    await openHistory();
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>(".research-history-select")].find((item) => item.textContent?.includes("我的对比研究"))!.click());
+    expect(container.textContent).toContain("原来的答案");
+    expect(container.querySelector(".research-history")).toBeNull();
+    expect(document.activeElement).toBe(container.querySelector('[aria-label="历史对话"]'));
+    await openHistory();
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="删除对话：我的对比研究"]')!.click());
+    await click("确认删除");
+    expect(records.some((item) => item.id === "old")).toBe(false);
+    expect(container.textContent).not.toContain("原来的答案");
+  });
+  it("opens history and skills on demand and closes the picker after choosing a workflow", async () => {
+    await mount(true, paper, true);
+    const history = container.querySelector<HTMLButtonElement>('[aria-label="历史对话"]')!;
+    const skills = container.querySelector<HTMLButtonElement>('[aria-label="篇篇的拿手活"]')!;
+    expect(skills).not.toBeNull();
+    expect(container.querySelector(".research-skills-list")).toBeNull();
+    await act(async () => history.click());
+    expect(container.querySelector('[aria-label="搜索历史对话"]')).toBe(document.activeElement);
+    await act(async () => skills.click());
+    expect(container.querySelector(".research-history")).toBeNull();
+    expect(skills.getAttribute("aria-expanded")).toBe("true");
+    await act(async () => container.querySelector<HTMLButtonElement>(".research-skills-list button")!.click());
+    expect(container.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe("请精读当前论文");
+    expect(container.querySelector(".research-skills-list")).toBeNull();
+    expect(container.querySelector("textarea")).toBe(document.activeElement);
+  });
+
+  it("dismisses the toolbar popover outside or with Escape and restores keyboard focus", async () => {
+    await mount();
+    const history = container.querySelector<HTMLButtonElement>('[aria-label="历史对话"]')!;
+    await act(async () => history.click());
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(history.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(history);
+    await act(async () => history.click());
+    await act(async () => container.querySelector("textarea")!.dispatchEvent(new Event("pointerdown", { bubbles: true })));
+    expect(container.querySelector(".research-history")).toBeNull();
+  });
+  it("closes the nonmodal picker when focus leaves it or its reader tab becomes inactive", async () => {
+    const { setActive, invoke } = await mount(true, paper, true);
+    const skills = container.querySelector<HTMLButtonElement>('[aria-label="篇篇的拿手活"]')!;
+    await act(async () => skills.click());
+    await act(async () => container.querySelector("textarea")!.focus());
+    expect(skills.getAttribute("aria-expanded")).toBe("false");
+    await act(async () => skills.click());
+    await setActive(false);
+    expect(container.querySelector(".research-skills")).toBeNull();
+    await setActive(true);
+    expect(skills.getAttribute("aria-expanded")).toBe("false");
+    expect(invoke.mock.calls.filter(([channel]) => channel === "zhiyan:agent:start")).toHaveLength(1);
+  });
+  it("keeps a citation clickable when pointer focus closes the history popover", async () => {
+    const { onJump } = await mount();
+    await act(async () => emit({ type: "message_end", message: {
+      id: "source", role: "assistant", content: "证据[引用:b1]。",
+      citations: [{ paperId: "p1", blockId: "b1", label: "原文" }],
+    } }));
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="历史对话"]')!.click());
+    const citation = container.querySelector<HTMLButtonElement>(".research-inline-citation")!;
+    await act(async () => {
+      citation.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      citation.focus();
+    });
+    expect(container.querySelector(".research-history")).toBeNull();
+    expect(citation.isConnected).toBe(true);
+    expect(document.activeElement).toBe(citation);
+    await act(async () => citation.click());
+    expect(onJump).toHaveBeenCalledWith("b1");
+  });
   it("loads the skill catalogue without starting a model session when credentials are missing", async () => {
     const { invoke } = await mount(false);
     expect(invoke).toHaveBeenCalledWith("zhiyan:agent:skills");
@@ -49,8 +159,9 @@ describe("research assistant", () => {
       emit({ type: "tool_start", tool: { id: "t1", name: "add_paper_to_library", label: "加入文献库", status: "running", input: {} } });
       emit({ type: "approval_required", approvalId: "a1", toolCallId: "t1", paper: { title: "Result", authors: ["A"], year: 2024 } });
     });
-    const approve = [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.includes("确认加入"))!;
+    const approve = container.querySelector<HTMLButtonElement>(".research-approval-actions .primary-button")!;
     expect(approve).toBeTruthy();
+    expect(container.querySelector('[aria-label="工具：确认加入文献库"]')).not.toBeNull();
     await act(async () => approve.click());
     expect(onAddPaper).toHaveBeenCalledWith(expect.objectContaining({ title: "Result" }));
     expect(invoke).toHaveBeenCalledWith("zhiyan:agent:approve", expect.objectContaining({ approvalId: "a1", approved: true, result: { id: "added", duplicate: false } }));
@@ -280,7 +391,8 @@ describe("research assistant", () => {
       { name: "literature-search-review", title: "文献检索与筛选", prompt: "查找并筛选相关文献" },
       { name: "literature-comparison-notes", title: "文献对比与笔记", prompt: "对比证据并整理笔记" },
     ] }));
-    expect(container.textContent).toContain("预置研究技能");
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="篇篇的拿手活"]')!.click());
+    expect(container.querySelector(".research-skills-list")).not.toBeNull();
     const button = [...container.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === "论文精读");
     expect(button).toBeTruthy();
     await act(async () => button!.click());

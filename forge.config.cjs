@@ -9,7 +9,8 @@ function ignorePackageFile(file) {
   if (!relative) return false;
 
   const parts = relative.split("/");
-  if (relative === "package.json") return false;
+  if (["package.json", "brand.json"].includes(relative)) return false;
+  if (relative === "assets" || relative === "assets/brand" || relative === "assets/brand/pianpian.ico") return false;
   if (parts[0] === "skills") {
     return !skillFiles.some((file) => file === relative || file.startsWith(`${relative}/`));
   }
@@ -19,11 +20,12 @@ function ignorePackageFile(file) {
   }
   if (parts[0] === "electron") {
     if (parts.length === 1) return false;
-    return parts.length !== 2 || !["main.cjs", "preload.cjs", "resource.cjs", "secret-store.cjs", "settings.cjs", "ipc-security.cjs", "ai.cjs", "ai-stream-ipc.cjs", "document-store.cjs", "document-tasks.cjs", "mineru.cjs", "research-agent-runtime.cjs", "research-agent-tools.cjs", "research-agent-ipc.cjs", "literature-search.cjs", "pi-agent.cjs", "research-skills.cjs"].includes(parts[1]);
+    return parts.length !== 2 || !["main.cjs", "brand.cjs", "preload.cjs", "resource.cjs", "secret-store.cjs", "settings.cjs", "ipc-security.cjs", "ai.cjs", "ai-stream-ipc.cjs", "document-store.cjs", "document-tasks.cjs", "mineru.cjs", "research-agent-runtime.cjs", "research-agent-tools.cjs", "research-agent-ipc.cjs", "research-citations.cjs", "literature-search.cjs", "pi-agent.cjs", "pi-worker-session.cjs", "pi-agent-worker.cjs", "research-skills.cjs", "research-conversations.cjs", "research-library.cjs"].includes(parts[1]);
   }
   if (parts[0] === "dist") {
     if (parts.length === 1 || relative === "dist/index.html") return false;
     if (relative === "dist/pdf.worker.min.mjs") return false;
+    if (parts[1] === "brand") return parts.length > 3 || (parts.length === 3 && !["pianpian-avatar.webp", "pianpian-reading.webp"].includes(parts[2]));
     if (parts[1] === "assets") {
       return parts.length > 3 || (parts.length === 3 && !/\.(?:js|mjs|css|woff2?|ttf)$/.test(parts[2]));
     }
@@ -38,7 +40,8 @@ function ignorePackageFile(file) {
 module.exports = {
   packagerConfig: {
     asar: true,
-    executableName: "Zhiyan",
+    executableName: "Pianpian",
+    icon: "assets/brand/pianpian.ico",
     prune: false,
     ignore: ignorePackageFile,
   },

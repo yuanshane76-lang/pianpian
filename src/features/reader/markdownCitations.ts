@@ -15,7 +15,7 @@ export function citationRemark(citations: MarkdownCitation[]) {
         if (child.type !== "text" || !child.value) { visit(child); return [child]; }
         const parts: Node[] = [];
         let position = 0;
-        for (const match of child.value.matchAll(/\[引用:([^\]\r\n]{1,200})\]/g)) {
+        for (const match of child.value.matchAll(/\[引用:([^\]\r\n]{1,420})\]/g)) {
           const index = ids.get(match[1]);
           if (index === undefined) continue;
           parts.push({ type: "text", value: child.value.slice(position, match.index) });
