@@ -32,7 +32,7 @@ function registerResearchAgentHandlers({ ipcMain, isDev, readSettings, createRun
   const getRuntime = (event) => {
     const id = event.sender.id;
     const runtime = runtimeStore.get(id);
-    if (!runtime) throw new Error("Agent 会话不存在，请重新打开研究助手");
+    if (!runtime) throw new Error("对话会话不存在，请重新打开篇篇对话");
     return runtime;
   };
   ipcMain.handle("zhiyan:agent:start", async (event, context) => {

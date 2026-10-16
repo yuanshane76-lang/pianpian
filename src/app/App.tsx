@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, ArrowLeft, BookOpen, Settings2, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Settings2, X } from "lucide-react";
+import { Pianpian } from "../brand/Pianpian";
 import {
   getDocumentBlockSignature,
   getDocumentContentSignature,
@@ -1086,8 +1087,8 @@ export default function App() {
   if (view === "research") {
     const parsedCount = papers.filter((item) => canOpenPaper(item, pipelineStates[item.id])).length;
     return <>{storageWarning}{settingsDialog}{wordbookDialog}<main className="research-workspace">
-      <header className="research-workspace-header"><button type="button" className="back-button" onClick={() => setView("library")}><ArrowLeft size={17} />返回文献库</button><div><BookOpen size={18} /><strong>纸研 · 研究工作区</strong></div><button type="button" className="icon-button" aria-label="服务配置" onClick={() => setSettingsOpen(true)}><Settings2 size={17} /></button></header>
-      <div className="research-workspace-body"><aside className="research-workspace-context"><span className="eyebrow">全库研究上下文</span><h1>与整个文献库对话</h1><p>检索已有论文的标题、作者与已解析正文，按需读取原文并对比证据。不受首页选中论文影响。</p><div className="research-context-stat"><strong>{papers.length}</strong><span>本地文献</span><strong>{parsedCount}</strong><span>已就绪论文</span></div><div className="research-workspace-tip"><strong>证据范围</strong><p>已解析论文可读取正文与定位引用。<br />未解析条目仅提供元数据，不作为全文证据。<br />全库与单篇对话分别保存。</p></div></aside><div className="research-workspace-chat"><ResearchAssistant scope="library" paper={WORKSPACE_CONTEXT} library={papers} onAddPaper={handleAddLiterature} available={availability.available} configurationRevision={serviceSettings.revision} onOpenSettings={() => setSettingsOpen(true)} onJump={() => {}} onJumpPaper={(paperId, blockId) => { const target = papers.find((item) => item.id === paperId); if (!target || !canOpenPaper(target, pipelineStates[paperId])) return; setSelectedPaperId(paperId); setSourceNavigation({ paperId, blockId, requestId: ++sourceNavigationSequence.current }); setView("reader"); }} /></div></div>
+      <header className="research-workspace-header"><button type="button" className="back-button" onClick={() => setView("library")}><ArrowLeft size={17} />返回文献库</button><div><Pianpian /><strong>和篇篇聊聊</strong></div><button type="button" className="icon-button" aria-label="服务配置" onClick={() => setSettingsOpen(true)}><Settings2 size={17} /></button></header>
+      <div className="research-workspace-body"><aside className="research-workspace-context"><Pianpian variant="reading" /><span className="eyebrow">你的论文阅读伙伴</span><h1>每篇论文，<br />都有个伴。</h1><p>把问题告诉篇篇，一起翻翻文献库、对照原文，再把收获整理成笔记。不受首页选中论文影响。</p><div className="research-context-stat"><strong>{papers.length}</strong><span>本地文献</span><strong>{parsedCount}</strong><span>已就绪论文</span></div><div className="research-workspace-tip"><strong>证据范围</strong><p>已解析论文可读取正文与定位引用。<br />未解析条目仅提供元数据，不作为全文证据。<br />全库与单篇对话分别保存。</p></div></aside><div className="research-workspace-chat"><ResearchAssistant scope="library" paper={WORKSPACE_CONTEXT} library={papers} onAddPaper={handleAddLiterature} available={availability.available} configurationRevision={serviceSettings.revision} onOpenSettings={() => setSettingsOpen(true)} onJump={() => {}} onJumpPaper={(paperId, blockId) => { const target = papers.find((item) => item.id === paperId); if (!target || !canOpenPaper(target, pipelineStates[paperId])) return; setSelectedPaperId(paperId); setSourceNavigation({ paperId, blockId, requestId: ++sourceNavigationSequence.current }); setView("reader"); }} /></div></div>
     </main></>;
   }
 

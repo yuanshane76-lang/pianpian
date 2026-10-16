@@ -95,10 +95,10 @@ if (process.versions.electron) {
       await page.getByRole("tab", { name: /论文解析/ }).click();
       assert(await page.locator("#mineru-key").isVisible());
       await page.getByRole("button", { name: "关闭配置", exact: true }).click();
-      await page.getByRole("button", { name: "打开研究助手", exact: true }).click();
+      await page.getByRole("button", { name: "问问篇篇", exact: true }).click();
       assert.equal(await background(page, ".research-workspace-chat"), "rgb(27, 32, 36)");
       assert.equal(await background(page, ".research-input-wrap"), "rgb(38, 45, 51)");
-      await page.locator(".research-skills summary").click();
+      await page.getByRole("button", { name: "篇篇的拿手活", exact: true }).click();
       assert.equal(await background(page, ".research-skills-list button:first-child"), "rgb(38, 45, 51)");
       await capture(page, "02-dark-research-workspace.png");
       await page.getByRole("button", { name: "返回文献库", exact: true }).click();
@@ -132,7 +132,7 @@ if (process.versions.electron) {
       const pixel = await page.locator(".pdf-page-stage canvas").evaluate((canvas) =>
         [...canvas.getContext("2d").getImageData(10, 10, 1, 1).data]);
       assert.deepEqual(pixel, [255, 255, 255, 255]);
-      await page.getByRole("tab", { name: "研究对话", exact: true }).click();
+      await page.getByRole("tab", { name: "聊聊", exact: true }).click();
       assert.equal(await background(page, ".research-agent-composer"), "rgb(27, 32, 36)");
       await capture(page, "03-dark-reader.png");
       report.checks.push("Dark preference survives Electron restart; original PDF canvas stays white");

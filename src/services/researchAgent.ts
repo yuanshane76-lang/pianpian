@@ -73,7 +73,7 @@ export function subscribeToResearchAgent(onEvent: (event: ResearchAgentEvent) =>
 
 export async function startResearchAgent(context: ResearchAgentContext): Promise<{ sessionId: string }> {
   const bridge = getDesktopBridge();
-  if (!bridge?.on) throw new Error("研究 Agent 需要在纸研桌面端中使用");
+  if (!bridge?.on) throw new Error("篇篇对话需要在桌面端中使用");
   return bridge.invoke("zhiyan:agent:start", context);
 }
 
@@ -110,7 +110,7 @@ export interface ConversationSummary {
 export interface ResearchConversation extends ConversationSummary { timeline: ResearchTimelineItem[] }
 async function historyCall<T>(action: string, input: unknown): Promise<T> {
   const bridge = getDesktopBridge();
-  if (!bridge) throw new Error("对话历史需要在纸研桌面端中使用");
+  if (!bridge) throw new Error("对话历史需要在篇篇桌面端中使用");
   return bridge.invoke<T>(`zhiyan:agent:conversations:${action}`, input);
 }
 function normalizeConversation(value: ResearchConversation): ResearchConversation {

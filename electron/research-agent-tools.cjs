@@ -71,7 +71,7 @@ function toolResult(textContent, structuredContent) {
 function createToolDefinitions({ getContext, emitApproval, fetchImpl, readLibraryPaper }) {
   const tool = (name, label, description, execute) => ({ name, label, description, parameters: { type: "object", properties: {}, additionalProperties: false }, execute });
   return [
-    tool("read_research_skill", "读取预置研究技能", "按名称读取随纸研安装的研究流程说明；不接受文件路径。", async (_id, params) => {
+    tool("read_research_skill", "读取预置研究技能", "按名称读取随篇篇安装的阅读流程说明；不接受文件路径。", async (_id, params) => {
       const skill = readBundledResearchSkill(params?.name);
       return toolResult(`已读取预置研究技能「${skill.title}」。`, skill);
     }),

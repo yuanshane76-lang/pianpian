@@ -1,4 +1,5 @@
-import { BookOpen, Clock3, FolderKanban, Heart, LibraryBig, Plus, Settings2 } from "lucide-react";
+import { Clock3, FolderKanban, Heart, LibraryBig, Plus, Settings2 } from "lucide-react";
+import { brand, Pianpian } from "../../brand/Pianpian";
 import { ThemeToggle } from "../settings/ThemeToggle";
 import type { LibraryGroup } from "../../domain/library";
 
@@ -21,11 +22,11 @@ export function LibrarySidebar({ activeFilter, groups, onFilterChange, onCreateG
     <aside className="library-sidebar">
       <div className="brand-lockup">
         <div className="brand-mark" aria-hidden="true">
-          <BookOpen size={18} strokeWidth={2.2} />
+          <Pianpian />
         </div>
         <div>
-          <strong>纸研</strong>
-          <span>研究工作台</span>
+          <strong>{brand.name}</strong>
+          <span>论文阅读伙伴</span>
         </div>
       </div>
 

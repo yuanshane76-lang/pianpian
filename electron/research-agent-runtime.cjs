@@ -60,9 +60,9 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
     busy = false;
     sessionId = null;
     citationEvidence.clear();
-    clearPendingApprovals("研究助手已关闭");
+    clearPendingApprovals("篇篇对话已关闭");
     piSession = null;
-    publish({ type: "agent_error", message: "研究助手工作线程已退出，请重新连接后重试", recoverable: false });
+    publish({ type: "agent_error", message: "篇篇对话工作线程已退出，请重新连接后重试", recoverable: false });
   }
 
   function approve(input) {
@@ -224,7 +224,7 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
   }
 
   function updateContext(nextContext) {
-    if (disposed || !sessionId) throw new Error("Agent 会话不存在");
+    if (disposed || !sessionId) throw new Error("对话会话不存在");
     const next = normalizeContext(nextContext);
     if (next.scope !== context.scope || next.paper?.id !== context.paper?.id) throw new Error("不能更改当前对话的论文范围，请新建或切换对话");
     if (JSON.stringify(next.paper?.blocks) !== JSON.stringify(context.paper?.blocks)) {

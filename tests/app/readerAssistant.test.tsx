@@ -41,7 +41,7 @@ afterEach(async () => {
 describe("chart result streaming", () => {
   it("reveals a cached chart result when another double-click starts from the research tab", async () => {
     const props = await mount({ selectedBlock: { id: "chart", kind: "image", pageNumber: 1, order: 0, text: "Figure" },
-      researchPanel: <div>研究对话内容</div>, chartReading: { summary: "比较模型", encoding: "读指标", findings: ["发现"],
+      researchPanel: <div>聊聊内容</div>, chartReading: { summary: "比较模型", encoding: "读指标", findings: ["发现"],
         role: "作用", caveats: ["限制"] } });
     await act(async () => container.querySelector<HTMLButtonElement>('[role="tab"]:last-child')!.click());
     expect(container.querySelector('[role="tab"]:last-child')?.getAttribute("aria-selected")).toBe("true");
@@ -76,7 +76,7 @@ describe("reader assistant layout", () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="insight"]')!.click());
     expect(container.querySelector(".paragraph-progress")?.textContent).toContain("正在生成摘要与作用");
     await act(async () => tabs[1].click());
-    expect(container.querySelector(".vocabulary-intro")?.textContent).toContain("正在挑选段落词汇");
+    expect(container.querySelector(".vocabulary-intro")?.textContent).toContain("篇篇正在选词");
   });
 
   it("keeps AI vocabulary opt-in until the user asks for it", async () => {
@@ -90,14 +90,19 @@ describe("reader assistant layout", () => {
 
   it("mounts research only after its tab is visited and keeps it mounted across tab changes", async () => {
     const mounted = vi.fn(), unmounted = vi.fn();
-    function Probe() { useEffect(() => { mounted(); return unmounted; }, []); return <div>研究内容</div>; }
+    function Probe({ active }: { active?: boolean }) { useEffect(() => { mounted(); return unmounted; }, []); return <div data-research-active={active}>研究内容</div>; }
     await mount({ researchPanel: <Probe /> });
     expect(mounted).not.toHaveBeenCalled();
     const research = container.querySelector<HTMLButtonElement>('[id$="-research-tab"]')!;
     await act(async () => research.click());
     expect(mounted).toHaveBeenCalledOnce();
+    expect(container.querySelector('[data-research-active="true"]')).not.toBeNull();
     await act(async () => container.querySelector<HTMLButtonElement>('[id$="-assist-tab"]')!.click());
     expect(unmounted).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-research-active="false"]')).not.toBeNull();
+    await act(async () => research.click());
+    expect(container.querySelector('[data-research-active="true"]')).not.toBeNull();
+    expect(mounted).toHaveBeenCalledOnce();
   });
 
   it("prioritizes the selected paragraph without duplicating the original text", async () => {

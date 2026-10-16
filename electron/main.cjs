@@ -13,6 +13,9 @@ const { createDocumentTasks } = require("./document-tasks.cjs");
 const { registerResearchAgentHandlers } = require("./research-agent-ipc.cjs");
 const { createConversationStore } = require("./research-conversations.cjs");
 const { createLibraryPaperReader } = require("./research-library.cjs");
+const { configureBrand, brand } = require("./brand.cjs");
+
+configureBrand(app);
 
 const isDev = !app.isPackaged;
 const distDirectory = path.join(__dirname, "..", "dist");
@@ -44,6 +47,8 @@ function createWindow() {
     minWidth: Math.min(980, workArea.width),
     minHeight: Math.min(680, workArea.height),
     show: false,
+    title: brand.name,
+    icon: path.join(__dirname, "..", "assets", "brand", "pianpian.ico"),
     backgroundColor: "#f4f7f7",
     webPreferences: {
       contextIsolation: true,

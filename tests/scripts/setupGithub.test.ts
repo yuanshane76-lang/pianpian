@@ -31,7 +31,7 @@ function global:git {
     }
     'remote get-url --push --all origin' {
       if ($scenario.badPushUrl) { 'https://github.com/someone/public-project.git' }
-      else { 'https://github.com/yuanshane76-lang/zhiyan-workbench.git' }
+      else { 'https://github.com/yuanshane76-lang/pianpian.git' }
       return
     }
     'ls-remote --heads origin main' {
@@ -74,7 +74,7 @@ function global:gh {
     if ($scenario.repoMissing -and -not $global:createdRepository) {
       'GraphQL: Could not resolve to a Repository with the name'; $global:LASTEXITCODE = 1; return
     }
-    $url = if ($scenario.wrongHost) { 'https://example.org/yuanshane76-lang/zhiyan-workbench' } else { 'https://github.com/yuanshane76-lang/zhiyan-workbench' }
+    $url = if ($scenario.wrongHost) { 'https://example.org/yuanshane76-lang/pianpian' } else { 'https://github.com/yuanshane76-lang/pianpian' }
     @{ isPrivate = -not $scenario.publicRepository; viewerPermission = 'ADMIN'; url = $url; defaultBranchRef = @{ name = 'main' } } |
       ConvertTo-Json -Compress
     return
@@ -89,7 +89,7 @@ function global:gh {
     return
   }
   if ($args[0] -eq 'pr' -and $args[1] -eq 'create') {
-    'https://github.com/yuanshane76-lang/zhiyan-workbench/pull/1'
+    'https://github.com/yuanshane76-lang/pianpian/pull/1'
   }
 }
 if ($scenario.bypassGitProxy) {
@@ -150,7 +150,7 @@ describe("GitHub setup boundaries", () => {
     { scenario: { wrongAccount: true }, reason: "预期账号" },
     { scenario: { publicRepository: true }, reason: "不是私有仓库" },
     { scenario: { origin: "https://github.com/someone/another-project.git" }, reason: "origin 指向其他仓库" },
-    { scenario: { origin: "https://github.com/yuanshane76-lang/zhiyan-workbench.git", badPushUrl: true }, reason: "实际推送地址" },
+    { scenario: { origin: "https://github.com/yuanshane76-lang/pianpian.git", badPushUrl: true }, reason: "实际推送地址" },
     { scenario: { wrongHost: true }, reason: "仓库主机或地址" },
     { scenario: { changeCommitAfterCheck: true }, reason: "提交或分支发生变化" },
   ].flatMap(({ scenario, reason }) =>

@@ -3,7 +3,7 @@ param(
   [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9-]{0,38}$')]
   [string]$Owner = 'yuanshane76-lang',
   [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$')]
-  [string]$Repository = 'zhiyan-workbench',
+  [string]$Repository = 'pianpian',
   [switch]$CheckOnly,
   [switch]$BypassGitProxy
 )
@@ -113,7 +113,7 @@ try {
     }
     Invoke-Checked gh @(
       'repo', 'create', $fullName, '--private', '--disable-wiki',
-      '--description', '纸研工作台：中文、本地优先的英文论文阅读桌面产品。'
+      '--description', '篇篇 Pianpian：每篇论文，都有个伴。中文、本地优先的 AI 论文阅读伙伴。'
     ) | Write-Host
   }
 
@@ -178,7 +178,7 @@ try {
 '@ | Set-Content -LiteralPath $bodyPath -Encoding utf8
           Invoke-Checked gh @(
             'pr', 'create', '--repo', $qualifiedRepository, '--base', 'main', '--head', $branch,
-            '--title', 'chore: 建立纸研工作台协作流程', '--body-file', $bodyPath
+            '--title', 'chore: 建立篇篇协作流程', '--body-file', $bodyPath
           ) | Write-Host
         } finally {
           Remove-Item -LiteralPath $bodyPath -ErrorAction SilentlyContinue

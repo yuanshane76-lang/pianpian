@@ -34,9 +34,9 @@ describe("vocabulary panel", () => {
       />,
     ));
 
-    expect(container.textContent?.match(/AI 精选本段词汇/g)).toHaveLength(1);
+    expect(container.textContent?.match(/篇篇选词/g)).toHaveLength(1);
     expect(container.textContent).not.toContain("第 9 页");
-    expect(container.querySelector(".vocabulary-heading")?.textContent).toContain("AI 精选本段词汇");
+    expect(container.querySelector(".vocabulary-heading")?.textContent).toContain("篇篇选词");
     expect([...container.querySelectorAll("button")].some((button) => button.textContent?.includes("生成本段词汇"))).toBe(true);
   });
 });

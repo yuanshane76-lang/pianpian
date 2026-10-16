@@ -9,6 +9,7 @@ import {
   type ServiceSettingsInput,
 } from "../../domain/serviceSettings";
 import { getDesktopBridge } from "../../platform/electron";
+import { Pianpian } from "../../brand/Pianpian";
 
 interface Props {
   required?: boolean;
@@ -220,11 +221,11 @@ export function ServiceSettingsDialog({ onClose, onSaved, required = false, init
           {required ? <span className="settings-required-label">使用前需配置</span> : <button className="icon-button" type="button" aria-label="关闭配置" title="关闭配置" onClick={onClose}><X size={18} /></button>}
         </header>
         <div className="settings-body">
-          {!desktop ? <p className="settings-notice">密钥只支持在桌面程序中加密保存。请打开 ZIP 内的 Zhiyan.exe 进行配置。</p> : null}
+          {!desktop ? <p className="settings-notice">密钥只支持在桌面程序中加密保存。请打开 ZIP 内的 Pianpian.exe 进行配置。</p> : null}
           {required ? <section className="settings-setup" aria-label="服务配置引导">
-            <div className="settings-setup-heading"><KeyRound size={18} aria-hidden="true" /><strong>完成配置后开始使用</strong>
+            <div className="settings-setup-heading"><Pianpian /><strong>完成配置后开始使用</strong>
               {loaded && !readError ? <span>已完成 {2 - missing.length} / 2</span> : null}</div>
-            <p id="service-setup-description">需要配置一个模型服务的 API Key 和 MinerU Token。支持分步保存，补齐后自动进入工作台。</p>
+            <p id="service-setup-description">你好，我是篇篇。先连接一个模型服务和 MinerU，我们就能一起读论文了。需要填写 API Key 和 MinerU Token，支持分步保存，补齐后自动进入文献库。</p>
             {loaded && !readError ? <ol className="settings-setup-steps">
               <li data-complete={!missing.includes("model")}><CheckCircle2 size={15} aria-hidden="true" />模型服务 <span>{missing.includes("model") ? "待填写" : "已保存"}</span></li>
               <li data-complete={!missing.includes("parser")}><CheckCircle2 size={15} aria-hidden="true" />MinerU 解析 <span>{missing.includes("parser") ? "待填写" : "已保存"}</span></li>
@@ -244,7 +245,7 @@ export function ServiceSettingsDialog({ onClose, onSaved, required = false, init
               onClick={() => setServiceArea("model")}
               onKeyDown={(event) => moveSelection(event, 0, "area")}
             >
-              <strong>模型服务</strong><span>用于翻译、问答和研究 Agent</span>
+              <strong>模型服务</strong><span>让篇篇帮你翻译、理解和对话</span>
             </button>
             <button
               type="button"

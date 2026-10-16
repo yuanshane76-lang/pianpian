@@ -13,6 +13,14 @@ const ignored = (relative: string) =>
 describe("portable package contents", () => {
   it("includes only runtime entry points and built assets", () => {
     expect(ignored("package.json")).toBe(false);
+    expect(ignored("brand.json")).toBe(false);
+    expect(ignored("electron/brand.cjs")).toBe(false);
+    expect(ignored("assets/brand/pianpian.ico")).toBe(false);
+    expect(ignored("dist/brand/pianpian-avatar.webp")).toBe(false);
+    expect(ignored("dist/brand/pianpian-reading.webp")).toBe(false);
+    expect(ignored("dist/brand/private.svg")).toBe(true);
+    expect(ignored("output/imagegen/pianpian-character-sheet-v1.png")).toBe(true);
+    expect(ignored("tmp/imagegen/pianpian-character-v1.txt")).toBe(true);
     expect(ignored("electron/main.cjs")).toBe(false);
     expect(ignored("electron/preload.cjs")).toBe(false);
     expect(ignored("electron/resource.cjs")).toBe(false);

@@ -9,12 +9,18 @@
 | `library.png` | 真实桌面文献库界面，三个专门编写的合成论文条目。 |
 | `reader.png` | 真实 PDF.js 画布与段落交互层，右侧为预设的中文解释模拟响应。 |
 | `wordbook.png` | 通过真实界面主动收藏三个词汇后打开个人单词表。 |
-| `../screenshots/research-block-citations.png` | 2026-10-14 的研究助手桌面回归截图：本仓库合成的一页 PDF、真实 Pi SDK、本地模拟 SSE，展示紧凑工具过程和可点击原文引用。无用户论文或真实服务输出。 |
+| `../screenshots/pianpian-workspace.png` | 2026-10-16 新版篇篇全库对话与「拿手活」浮层，来自浅色桌面回归的 `00-global-skills.png`。 |
+| `../screenshots/pianpian-reader-light.png` | 2026-10-16 新版篇篇浅色阅读器，来自 `06-reader-agent.png`：本仓库合成的一页 PDF、真实 Pi SDK、本地模拟 SSE，展示工具执行与可点击原文引用。 |
+| `../screenshots/research-reader-dark.png` | 同一次深色桌面回归的 `06-reader-agent.png`，展示深色界面、原文保持原貌与引用定位。 |
 
 `library.png`、`reader.png`、`wordbook.png` 于 2026-10-11 基于 `0.3.0` 的桌面界面生成。演示文档均标为 `Documentation Example`，内容是为界面说明编写的英文短文，不是发表论文；其中的对比数值仅为合成图形数据，不构成研究证据。
 
-`research-block-citations.png` 来自 `scripts/research-agent-e2e.cjs` 的 `06-reader-agent.png`，文档标题为 `Research Agent Fixture`。模型与文献检索使用本地合成响应；截图用于展示工具状态、引用按钮与 PDF 的布局，不代表真实回答的质量评估。
+`pianpian-reader-light.png` 来自 `scripts/research-agent-e2e.cjs` 的 `06-reader-agent.png`，文档标题为 `Research Agent Fixture`。模型与文献检索使用本地合成响应；截图用于展示工具状态、引用按钮与 PDF 的布局，不代表真实回答的质量评估。原有 `research-bundled-skills.png` 保留为 2026-10-12 的历史打包验收图，`research-block-citations.png` 保留为 2026-10-14 的历史对话验收图。
 
 截图生成使用隔离的临时 Electron 用户目录。原始 PDF 在本机合成，解析结果为固定结构化数据，翻译、解释、摘要与词汇为模拟流式响应；未访问用户文献库、未使用真实密钥、未调用外部服务。演示 PDF、解析数据和临时设置文件不提交，只提交以上视觉资产。
 
 这些图用于展示交互和信息布局，不能作为真实 MinerU 解析精度或模型回答质量的验证结果。
+
+## 篇篇品牌素材
+
+README 顶部与当前应用使用 `public/brand/` 下的篇篇形象：2026-10-16 通过 imagegen Python CLI / gpt-image-2 真实生成，再本地提取透明背景。它们不是桌面截图，也不代表论文或服务测试结果。详细来源与提示词见 [品牌语言](../品牌语言.md)。文献库、原文阅读与单词表的旧截图仍作为历史功能示意；三张对话截图已更新为新版。

@@ -151,6 +151,6 @@ describe("research Agent IPC", () => {
     const owner = createEvent(1);
     const stranger = createEvent(2);
     await ipcMain.handlers.get("zhiyan:agent:start")!(owner, { paper: { id: "p1", title: "Paper", blocks: [] }, library: [] });
-    await expect(ipcMain.handlers.get("zhiyan:agent:prompt")!(stranger, "越权")).rejects.toThrow("Agent 会话不存在");
+    await expect(ipcMain.handlers.get("zhiyan:agent:prompt")!(stranger, "越权")).rejects.toThrow("对话会话不存在");
   });
 });

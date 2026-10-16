@@ -2,6 +2,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../../src/app/App";
+import { PaperEditDialog } from "../../src/features/library/PaperEditDialog";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -41,6 +42,61 @@ async function mount() {
 }
 
 describe("library CRUD interactions", () => {
+  it("keeps the group draft and original selection when creation fails, allowing a retry", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const onCreateGroup = vi.fn().mockImplementationOnce(() => { throw new Error("分组保存失败"); })
+      .mockReturnValue({ id: "group-new", name: "研究方法" });
+    await act(async () => root.render(<PaperEditDialog paper={{ ...paper, blockData: [] }} groups={[{ id: "group-inbox", name: "待整理", createdAt: "2026-10-16" }, { id: "group-new", name: "研究方法", createdAt: "2026-10-16" }]} onCreateGroup={onCreateGroup} onClose={vi.fn()} onSave={vi.fn()} />));
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="在编辑文献中创建分组"]')!.click());
+    const name = container.querySelector<HTMLInputElement>('[aria-label="新分组名称"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(name, "研究方法");
+      name.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="确认创建分组"]')!.click());
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("分组保存失败");
+    expect(name.value).toBe("研究方法");
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="确认创建分组"]')!.click());
+    expect(container.querySelector<HTMLSelectElement>("#paper-group")!.value).toBe("group-new");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    await act(async () => root.unmount());
+  });
+
+  it("creates and selects a group inline without opening a second dialog", async () => {
+    const { container, root } = await mount();
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="编辑文献"]')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="在编辑文献中创建分组"]')!.click());
+    expect(container.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    const name = container.querySelector<HTMLInputElement>('[aria-label="新分组名称"]')!;
+    expect(name).toBe(document.activeElement);
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="保存文献"]')!.disabled).toBe(true);
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="确认创建分组"]')!.click());
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("分组名称");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(name, "每周组会");
+      name.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => name.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(container.querySelector<HTMLSelectElement>("#paper-group")!.selectedOptions[0].text).toBe("每周组会");
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="保存文献"]')!.click());
+    expect(JSON.parse(window.localStorage.getItem("zhiyan-workbench.papers.v1")!)[0].groupId).toBe("group-每周组会");
+    await act(async () => root.unmount());
+  });
+
+  it("cancels inline group creation with Escape and keeps the original selection", async () => {
+    const { container, root } = await mount();
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="编辑文献"]')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="在编辑文献中创建分组"]')!.click());
+    const name = container.querySelector<HTMLInputElement>('[aria-label="新分组名称"]')!;
+    await act(async () => name.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(container.querySelector<HTMLSelectElement>("#paper-group")!.value).toBe("group-inbox");
+    expect(container.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    expect(document.activeElement).toBe(container.querySelector('[aria-label="在编辑文献中创建分组"]'));
+    await act(async () => root.unmount());
+  });
+
   it("creates a group, assigns the paper to it, and filters by the group", async () => {
     const { container, root } = await mount();
     await act(async () => (container.querySelector('[aria-label="创建分组"]') as HTMLButtonElement).click());
@@ -88,7 +144,7 @@ describe("library CRUD interactions", () => {
     expect(container.querySelector('[role="dialog"][aria-label="删除文献"]')).not.toBeNull();
 
     await act(async () => (container.querySelector('[aria-label="确认删除文献"]') as HTMLButtonElement).click());
-    expect(container.textContent).toContain("文献库还是空的");
+    expect(container.textContent).toContain("暂时没有文献");
     expect(JSON.parse(window.localStorage.getItem("zhiyan-workbench.papers.v1")!)).toEqual([]);
     await act(async () => root.unmount());
   });

@@ -1,4 +1,5 @@
-import { AlertTriangle, ArrowUpRight, BookMarked, Bot, FilePlus2, FolderOpen, Pencil, Sparkles, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, BookMarked, FilePlus2, FolderOpen, Pencil, Sparkles, Trash2 } from "lucide-react";
+import { Pianpian } from "../../brand/Pianpian";
 import { useState } from "react";
 import type { LibraryGroup, PaperMetadataPatch, PaperRecord } from "../../domain/library";
 import { canOpenPaper, getLibraryPreparation, getPaperPipelineState, type PaperPipelineState } from "../../domain/pipeline";
@@ -93,7 +94,7 @@ export function LibraryView({
   return (
     <>
       <div className="workspace-shell">
-        <div className="library-global-tools">{onOpenResearch ? <button type="button" className="wordbook-button" aria-label="打开研究助手" onClick={onOpenResearch}><Bot size={17} /><span>研究助手</span></button> : null}<button type="button" className="wordbook-button" aria-label="打开单词表" title="单词表" onClick={onOpenWordbook}><BookMarked size={17} /><span>单词表</span><small>{wordbookCount ?? 0}</small></button></div>
+        <div className="library-global-tools">{onOpenResearch ? <button type="button" className="wordbook-button" aria-label="问问篇篇" onClick={onOpenResearch}><Pianpian /><span>问问篇篇</span></button> : null}<button type="button" className="wordbook-button" aria-label="打开单词表" title="单词表" onClick={onOpenWordbook}><BookMarked size={17} /><span>单词表</span><small>{wordbookCount ?? 0}</small></button></div>
         <LibrarySidebar activeFilter={filter} groups={groups} onFilterChange={onFilterChange} onCreateGroup={() => setCreatingGroup(true)} onOpenSettings={onOpenSettings} />
         <PaperList
           papers={papers}
@@ -180,9 +181,9 @@ export function LibraryView({
             </>
           ) : (
             <div className="detail-empty">
-              <FilePlus2 size={32} />
-              <h2>{papers.length ? "选择一篇文献开始" : "文献库还是空的"}</h2>
-              <p>{papers.length ? "从左侧选择一篇文献查看详情。" : "导入 PDF 后，这里会成为你的研究入口。"}</p>
+              <Pianpian variant="reading" />
+              <h2>{papers.length ? "今天，我们一起读哪篇？" : "每篇论文，都有个伴。"}</h2>
+              <p>{papers.length ? "从左侧选择一篇文献，篇篇陪你读。" : "导入第一篇 PDF，让篇篇陪你读明白。"}</p>
               {!papers.length ? (
                 <label className="secondary-button">
                   <FolderOpen size={17} />

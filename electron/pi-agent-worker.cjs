@@ -2,7 +2,7 @@ const { parentPort } = require("node:worker_threads");
 const { createLocalPiSession } = require("./pi-agent.cjs");
 let session;
 const pendingTools = new Map();
-function errorText(error) { return typeof error?.message === "string" ? error.message : "研究助手工作线程失败"; }
+function errorText(error) { return typeof error?.message === "string" ? error.message : "篇篇对话工作线程失败"; }
 parentPort.on("message", async (message) => {
   if (message.type === "tool_result") {
     const pending = pendingTools.get(message.id);

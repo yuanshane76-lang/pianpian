@@ -5,7 +5,7 @@ async function createPiWorkerSession({ service, tools, emit, cwd = process.cwd()
   const worker = new Worker(path.join(__dirname, "pi-agent-worker.cjs"));
   const pending = new Map(), controllers = new Map();
   let sequence = 0, disposed = false, failureNotified = false;
-  const safe = (value) => String(value || "研究助手工作线程失败").split(service.apiKey).join("[已隐藏]").slice(0, 2000);
+  const safe = (value) => String(value || "篇篇对话工作线程失败").split(service.apiKey).join("[已隐藏]").slice(0, 2000);
   function notifyFailure(reason) {
     if (failureNotified) return;
     failureNotified = true;
@@ -18,7 +18,7 @@ async function createPiWorkerSession({ service, tools, emit, cwd = process.cwd()
     controllers.clear();
   }
   function request(type, args = {}) {
-    if (disposed) return Promise.reject(new Error("研究助手已关闭"));
+    if (disposed) return Promise.reject(new Error("篇篇对话已关闭"));
     const id = ++sequence;
     return new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject });
@@ -59,14 +59,14 @@ async function createPiWorkerSession({ service, tools, emit, cwd = process.cwd()
   worker.on("exit", (code) => {
     if (disposed) return;
     disposed = true;
-    const reason = code ? `研究助手工作线程异常退出（${code}）` : "研究助手工作线程已关闭";
+    const reason = code ? `篇篇对话工作线程异常退出（${code}）` : "篇篇对话工作线程已关闭";
     rejectPending(reason);
     notifyFailure(reason);
   });
   const cancelStartup = () => {
     if (disposed) return;
     disposed = true;
-    rejectPending("研究助手启动已取消");
+    rejectPending("篇篇对话启动已取消");
     void worker.terminate();
   };
   if (signal) {
@@ -92,7 +92,7 @@ async function createPiWorkerSession({ service, tools, emit, cwd = process.cwd()
     dispose: () => {
       signal?.removeEventListener("abort", cancelStartup);
       disposed = true;
-      rejectPending("研究助手已关闭");
+      rejectPending("篇篇对话已关闭");
       void worker.terminate();
     },
     activeTools: () => tools.map((tool) => tool.name),
