@@ -11,6 +11,8 @@ const { registerAiStreamHandlers } = require("./ai-stream-ipc.cjs");
 const { createDocumentStore } = require("./document-store.cjs");
 const { createDocumentTasks } = require("./document-tasks.cjs");
 const { registerResearchAgentHandlers } = require("./research-agent-ipc.cjs");
+const { createConversationStore } = require("./research-conversations.cjs");
+const { createLibraryPaperReader } = require("./research-library.cjs");
 
 const isDev = !app.isPackaged;
 const distDirectory = path.join(__dirname, "..", "dist");
@@ -98,12 +100,18 @@ app.whenReady().then(() => {
   });
   const readSettings = () => normalize(store.read());
   const disposeAiStreams = registerAiStreamHandlers({ ipcMain, isDev, readSettings, streamModel });
-  const disposeResearchAgent = registerResearchAgentHandlers({ ipcMain, isDev, readSettings });
-  app.once("before-quit", () => {
-    disposeAiStreams();
-    disposeResearchAgent();
-  });
   const documents = createDocumentStore({ rootDirectory: path.join(app.getPath("userData"), "documents") });
+  const disposeResearchAgent = registerResearchAgentHandlers({ ipcMain, isDev, readSettings,
+    conversationStore: createConversationStore({ rootDirectory: path.join(app.getPath("userData"), "research-history") }),
+    readLibraryPaper: createLibraryPaperReader({ documents }),
+  });
+  app.once("before-quit", (event) => {
+    event.preventDefault();
+    disposeAiStreams();
+    void disposeResearchAgent().catch(() => {
+      dialog.showErrorBox("对话历史保存失败", "退出前未能完整保存对话，请检查本地磁盘空间与权限。已保存的历史文件不会被清空。");
+    }).finally(() => app.quit());
+  });
   const documentTasks = createDocumentTasks({ documents, readSettings });
   secureHandle("zhiyan:documents:save", (input) => documents.save(input));
   secureHandle("zhiyan:documents:read", (id) => documents.read(id));

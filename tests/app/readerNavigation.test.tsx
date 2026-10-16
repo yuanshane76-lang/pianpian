@@ -32,7 +32,7 @@ HTMLElement.prototype.scrollIntoView = vi.fn();
 const paper: PaperRecord = {
   id: "navigation-paper", title: "返回阅读回归论文", authors: [], year: null,
   originalId: "navigation-original", sourcePath: "local://navigation-original",
-  importedAt: "2026-10-10", tags: ["导航测试"], favorite: true, parseStatus: "ready", parseVersion: 2,
+  importedAt: "2026-10-10", groupId: "group-inbox", favorite: true, parseStatus: "ready", parseVersion: 2,
   pageCount: 2, blocks: 1, readingPosition: { mode: "pdf", page: 2 },
   blockData: [{
     id: "page-two-paragraph", kind: "paragraph", pageNumber: 2, order: 0,

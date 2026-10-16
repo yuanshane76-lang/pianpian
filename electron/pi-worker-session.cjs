@@ -1,7 +1,7 @@
 const { Worker } = require("node:worker_threads");
 const path = require("node:path");
 
-async function createPiWorkerSession({ service, tools, emit, cwd = process.cwd(), signal, onFailure }) {
+async function createPiWorkerSession({ service, tools, emit, cwd = process.cwd(), signal, onFailure, history = [], scope = "paper" }) {
   const worker = new Worker(path.join(__dirname, "pi-agent-worker.cjs"));
   const pending = new Map(), controllers = new Map();
   let sequence = 0, disposed = false, failureNotified = false;
@@ -74,7 +74,7 @@ async function createPiWorkerSession({ service, tools, emit, cwd = process.cwd()
     else signal.addEventListener("abort", cancelStartup, { once: true });
   }
   try {
-    await request("init", { service, cwd, tools: tools.map(({ name, label, description }) => ({ name, label, description })) });
+    await request("init", { service, cwd, history, scope, tools: tools.map(({ name, label, description }) => ({ name, label, description })) });
   } catch (error) {
     disposed = true;
     rejectPending(safe(error.message));

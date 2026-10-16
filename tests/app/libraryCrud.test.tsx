@@ -13,7 +13,7 @@ const paper = {
   sourcePath: "local://crud-paper",
   originalId: "crud-document",
   importedAt: "2026-10-07",
-  tags: ["待整理"],
+  groupId: "group-inbox",
   favorite: false,
   blocks: 1,
   blockData: [{ id: "p001-b001", kind: "paragraph", pageNumber: 1, order: 0, text: "A paragraph." }],
@@ -41,6 +41,31 @@ async function mount() {
 }
 
 describe("library CRUD interactions", () => {
+  it("creates a group, assigns the paper to it, and filters by the group", async () => {
+    const { container, root } = await mount();
+    await act(async () => (container.querySelector('[aria-label="创建分组"]') as HTMLButtonElement).click());
+    const groupName = container.querySelector<HTMLInputElement>("#group-name")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(groupName, "AI 论文");
+      groupName.dispatchEvent(new Event("input", { bubbles: true }));
+      (container.querySelector('[aria-label="保存分组"]') as HTMLButtonElement).click();
+    });
+
+    expect(container.textContent).toContain("AI 论文");
+    await act(async () => (container.querySelector('[aria-label="编辑文献"]') as HTMLButtonElement).click());
+    const group = container.querySelector<HTMLSelectElement>("#paper-group")!;
+    await act(async () => {
+      group.value = "group-AI 论文";
+      group.dispatchEvent(new Event("change", { bubbles: true }));
+      (container.querySelector('[aria-label="保存文献"]') as HTMLButtonElement).click();
+    });
+
+    expect(JSON.parse(window.localStorage.getItem("zhiyan-workbench.papers.v1")!)[0].groupId).toBe("group-AI 论文");
+    await act(async () => (container.querySelector('[aria-label="分组：AI 论文"]') as HTMLButtonElement).click());
+    expect(container.querySelectorAll(".paper-row")).toHaveLength(1);
+    await act(async () => root.unmount());
+  });
+
   it("edits paper metadata from the detail panel and persists it", async () => {
     const { container, root } = await mount();
     await act(async () => (container.querySelector('[aria-label="编辑文献"]') as HTMLButtonElement).click());

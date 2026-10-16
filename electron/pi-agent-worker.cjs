@@ -15,6 +15,7 @@ parentPort.on("message", async (message) => {
     if (message.type === "init") {
       session = await createLocalPiSession({
         service: message.service, cwd: message.cwd,
+        history: message.history, scope: message.scope,
         emit: (event) => parentPort.postMessage({ type: "event", event }),
         tools: message.tools.map((tool) => ({ ...tool, execute: (id, params, signal) => new Promise((resolve, reject) => {
           pendingTools.set(id, { resolve, reject });

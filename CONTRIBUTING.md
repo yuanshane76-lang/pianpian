@@ -67,7 +67,7 @@ git worktree add -b fix/pdf-selection ../zhiyan-pdf-selection origin/main
 | `npm run check:credentials` | 检查常见凭据格式及当前分支历史，不打印密钥 |
 | `npm run check` | 凭据检查、测试、TypeScript 检查和前端构建 |
 | `npm run test:pi-agent:smoke` | 真实 Pi SDK、本地合成 SSE 和文献元数据，验证预置 Skill 按需读取与产品工具调用；禁止外部请求 |
-| `npm run test:research-agent:e2e` | 隔离 Electron、本地合成 SSE，验证预置技能入口、工具确认、文档导出、长文流式滚动和窗口尺寸变化 |
+| `npm run test:research-agent:e2e` | 隔离 Electron、本地合成 SSE，验证预置技能、历史增删改查/恢复模型上下文、双范围隔离、已解析正文检索/引用定位、工具确认、文档导出和流式滚动 |
 | `node scripts/packaged-research-skills-e2e.cjs <解压后的 Zhiyan.exe 路径>` | 验证 Windows 压缩包内的三个 Skill、已打包 Pi 工具循环及无密钥的中文技能入口；使用隔离用户目录与合成服务 |
 | `npm run make:win` | 验证后生成 Windows x64 免安装压缩包 |
 

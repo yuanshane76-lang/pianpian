@@ -1,4 +1,4 @@
-import type { PaperRecord } from "./library";
+import { DEFAULT_GROUP_ID, type PaperRecord } from "./library";
 
 export interface LiteraturePaper {
   title: string;
@@ -33,7 +33,7 @@ export function addLiteraturePaper(papers: PaperRecord[], item: LiteraturePaper,
     id, title, authors: item.authors, year: item.year,
     sourcePath: item.landingUrl || (doi ? `https://doi.org/${doi}` : `literature://${id}`),
     doi: doi || undefined, landingUrl: item.landingUrl, abstract: item.abstract,
-    importedAt: now, tags: ["待获取全文"], favorite: false, blocks: 0,
+    importedAt: now, groupId: DEFAULT_GROUP_ID, favorite: false, blocks: 0,
     recordType: "reference", blockData: [], parseVersion: 2,
   };
   return { papers: [record, ...papers], id, duplicate: false };

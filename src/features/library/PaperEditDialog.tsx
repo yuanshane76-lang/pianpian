@@ -1,10 +1,13 @@
-import { Save, X } from "lucide-react";
+import { FolderPlus, Save, X } from "lucide-react";
 import { useState } from "react";
-import type { PaperMetadataPatch, PaperRecord } from "../../domain/library";
+import type { LibraryGroup, PaperMetadataPatch, PaperRecord } from "../../domain/library";
+import { GroupCreateDialog } from "./GroupCreateDialog";
 
 interface PaperEditDialogProps {
   paper: PaperRecord;
+  groups: LibraryGroup[];
   onClose: () => void;
+  onCreateGroup: (name: string) => LibraryGroup;
   onSave: (patch: PaperMetadataPatch) => void;
 }
 
@@ -12,11 +15,12 @@ function splitValues(value: string): string[] {
   return [...new Set(value.split(/[,，;；\n]/).map((item) => item.trim()).filter(Boolean))];
 }
 
-export function PaperEditDialog({ paper, onClose, onSave }: PaperEditDialogProps) {
+export function PaperEditDialog({ paper, groups, onClose, onCreateGroup, onSave }: PaperEditDialogProps) {
   const [title, setTitle] = useState(paper.title);
   const [authors, setAuthors] = useState(paper.authors.join(", "));
   const [year, setYear] = useState(paper.year ? String(paper.year) : "");
-  const [tags, setTags] = useState(paper.tags.join(", "));
+  const [groupId, setGroupId] = useState(paper.groupId);
+  const [creatingGroup, setCreatingGroup] = useState(false);
   const [error, setError] = useState("");
 
   function save() {
@@ -34,7 +38,7 @@ export function PaperEditDialog({ paper, onClose, onSave }: PaperEditDialogProps
       title: normalizedTitle,
       authors: splitValues(authors),
       year: normalizedYear,
-      tags: splitValues(tags),
+      groupId,
     });
     onClose();
   }
@@ -51,7 +55,17 @@ export function PaperEditDialog({ paper, onClose, onSave }: PaperEditDialogProps
           <label className="settings-field" htmlFor="paper-title">标题<input id="paper-title" value={title} onChange={(event) => { setTitle(event.target.value); setError(""); }} /></label>
           <label className="settings-field" htmlFor="paper-authors">作者 <span>用逗号或换行分隔</span><input id="paper-authors" value={authors} onChange={(event) => setAuthors(event.target.value)} /></label>
           <label className="settings-field" htmlFor="paper-year">年份<input id="paper-year" inputMode="numeric" placeholder="例如 2024" value={year} onChange={(event) => setYear(event.target.value)} /></label>
-          <label className="settings-field" htmlFor="paper-tags">标签 <span>用逗号或换行分隔</span><input id="paper-tags" placeholder="例如 Transformer, NLP" value={tags} onChange={(event) => setTags(event.target.value)} /></label>
+          <div className="settings-field">
+            <label htmlFor="paper-group">所属分组</label>
+            <div className="group-select-row">
+              <select id="paper-group" value={groupId} onChange={(event) => setGroupId(event.target.value)}>
+                {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+              </select>
+              <button type="button" className="secondary-button compact" aria-label="在编辑文献中创建分组" onClick={() => setCreatingGroup(true)}>
+                <FolderPlus size={15} />新建分组
+              </button>
+            </div>
+          </div>
           {error ? <p className="settings-error" role="alert">{error}</p> : null}
         </div>
         <footer className="settings-footer">
@@ -59,6 +73,14 @@ export function PaperEditDialog({ paper, onClose, onSave }: PaperEditDialogProps
           <button className="primary-button" type="button" aria-label="保存文献" onClick={save}><Save size={15} />保存修改</button>
         </footer>
       </section>
+      {creatingGroup ? <GroupCreateDialog
+        onClose={() => setCreatingGroup(false)}
+        onSave={(name) => {
+          const group = onCreateGroup(name);
+          setGroupId(group.id);
+          setCreatingGroup(false);
+        }}
+      /> : null}
     </div>
   );
 }

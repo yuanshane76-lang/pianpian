@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { importPdfFile, loadPapers, savePapers } from "../../src/services/library";
-import { removePaper, updatePaperMetadata, type PaperRecord } from "../../src/domain/library";
+import { importPdfFile, loadGroups, loadPapers, saveGroups, savePapers } from "../../src/services/library";
+import { DEFAULT_GROUP_ID, removePaper, updatePaperMetadata, type PaperRecord } from "../../src/domain/library";
 
 const basePaper: PaperRecord = {
   id: "base",
@@ -9,7 +9,7 @@ const basePaper: PaperRecord = {
   year: null,
   sourcePath: "local://paper.pdf:100:1",
   importedAt: "2026-09-29T08:00:00.000Z",
-  tags: [],
+  groupId: DEFAULT_GROUP_ID,
   favorite: false,
   blocks: 1,
 };
@@ -30,6 +30,35 @@ afterEach(() => {
 });
 
 describe("paper persistence", () => {
+  it("migrates legacy tags into one group and writes the new schema", () => {
+    window.localStorage.setItem("zhiyan-workbench.papers.v1", JSON.stringify([{
+      ...basePaper,
+      groupId: undefined,
+      tags: ["  研究方法  ", "不再作为第二归属"],
+    }]));
+
+    expect(loadGroups().map((group) => group.name)).toEqual(["待整理", "研究方法"]);
+    expect(loadPapers()[0]).toMatchObject({ groupId: "group-研究方法" });
+    expect(loadPapers()[0]).not.toHaveProperty("tags");
+  });
+
+  it("puts papers without a legacy group into the default group", () => {
+    window.localStorage.setItem("zhiyan-workbench.papers.v1", JSON.stringify([{
+      ...basePaper,
+      groupId: undefined,
+    }]));
+
+    expect(loadPapers()[0].groupId).toBe(DEFAULT_GROUP_ID);
+  });
+
+  it("persists user-created groups independently from papers", () => {
+    saveGroups([{ id: DEFAULT_GROUP_ID, name: "待整理", createdAt: "" }, { id: "group-ai", name: "AI 论文", createdAt: "2026-10-16" }]);
+    expect(loadGroups()).toEqual([
+      { id: DEFAULT_GROUP_ID, name: "待整理", createdAt: "" },
+      { id: "group-ai", name: "AI 论文", createdAt: "2026-10-16" },
+    ]);
+  });
+
   it("keeps same-name files when their fingerprints differ", () => {
     savePapers([
       basePaper,
@@ -95,7 +124,7 @@ describe("paper library management", () => {
       title: "  Attention Is All You Need  ",
       authors: [" Ashish Vaswani ", "", "Ashish Vaswani"],
       year: 2017,
-      tags: ["transformer", " transformer ", "NLP"],
+      groupId: "group-transformer",
     })[0];
 
     expect(updated).toMatchObject({
@@ -104,7 +133,7 @@ describe("paper library management", () => {
       title: "Attention Is All You Need",
       authors: ["Ashish Vaswani"],
       year: 2017,
-      tags: ["transformer", "NLP"],
+      groupId: "group-transformer",
     });
   });
 

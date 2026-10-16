@@ -1,14 +1,16 @@
-import { BookOpen, Clock3, Heart, LibraryBig, Settings2, Tags } from "lucide-react";
+import { BookOpen, Clock3, FolderKanban, Heart, LibraryBig, Plus, Settings2 } from "lucide-react";
 import { ThemeToggle } from "../settings/ThemeToggle";
+import type { LibraryGroup } from "../../domain/library";
 
 interface LibrarySidebarProps {
   activeFilter: string;
-  tags: string[];
+  groups: LibraryGroup[];
   onFilterChange: (filter: string) => void;
+  onCreateGroup: () => void;
   onOpenSettings: () => void;
 }
 
-export function LibrarySidebar({ activeFilter, tags, onFilterChange, onOpenSettings }: LibrarySidebarProps) {
+export function LibrarySidebar({ activeFilter, groups, onFilterChange, onCreateGroup, onOpenSettings }: LibrarySidebarProps) {
   const items = [
     { id: "all", label: "全部文献", icon: LibraryBig },
     { id: "favorite", label: "收藏", icon: Heart },
@@ -41,26 +43,30 @@ export function LibrarySidebar({ activeFilter, tags, onFilterChange, onOpenSetti
         ))}
       </nav>
 
-      <div className="sidebar-tags">
+      <div className="sidebar-groups">
         <div className="sidebar-section-label">
-          <Tags size={15} />
-          <span>标签</span>
+          <FolderKanban size={15} />
+          <span>分组</span>
+          <button className="icon-button sidebar-add-button" type="button" aria-label="创建分组" title="创建分组" onClick={onCreateGroup}>
+            <Plus size={15} />
+          </button>
         </div>
-        <div className="tag-list">
-          {tags.length ? (
-            tags.map((tag) => (
+        <div className="group-list">
+          {groups.length ? (
+            groups.map((group) => (
               <button
-                className={`tag-link ${activeFilter === `tag:${tag}` ? "is-active" : ""}`}
-                key={tag}
-                onClick={() => onFilterChange(`tag:${tag}`)}
+                className={`group-link ${activeFilter === `group:${group.id}` ? "is-active" : ""}`}
+                key={group.id}
+                aria-label={`分组：${group.name}`}
+                onClick={() => onFilterChange(`group:${group.id}`)}
                 type="button"
               >
-                <span className="tag-dot" />
-                {tag}
+                <span className="group-dot" />
+                <span>{group.name}</span>
               </button>
             ))
           ) : (
-            <span className="empty-tag-list">暂无标签</span>
+            <span className="empty-group-list">暂无分组</span>
           )}
         </div>
       </div>

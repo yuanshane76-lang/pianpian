@@ -1,11 +1,12 @@
 import { AlertTriangle, ArrowUpRight, BookMarked, Bot, FilePlus2, FolderOpen, Pencil, Sparkles, Trash2 } from "lucide-react";
 import { useState } from "react";
-import type { PaperMetadataPatch, PaperRecord } from "../../domain/library";
+import type { LibraryGroup, PaperMetadataPatch, PaperRecord } from "../../domain/library";
 import { canOpenPaper, getLibraryPreparation, getPaperPipelineState, type PaperPipelineState } from "../../domain/pipeline";
 import { PaperPreparation } from "./PaperPreparation";
 import { LibrarySidebar } from "./LibrarySidebar";
 import { PaperEditDialog } from "./PaperEditDialog";
 import { PaperList } from "./PaperList";
+import { GroupCreateDialog } from "./GroupCreateDialog";
 
 interface LibraryViewProps {
   onOpenResearch?: () => void;
@@ -16,7 +17,7 @@ interface LibraryViewProps {
   selectedId: string | null;
   query: string;
   filter: string;
-  tags: string[];
+  groups: LibraryGroup[];
   errorMessage: string | null;
   onFilterChange: (filter: string) => void;
   onQueryChange: (query: string) => void;
@@ -26,6 +27,7 @@ interface LibraryViewProps {
   onStartMineru: (paperId: string) => void;
   onToggleFavorite: (paperId: string) => void;
   onUpdateMetadata: (paperId: string, patch: PaperMetadataPatch) => void;
+  onCreateGroup: (name: string) => LibraryGroup;
   onDelete: (paperId: string) => Promise<void>;
   onOpenSettings: () => void;
   pipelineStates: Record<string, PaperPipelineState>;
@@ -39,7 +41,7 @@ export function LibraryView({
   selectedId,
   query,
   filter,
-  tags,
+  groups,
   errorMessage,
   onFilterChange,
   onQueryChange,
@@ -49,6 +51,7 @@ export function LibraryView({
   onStartMineru,
   onToggleFavorite,
   onUpdateMetadata,
+  onCreateGroup,
   onDelete,
   onOpenSettings,
   pipelineStates,
@@ -58,6 +61,7 @@ export function LibraryView({
   onOpenResearch,
 }: LibraryViewProps) {
   const [editing, setEditing] = useState(false);
+  const [creatingGroup, setCreatingGroup] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -90,7 +94,7 @@ export function LibraryView({
     <>
       <div className="workspace-shell">
         <div className="library-global-tools">{onOpenResearch ? <button type="button" className="wordbook-button" aria-label="打开研究助手" onClick={onOpenResearch}><Bot size={17} /><span>研究助手</span></button> : null}<button type="button" className="wordbook-button" aria-label="打开单词表" title="单词表" onClick={onOpenWordbook}><BookMarked size={17} /><span>单词表</span><small>{wordbookCount ?? 0}</small></button></div>
-        <LibrarySidebar activeFilter={filter} tags={tags} onFilterChange={onFilterChange} onOpenSettings={onOpenSettings} />
+        <LibrarySidebar activeFilter={filter} groups={groups} onFilterChange={onFilterChange} onCreateGroup={() => setCreatingGroup(true)} onOpenSettings={onOpenSettings} />
         <PaperList
           papers={papers}
           selectedId={selectedId}
@@ -109,7 +113,7 @@ export function LibraryView({
           {selectedPaper ? (
             <>
               <div className="detail-topbar">
-                <span className="detail-path">文献库 / {selectedPaper.tags[0] ?? "待整理"}</span>
+                <span className="detail-path">文献库 / {groups.find((group) => group.id === selectedPaper.groupId)?.name ?? "待整理"}</span>
               </div>
               <div className="detail-content">
                 <div className="paper-cover-mark" aria-hidden="true">
@@ -134,12 +138,8 @@ export function LibraryView({
                     <strong>{selectedPaper.recordType === "reference" ? "文献条目" : selectedReady ? "可阅读" : selectedPipeline?.stage === "failed" ? "解析失败" : selectedActive ? "处理中" : "等待 MinerU"}</strong>
                   </div>
                 </div>
-                <div className="tag-row">
-                  {selectedPaper.tags.map((tag) => (
-                    <span className="tag-chip" key={tag}>
-                      {tag}
-                    </span>
-                  ))}
+                <div className="group-row">
+                  <span className="group-chip">{groups.find((group) => group.id === selectedPaper.groupId)?.name ?? "待整理"}</span>
                 </div>
                 {selectedPaper.recordType === "reference" ? <div className="reference-detail-note"><strong>已收藏文献信息，全文待导入</strong><p>{selectedPaper.abstract || "这条记录来自公开学术检索。导入原始 PDF 并完成解析后即可阅读。"}</p>{selectedPaper.doi ? <span>DOI：{selectedPaper.doi}</span> : null}</div> : !selectedReady && <PaperPreparation paper={selectedPaper} pipeline={selectedPipeline!}
                   configured={mineruConfigured} onStart={() => onStartMineru(selectedPaper.id)} />}
@@ -205,8 +205,17 @@ export function LibraryView({
       </div>
       {editing && selectedPaper ? <PaperEditDialog
         paper={selectedPaper}
+        groups={groups}
         onClose={() => setEditing(false)}
+        onCreateGroup={onCreateGroup}
         onSave={(patch) => onUpdateMetadata(selectedPaper.id, patch)}
+      /> : null}
+      {creatingGroup ? <GroupCreateDialog
+        onClose={() => setCreatingGroup(false)}
+        onSave={(name) => {
+          onCreateGroup(name);
+          setCreatingGroup(false);
+        }}
       /> : null}
       {deleteConfirmOpen && selectedPaper ? (
         <div className="settings-overlay">

@@ -20,7 +20,7 @@ const headings = [
 function props(): ComponentProps<typeof ReaderView> {
   return {
     paper: { id: "paper", title: "Paper", authors: [], year: null, sourcePath: "local://paper",
-      originalId: "original", importedAt: "2026-10-09", tags: [], favorite: false,
+      originalId: "original", importedAt: "2026-10-09", groupId: "group-inbox", favorite: false,
       blocks: 1, blockData: [paragraph], parseStatus: "ready" },
     selectedBlock: null, selectionText: "", translation: null, answer: null,
     isBusy: false, chartReading: null, explanation: null, actionError: null, processingStatus: "",

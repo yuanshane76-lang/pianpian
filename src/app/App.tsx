@@ -16,16 +16,18 @@ import {
   type ParagraphOperation,
 } from "../domain/analysis";
 import {
+  createLibraryGroup,
   filterPapers,
   removePaper,
   sortPapers,
+  type LibraryGroup,
   updatePaperMetadata,
   type PaperMetadataPatch,
   type PaperRecord,
 } from "../domain/library";
 import type { AiRequest } from "../services/ai";
 import { loadAnalysisCache, saveAnalysisCache } from "../services/analysisCache";
-import { preparePdfFile, loadPapers, savePapers } from "../services/library";
+import { loadGroups, loadPapers, preparePdfFile, saveGroups, savePapers } from "../services/library";
 import { deleteOriginalPdf } from "../services/originalPdf";
 import { getAnalysisAvailability, getTranslationTarget, isVisualBlock } from "../domain/readingFlow";
 import { canOpenPaper, hasCompletePageBounds, type PaperPipelineState } from "../domain/pipeline";
@@ -46,7 +48,7 @@ import { addLiteraturePaper, type LiteraturePaper } from "../domain/literature";
 type AppView = "library" | "reader" | "research";
 const WORKSPACE_CONTEXT: PaperRecord = {
   id: "research-workspace", title: "研究工作区", authors: [], year: null, sourcePath: "",
-  importedAt: "", tags: [], favorite: false, blocks: 0, blockData: [],
+  importedAt: "", groupId: "group-inbox", favorite: false, blocks: 0, blockData: [],
 };
 const PARAGRAPH_OPERATIONS: ParagraphOperation[] = ["translate", "explain", "insight", "vocabulary"];
 const PARAGRAPH_LABELS: Record<ParagraphOperation, string> = {
@@ -72,6 +74,7 @@ export default function App() {
   const [sourceNavigation, setSourceNavigation] = useState<{ paperId: string; blockId: string; requestId: number }>();
   const sourceNavigationSequence = useRef(0);
   const [papers, setPapers] = useState<PaperRecord[]>(() => loadPapers());
+  const [groups, setGroups] = useState<LibraryGroup[]>(() => loadGroups());
   const [view, setView] = useState<AppView>("library");
   const [selectedPaperId, setSelectedPaperId] = useState<string | null>(papers[0]?.id ?? null);
   const [selectedBlock, setSelectedBlock] = useState<DocumentBlock | null>(null);
@@ -267,19 +270,16 @@ export default function App() {
   const availability = getAnalysisAvailability(serviceSettings);
   const documentSignature = useMemo(() => getDocumentSourceSignature(selectedPaper?.blockData ?? []), [selectedPaper?.blockData]);
   const visiblePapers = useMemo(() => {
-    let filtered = filterPapers(papers, query);
+    const groupNames = new Map(groups.map((group) => [group.id, group.name]));
+    let filtered = filterPapers(papers, query, groupNames);
     if (filter === "favorite") filtered = filtered.filter((paper) => paper.favorite);
     if (filter === "recent") filtered = sortPapers(filtered).slice(0, 5);
-    if (filter.startsWith("tag:")) {
-      const tag = filter.slice(4);
-      filtered = filtered.filter((paper) => paper.tags.includes(tag));
+    if (filter.startsWith("group:")) {
+      const groupId = filter.slice(6);
+      filtered = filtered.filter((paper) => paper.groupId === groupId);
     }
     return sortPapers(filtered);
-  }, [filter, papers, query]);
-  const availableTags = useMemo(
-    () => [...new Set(papers.flatMap((paper) => paper.tags))].sort((left, right) => left.localeCompare(right)),
-    [papers],
-  );
+  }, [filter, groups, papers, query]);
   const serviceIdentity = `${serviceSettings.revision}:${serviceSettings.aiProvider}:${serviceSettings[serviceSettings.aiProvider].model}`;
   const serviceIdentityRef = useRef(serviceIdentity);
   serviceIdentityRef.current = serviceIdentity;
@@ -670,6 +670,15 @@ export default function App() {
   function handleUpdateMetadata(paperId: string, patch: PaperMetadataPatch) {
     setPapers((current) => updatePaperMetadata(current, paperId, patch));
     setActionError(null);
+  }
+
+  function handleCreateGroup(name: string): LibraryGroup {
+    const result = createLibraryGroup(groups, name);
+    if (result.groups.length !== groups.length && !saveGroups(result.groups)) {
+      throw new Error("分组保存失败，请检查本机存储空间。");
+    }
+    setGroups(result.groups);
+    return result.group;
   }
 
   async function handleDeletePaper(paperId: string): Promise<void> {
@@ -1075,10 +1084,10 @@ export default function App() {
     onRetry={() => { const next = loadWordbook(); wordbookRef.current = next; setWordbook(next); setWordbookWriteError(null); }} /> : null;
 
   if (view === "research") {
-    const contextPaper = selectedPaper && canOpenPaper(selectedPaper, pipelineStates[selectedPaper.id]) ? selectedPaper : WORKSPACE_CONTEXT;
+    const parsedCount = papers.filter((item) => canOpenPaper(item, pipelineStates[item.id])).length;
     return <>{storageWarning}{settingsDialog}{wordbookDialog}<main className="research-workspace">
       <header className="research-workspace-header"><button type="button" className="back-button" onClick={() => setView("library")}><ArrowLeft size={17} />返回文献库</button><div><BookOpen size={18} /><strong>纸研 · 研究工作区</strong></div><button type="button" className="icon-button" aria-label="服务配置" onClick={() => setSettingsOpen(true)}><Settings2 size={17} /></button></header>
-      <div className="research-workspace-body"><aside className="research-workspace-context"><span className="eyebrow">研究上下文</span><h1>{contextPaper === WORKSPACE_CONTEXT ? "开始一次研究对话" : contextPaper.title}</h1><p>{contextPaper === WORKSPACE_CONTEXT ? "从一个问题或检索主题开始，收集文献，再整理成阅读笔记。" : "助手可以读取这篇论文的解析文本，并继续查找相关文献。"}</p><div className="research-context-stat"><strong>{papers.length}</strong><span>本地文献</span><strong>{contextPaper.blocks}</strong><span>当前阅读块</span></div><div className="research-workspace-tip"><strong>可用工具</strong><p>论文阅读 · 文献检索<br />文献库搜索 · 文献收藏<br />Markdown 文档草稿</p></div></aside><div className="research-workspace-chat"><ResearchAssistant paper={contextPaper} library={papers} onAddPaper={handleAddLiterature} available={availability.available} configurationRevision={serviceSettings.revision} onOpenSettings={() => setSettingsOpen(true)} onJump={(blockId) => { if (contextPaper === WORKSPACE_CONTEXT) return; setSourceNavigation({ paperId: contextPaper.id, blockId, requestId: ++sourceNavigationSequence.current }); setView("reader"); }} /></div></div>
+      <div className="research-workspace-body"><aside className="research-workspace-context"><span className="eyebrow">全库研究上下文</span><h1>与整个文献库对话</h1><p>检索已有论文的标题、作者与已解析正文，按需读取原文并对比证据。不受首页选中论文影响。</p><div className="research-context-stat"><strong>{papers.length}</strong><span>本地文献</span><strong>{parsedCount}</strong><span>已就绪论文</span></div><div className="research-workspace-tip"><strong>证据范围</strong><p>已解析论文可读取正文与定位引用。<br />未解析条目仅提供元数据，不作为全文证据。<br />全库与单篇对话分别保存。</p></div></aside><div className="research-workspace-chat"><ResearchAssistant scope="library" paper={WORKSPACE_CONTEXT} library={papers} onAddPaper={handleAddLiterature} available={availability.available} configurationRevision={serviceSettings.revision} onOpenSettings={() => setSettingsOpen(true)} onJump={() => {}} onJumpPaper={(paperId, blockId) => { const target = papers.find((item) => item.id === paperId); if (!target || !canOpenPaper(target, pipelineStates[paperId])) return; setSelectedPaperId(paperId); setSourceNavigation({ paperId, blockId, requestId: ++sourceNavigationSequence.current }); setView("reader"); }} /></div></div>
     </main></>;
   }
 
@@ -1165,7 +1174,7 @@ export default function App() {
         selectedId={selectedPaperId}
         query={query}
         filter={filter}
-        tags={availableTags}
+        groups={groups}
         errorMessage={errorMessage || actionError}
         onFilterChange={setFilter}
         onQueryChange={setQuery}
@@ -1175,6 +1184,7 @@ export default function App() {
         onStartMineru={handleStartMineru}
         onToggleFavorite={handleToggleFavorite}
         onUpdateMetadata={handleUpdateMetadata}
+        onCreateGroup={handleCreateGroup}
         onDelete={handleDeletePaper}
         onOpenSettings={() => setSettingsOpen(true)}
         pipelineStates={pipelineStates}

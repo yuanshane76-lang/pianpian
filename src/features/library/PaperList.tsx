@@ -69,7 +69,7 @@ export function PaperList({
         <input
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="搜索标题、作者或标签"
+          placeholder="搜索标题、作者或分组"
           type="search"
         />
       </label>

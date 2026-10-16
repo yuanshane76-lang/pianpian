@@ -8,12 +8,17 @@ let root: Root;
 let container: HTMLDivElement;
 let emit: (event: unknown) => void;
 const paper = { id: "p1", title: "Paper", authors: [], year: 2024, sourcePath: "local://p1",
-  importedAt: "2026-10-12", tags: [], favorite: false, blocks: 1, blockData: [
+  importedAt: "2026-10-12", groupId: "group-inbox", favorite: false, blocks: 1, blockData: [
     { id: "b1", pageNumber: 1, order: 0, kind: "paragraph" as const, text: "Evidence." },
   ] };
 
 async function mount(available = true, currentPaper = paper) {
-  const invoke = vi.fn(async (channel: string): Promise<any> => channel === "zhiyan:agent:start" ? { sessionId: "s1" } : channel === "zhiyan:agent:skills" ? [] : channel === "zhiyan:agent:approve" ? true : undefined);
+  const invoke = vi.fn(async (channel: string, input?: any): Promise<any> => {
+    if (channel === "zhiyan:agent:start") return { sessionId: "s1" };
+    if (channel === "zhiyan:agent:skills" || channel === "zhiyan:agent:conversations:list") return [];
+    if (channel === "zhiyan:agent:conversations:create") return { id: `history-${input.paperId || "library"}`, scope: input.scope, title: "新对话", timeline: [] };
+    if (channel === "zhiyan:agent:approve") return true;
+  });
   window.zhiyan = { invoke: invoke as any, on: (_channel, handler) => { emit = handler as any; return () => {}; } };
   container = document.createElement("div");
   document.body.append(container);
@@ -34,6 +39,44 @@ afterEach(async () => {
 });
 
 describe("research assistant", () => {
+  it("starts global conversations without a selected paper and restores history through CRUD controls", async () => {
+    const records: any[] = [{ id: "old", scope: "library", title: "旧的主题对比", updatedAt: Date.now(), messageCount: 2, preview: "原来的答案", timeline: [
+      { type: "message", message: { id: "u-old", role: "user", content: "原来的问题" } },
+      { type: "message", message: { id: "a-old", role: "assistant", content: "原来的答案" } },
+    ] }];
+    const invoke = vi.fn(async (channel: string, input?: any): Promise<any> => {
+      if (channel === "zhiyan:agent:skills") return [];
+      if (channel.endsWith("conversations:list")) return records.filter((item) => !input.query || item.title.includes(input.query));
+      if (channel.endsWith("conversations:get")) return records.find((item) => item.id === input);
+      if (channel.endsWith("conversations:create")) { const empty = records.find((item) => item.timeline.length === 0); if (empty) return empty; const item = { id: `new-${records.length}`, scope: "library", title: "新对话", timeline: [], updatedAt: Date.now() }; records.push(item); return item; }
+      if (channel.endsWith("conversations:rename")) { Object.assign(records.find((item) => item.id === input.id), { title: input.title }); return records[0]; }
+      if (channel.endsWith("conversations:delete")) { records.splice(records.findIndex((item) => item.id === input), 1); return true; }
+      if (channel === "zhiyan:agent:start") return { sessionId: "s" };
+    });
+    window.zhiyan = { invoke: invoke as any, on: (_channel, handler) => { emit = handler as any; return () => {}; } };
+    container = document.createElement("div"); document.body.append(container); root = createRoot(container);
+    await act(async () => root.render(<ResearchAssistant scope="library" paper={paper} library={[paper]} available onAddPaper={vi.fn()} onJump={vi.fn()} onOpenSettings={vi.fn()} />));
+    expect(container.textContent).toContain("原来的答案");
+    expect(invoke).toHaveBeenCalledWith("zhiyan:agent:start", expect.objectContaining({ scope: "library", paper: null, conversationId: "old" }));
+    const click = async (text: string) => act(async () => { const button = [...container.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === text); expect(button).toBeTruthy(); button!.click(); });
+    await click("历史对话");
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="重命名对话：旧的主题对比"]')!.click());
+    await act(async () => {
+      const input = container.querySelector<HTMLInputElement>('[aria-label="对话标题"]')!;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "我的对比研究");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(records[0].title).toBe("我的对比研究");
+    await click("新建");
+    expect(container.querySelector(".research-agent-content")?.textContent).not.toContain("原来的答案");
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>(".research-history-select")].find((item) => item.textContent?.includes("我的对比研究"))!.click());
+    expect(container.textContent).toContain("原来的答案");
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="删除对话：我的对比研究"]')!.click());
+    await click("确认删除");
+    expect(records.some((item) => item.id === "old")).toBe(false);
+    expect(container.textContent).not.toContain("原来的答案");
+  });
   it("loads the skill catalogue without starting a model session when credentials are missing", async () => {
     const { invoke } = await mount(false);
     expect(invoke).toHaveBeenCalledWith("zhiyan:agent:skills");

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { currentPaperCitations } from "../../src/domain/paperCitations";
 import type { PaperRecord } from "../../src/domain/library";
 const paper: PaperRecord = { id: "paper", title: "论文", authors: [], year: null,
-  sourcePath: "local://paper", importedAt: "2026-10-14", tags: [], favorite: false, blocks: 1,
+  sourcePath: "local://paper", importedAt: "2026-10-14", groupId: "group-inbox", favorite: false, blocks: 1,
   blockData: [{ id: "block", kind: "paragraph", pageNumber: 3, order: 0, text: "Actual source." }] };
 
 describe("current paper references", () => {
