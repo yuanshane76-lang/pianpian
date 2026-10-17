@@ -4,7 +4,7 @@ const START_CHANNEL = "zhiyan:ai:stream:start";
 const CANCEL_CHANNEL = "zhiyan:ai:stream:cancel";
 const EVENT_CHANNEL = "zhiyan:ai:stream:event";
 
-function registerAiStreamHandlers({ ipcMain, isDev, readSettings, streamModel }) {
+function registerAiStreamHandlers({ ipcMain, isDev, readSettings, streamModel, canWrite = () => true }) {
   const active = new Map();
   const requestKey = (senderId, requestId) => `${senderId}:${requestId}`;
 
@@ -16,6 +16,7 @@ function registerAiStreamHandlers({ ipcMain, isDev, readSettings, streamModel })
     try { assertAppSender(event, isDev); } catch { return; }
     const requestId = payload?.requestId;
     if (typeof requestId !== "string" || !/^[a-zA-Z0-9-]{1,80}$/.test(requestId)) return;
+    if (!canWrite()) { send(event, requestId, { type: "error", message: "正在准备更新，请稍候。" }); return; }
     const key = requestKey(event.sender.id, requestId);
     if (active.has(key)) {
       send(event, requestId, { type: "error", message: "重复的模型请求编号" });
@@ -52,12 +53,14 @@ function registerAiStreamHandlers({ ipcMain, isDev, readSettings, streamModel })
   ipcMain.on(START_CHANNEL, start);
   ipcMain.on(CANCEL_CHANNEL, cancel);
 
-  return () => {
+  const dispose = () => {
     ipcMain.removeListener(START_CHANNEL, start);
     ipcMain.removeListener(CANCEL_CHANNEL, cancel);
     for (const controller of active.values()) controller.abort();
     active.clear();
   };
+  dispose.isBusy = () => active.size > 0;
+  return dispose;
 }
 
 module.exports = { registerAiStreamHandlers };

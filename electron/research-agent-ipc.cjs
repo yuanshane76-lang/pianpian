@@ -4,15 +4,21 @@ const { listBundledResearchSkills } = require("./research-skills.cjs");
 
 const EVENT_CHANNEL = "zhiyan:agent:event";
 
-function registerResearchAgentHandlers({ ipcMain, isDev, readSettings, createRuntime = createResearchAgentRuntime, runtimeStore = new Map(), conversationStore, readLibraryPaper }) {
-  const secure = (event) => assertAppSender(event, isDev);
+function registerResearchAgentHandlers({ ipcMain, isDev, readSettings, createRuntime = createResearchAgentRuntime, runtimeStore = new Map(), conversationStore, readLibraryPaper, canWrite = () => true }) {
+  const secure = (event) => {
+    assertAppSender(event, isDev);
+    if (!canWrite()) throw new Error("正在准备更新，请稍候。");
+  };
   const bindings = new Map();
   const starts = new Map();
+  let activeHistoryOperations = 0;
   const watchedSenders = new WeakSet();
   const flush = async (binding) => { await binding?.flush?.(); };
   for (const action of ["list", "create", "get", "rename", "delete"]) {
     ipcMain.handle(`zhiyan:agent:conversations:${action}`, async (event, input) => {
       secure(event);
+      activeHistoryOperations++;
+      try {
       if (!conversationStore) throw new Error("对话历史存储不可用");
       await flush(bindings.get(event.sender.id));
       if (action === "delete") {
@@ -20,9 +26,10 @@ function registerResearchAgentHandlers({ ipcMain, isDev, readSettings, createRun
           await runtimeStore.get(senderId)?.abort(); await flush(binding);
           runtimeStore.get(senderId)?.dispose(); runtimeStore.delete(senderId); bindings.delete(senderId);
         }
-        return conversationStore.remove(input);
+        return await conversationStore.remove(input);
       }
-      return conversationStore[action](input);
+      return await conversationStore[action](input);
+      } finally { activeHistoryOperations--; }
     });
   }
   ipcMain.handle("zhiyan:agent:skills", (event) => {
@@ -156,6 +163,8 @@ function registerResearchAgentHandlers({ ipcMain, isDev, readSettings, createRun
     await Promise.all([...bindings.values()].map((binding) => flush(binding)));
     bindings.clear();
   };
+  dispose.isBusy = () => activeHistoryOperations > 0 || starts.size > 0 || [...runtimeStore.values()].some((runtime) => runtime.busy);
+  dispose.flush = async () => { await Promise.all([...bindings.values()].map((binding) => flush(binding))); };
   return dispose;
 }
 

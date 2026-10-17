@@ -19,7 +19,7 @@ const complete = (): StoredServiceSettings => ({
   deepseek: { ...DEFAULT_SERVICE_SETTINGS.deepseek, apiKey: "synthetic-model" },
   mineru: { ...DEFAULT_SERVICE_SETTINGS.mineru, apiKey: "synthetic-parser" },
 });
-async function mount(stored = DEFAULT_SERVICE_SETTINGS, read?: () => Promise<unknown>) {
+async function mount(stored = DEFAULT_SERVICE_SETTINGS, read?: () => Promise<unknown>, on?: (channel: string, handler: (payload: any) => void) => () => void) {
   let settings = structuredClone(stored);
   const invoke = vi.fn(async (channel: string, input?: unknown) => {
     if (channel === "zhiyan:settings:get") return read ? read() : toPublicServiceSettings(settings);
@@ -28,9 +28,10 @@ async function mount(stored = DEFAULT_SERVICE_SETTINGS, read?: () => Promise<unk
       return toPublicServiceSettings(settings);
     }
     if (channel === "zhiyan:documents:states") return [];
+    if (channel === "zhiyan:update:saved") return undefined;
     throw new Error(`Unexpected IPC channel: ${channel}`);
   });
-  window.zhiyan = { isDesktop: true, invoke: invoke as never };
+  window.zhiyan = { isDesktop: true, invoke: invoke as never, on };
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
@@ -56,6 +57,17 @@ async function save(container: HTMLElement) {
 }
 
 describe("mandatory desktop service setup", () => {
+  it("requires a successful current-state storage write before acknowledging an update", async () => {
+    const listeners = new Map<string, (payload: any) => void>();
+    const { invoke } = await mount(complete(), undefined, (channel, handler) => { listeners.set(channel, handler); return () => listeners.delete(channel); });
+    const storage = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("QuotaExceeded"); });
+    await act(async () => listeners.get("zhiyan:update:prepare")!({ requestId: "failed-save" }));
+    expect(invoke).toHaveBeenCalledWith("zhiyan:update:saved", { requestId: "failed-save", saved: false });
+    storage.mockRestore();
+    await act(async () => listeners.get("zhiyan:update:prepare")!({ requestId: "retried-save" }));
+    expect(invoke).toHaveBeenCalledWith("zhiyan:update:saved", { requestId: "retried-save", saved: true });
+    expect(JSON.parse(window.localStorage.getItem("zhiyan-workbench.groups.v1")!)[0].id).toBe("group-inbox");
+  });
   it("opens setup for an empty profile and cannot be dismissed by backdrop or Escape", async () => {
     const { container, invoke } = await mount();
     expect(dialog(container)).not.toBeNull();

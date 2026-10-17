@@ -9,7 +9,7 @@ function ignorePackageFile(file) {
   if (!relative) return false;
 
   const parts = relative.split("/");
-  if (["package.json", "brand.json"].includes(relative)) return false;
+  if (["package.json", "brand.json", "update-config.json"].includes(relative)) return false;
   if (relative === "assets" || relative === "assets/brand" || relative === "assets/brand/pianpian.ico") return false;
   if (parts[0] === "skills") {
     return !skillFiles.some((file) => file === relative || file.startsWith(`${relative}/`));
@@ -20,7 +20,7 @@ function ignorePackageFile(file) {
   }
   if (parts[0] === "electron") {
     if (parts.length === 1) return false;
-    return parts.length !== 2 || !["main.cjs", "brand.cjs", "preload.cjs", "resource.cjs", "secret-store.cjs", "settings.cjs", "ipc-security.cjs", "ai.cjs", "ai-stream-ipc.cjs", "document-store.cjs", "document-tasks.cjs", "mineru.cjs", "research-agent-runtime.cjs", "research-agent-tools.cjs", "research-agent-ipc.cjs", "research-citations.cjs", "literature-search.cjs", "pi-agent.cjs", "pi-worker-session.cjs", "pi-agent-worker.cjs", "research-skills.cjs", "research-conversations.cjs", "research-library.cjs"].includes(parts[1]);
+    return parts.length !== 2 || !["main.cjs", "brand.cjs", "preload.cjs", "resource.cjs", "secret-store.cjs", "settings.cjs", "ipc-security.cjs", "ai.cjs", "ai-stream-ipc.cjs", "document-store.cjs", "document-tasks.cjs", "mineru.cjs", "research-agent-runtime.cjs", "research-agent-tools.cjs", "research-agent-ipc.cjs", "research-citations.cjs", "literature-search.cjs", "pi-agent.cjs", "pi-worker-session.cjs", "pi-agent-worker.cjs", "research-skills.cjs", "research-conversations.cjs", "research-library.cjs", "update-controller.cjs", "update-signature.cjs", "update-backup.cjs", "update-service.cjs", "update-support.cjs"].includes(parts[1]);
   }
   if (parts[0] === "dist") {
     if (parts.length === 1 || relative === "dist/index.html") return false;

@@ -1,0 +1,23 @@
+.update-overlay { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 20px; background: var(--overlay); }
+.update-dialog { width: min(520px, 100%); max-height: calc(100dvh - 40px); overflow: auto; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-strong); }
+.update-dialog > header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px 0; color: var(--muted-strong); font-size: 12px; }
+.update-hero { display: flex; align-items: center; gap: 20px; padding: 20px 28px; }
+.update-hero .pianpian { width: 90px; height: 100px; flex-shrink: 0; }
+.update-hero h2 { margin: 0 0 10px; font-size: 20px; line-height: 1.5; }
+.update-hero p { margin: 0; color: var(--muted-strong); font-size: 12px; }
+.update-status { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 0 28px 20px; color: var(--muted-strong); font-size: 13px; line-height: 1.7; }
+.update-status svg { flex-shrink: 0; margin-top: 3px; color: var(--teal); }
+.update-notes { margin: 0 28px 20px; font-size: 13px; }
+.update-notes summary { color: var(--ink); cursor: pointer; }
+.update-notes p { max-height: 150px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted-strong); line-height: 1.8; }
+.update-preservation { display: flex; align-items: flex-start; gap: 10px; margin: 0 28px 24px; padding: 14px; border-radius: 10px; background: var(--teal-soft); }
+.update-preservation > svg { flex-shrink: 0; color: var(--teal); }
+.update-preservation strong { display: block; margin-bottom: 6px; font-size: 12px; color: var(--teal-dark); }
+.update-preservation p { margin: 0; font-size: 12px; line-height: 1.7; color: var(--muted-strong); }
+.update-dialog footer { display: flex; align-items: center; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--line); padding: 16px 24px; }
+.update-error { margin: 0 28px 20px; font-size: 12px; line-height: 1.7; color: var(--danger-ink-soft); }
+.update-progress { position: relative; height: 7px; border-radius: 7px; background: var(--line); margin: 0 28px 34px; }
+.update-progress > span { display: block; height: 100%; border-radius: inherit; background: var(--teal); transition: width 180ms ease; }
+.update-progress small { position: absolute; right: 0; top: 10px; color: var(--muted-strong); font-size: 11px; }
+.update-dialog button { min-height: 38px; }
+@media (max-width: 480px) { .update-hero { gap: 12px; padding: 20px; } .update-hero h2 { font-size: 18px; } .update-hero .pianpian { width: 68px; height: 80px; } }

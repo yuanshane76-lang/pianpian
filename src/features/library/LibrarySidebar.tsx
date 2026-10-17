@@ -1,7 +1,8 @@
-import { Clock3, FolderKanban, Heart, LibraryBig, Plus, Settings2 } from "lucide-react";
+import { Clock3, FolderKanban, Heart, LibraryBig, Plus, RefreshCw, Settings2 } from "lucide-react";
 import { brand, Pianpian } from "../../brand/Pianpian";
 import { ThemeToggle } from "../settings/ThemeToggle";
 import type { LibraryGroup } from "../../domain/library";
+import { getDesktopBridge } from "../../platform/electron";
 
 interface LibrarySidebarProps {
   activeFilter: string;
@@ -73,6 +74,7 @@ export function LibrarySidebar({ activeFilter, groups, onFilterChange, onCreateG
       </div>
 
       <div className="sidebar-footer">
+        {getDesktopBridge()?.isDesktop ? <button className="nav-item" type="button" aria-label="检查更新" onClick={() => window.dispatchEvent(new Event("pianpian:updates:open"))}><RefreshCw size={17} /><span>检查更新</span></button> : null}
         <button className="nav-item" type="button" aria-label="服务配置" onClick={onOpenSettings} title="模型与解析配置">
           <Settings2 size={17} />
           <span>服务配置</span>

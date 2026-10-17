@@ -27,6 +27,13 @@ function createEvent(id = 1) {
 }
 
 describe("AI stream IPC", () => {
+  it("refuses new model streams while an update freezes writes", () => {
+    const ipcMain = createIpcMain(); const event = createEvent(); const streamModel = vi.fn();
+    registerAiStreamHandlers({ ipcMain, isDev: true, readSettings: () => ({}), streamModel, canWrite: () => false });
+    ipcMain.handlers.get("zhiyan:ai:stream:start")!(event, { requestId: "update-test", request: {} });
+    expect(streamModel).not.toHaveBeenCalled();
+    expect(event.sender.send).toHaveBeenCalledWith("zhiyan:ai:stream:event", expect.objectContaining({ type: "error" }));
+  });
   it("forwards deltas and a final result to the requesting renderer", async () => {
     const ipcMain = createIpcMain();
     const streamModel = vi.fn(async (_settings, _request, onDelta) => {

@@ -10,6 +10,12 @@ contextBridge.exposeInMainWorld("zhiyan", {
   invoke(channel, payload) {
     const allowedChannels = new Set([
       "zhiyan:ping",
+      "zhiyan:update:state",
+      "zhiyan:update:check",
+      "zhiyan:update:download",
+      "zhiyan:update:install",
+      "zhiyan:update:releases",
+      "zhiyan:update:saved",
       "zhiyan:settings:get",
       "zhiyan:settings:save",
       "zhiyan:settings:test",
@@ -40,7 +46,7 @@ contextBridge.exposeInMainWorld("zhiyan", {
     return ipcRenderer.invoke(channel, payload);
   },
   on(channel, handler) {
-    if (channel !== AGENT_EVENT_CHANNEL || typeof handler !== "function") {
+    if (![AGENT_EVENT_CHANNEL, "zhiyan:update:event", "zhiyan:update:prepare"].includes(channel) || typeof handler !== "function") {
       throw new Error(`Unsupported event channel: ${channel}`);
     }
     const listener = (_event, payload) => handler(payload);
