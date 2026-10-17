@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, net, protocol, safeStorage, shell, dialog, screen } = require("electron");
+const { app, BrowserWindow, ipcMain, net, protocol, safeStorage, shell, dialog, screen, Menu } = require("electron");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -14,8 +14,16 @@ const { registerResearchAgentHandlers } = require("./research-agent-ipc.cjs");
 const { createConversationStore } = require("./research-conversations.cjs");
 const { createLibraryPaperReader } = require("./research-library.cjs");
 const { configureBrand, brand } = require("./brand.cjs");
+const { registerUpdateService } = require("./update-service.cjs");
 
 configureBrand(app);
+app.setAppUserModelId("com.pianpian.desktop");
+const hasInstanceLock = !app.isPackaged || app.requestSingleInstanceLock();
+if (!hasInstanceLock) app.quit();
+app.on("second-instance", () => {
+  const window = BrowserWindow.getAllWindows()[0];
+  if (window) { if (window.isMinimized()) window.restore(); window.show(); window.focus(); }
+});
 
 const isDev = !app.isPackaged;
 const distDirectory = path.join(__dirname, "..", "dist");
@@ -79,10 +87,14 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (!hasInstanceLock) return;
+  let updatePreparing = false, desktopOperations = 0;
   if (!isDev) registerAppProtocol();
-  const secureHandle = (channel, handler) => ipcMain.handle(channel, (event, ...args) => {
+  const secureHandle = (channel, handler) => ipcMain.handle(channel, async (event, ...args) => {
     assertAppSender(event, isDev);
-    return handler(...args);
+    if (updatePreparing) throw new Error("正在准备更新，请稍候。");
+    desktopOperations++;
+    try { return await handler(...args); } finally { desktopOperations--; }
   });
   secureHandle("zhiyan:ping", () => ({ ok: true, at: new Date().toISOString() }));
   secureHandle("zhiyan:agent:save-document", async (input) => {
@@ -104,18 +116,26 @@ app.whenReady().then(() => {
     safeStorage,
   });
   const readSettings = () => normalize(store.read());
-  const disposeAiStreams = registerAiStreamHandlers({ ipcMain, isDev, readSettings, streamModel });
+  const disposeAiStreams = registerAiStreamHandlers({ ipcMain, isDev, readSettings, streamModel, canWrite: () => !updatePreparing });
   const documents = createDocumentStore({ rootDirectory: path.join(app.getPath("userData"), "documents") });
   const disposeResearchAgent = registerResearchAgentHandlers({ ipcMain, isDev, readSettings,
+    canWrite: () => !updatePreparing,
     conversationStore: createConversationStore({ rootDirectory: path.join(app.getPath("userData"), "research-history") }),
     readLibraryPaper: createLibraryPaperReader({ documents }),
   });
-  app.once("before-quit", (event) => {
+  let exitReady = false, exiting = false;
+  app.on("before-quit", (event) => {
+    if (exitReady) return;
     event.preventDefault();
-    disposeAiStreams();
-    void disposeResearchAgent().catch(() => {
+    if (exiting) return;
+    exiting = true;
+    void disposeResearchAgent.flush().then(async () => {
+      disposeAiStreams(); await disposeResearchAgent();
+      exitReady = true; app.quit();
+    }).catch(() => {
+      exiting = false;
       dialog.showErrorBox("对话历史保存失败", "退出前未能完整保存对话，请检查本地磁盘空间与权限。已保存的历史文件不会被清空。");
-    }).finally(() => app.quit());
+    });
   });
   const documentTasks = createDocumentTasks({ documents, readSettings });
   secureHandle("zhiyan:documents:save", (input) => documents.save(input));
@@ -168,6 +188,21 @@ app.whenReady().then(() => {
       clearTimeout(timeout);
     }
   });
+  const updates = registerUpdateService({ app, ipcMain, BrowserWindow, shell, net,
+    prepareWrites: () => { updatePreparing = true; }, resumeWrites: () => { updatePreparing = false; exitReady = false; },
+    isBusy: () => desktopOperations > 0 || disposeAiStreams.isBusy() || disposeResearchAgent.isBusy(),
+    flushHistory: () => disposeResearchAgent.flush(),
+    finalizeExit: async () => {
+      disposeAiStreams();
+      await disposeResearchAgent();
+      exitReady = true;
+    },
+  });
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { label: "篇篇", submenu: [{ label: "检查更新…", click: () => updates.open() }, { type: "separator" }, { role: "quit", label: "退出篇篇" }] },
+    { label: "编辑", submenu: [{ role: "undo", label: "撤销" }, { role: "redo", label: "重做" }, { type: "separator" }, { role: "cut", label: "剪切" }, { role: "copy", label: "复制" }, { role: "paste", label: "粘贴" }, { role: "selectAll", label: "全选" }] },
+    { label: "视图", submenu: [{ role: "resetZoom", label: "实际大小" }, { role: "zoomIn", label: "放大" }, { role: "zoomOut", label: "缩小" }, { role: "togglefullscreen", label: "全屏" }] },
+  ]));
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

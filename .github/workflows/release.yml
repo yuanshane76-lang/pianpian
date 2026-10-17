@@ -1,0 +1,65 @@
+name: Windows Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Validate version before loading signing credentials
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Not a stable release version' }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") { throw 'Tag and package version differ' }
+      - name: Load signing identity into the temporary directory
+        shell: pwsh
+        env:
+          PIANPIAN_UPDATE_SIGNING_KEY: ${{ secrets.PIANPIAN_UPDATE_SIGNING_KEY }}
+        run: |
+          if (-not $env:PIANPIAN_UPDATE_SIGNING_KEY) { throw 'Missing update signing secret' }
+          $keyFile = Join-Path $env:RUNNER_TEMP 'pianpian-release-private.pem'
+          [IO.File]::WriteAllText($keyFile, $env:PIANPIAN_UPDATE_SIGNING_KEY)
+          "PIANPIAN_UPDATE_SIGNING_KEY_FILE=$keyFile" >> $env:GITHUB_ENV
+      - run: npm run make:win
+      - name: Keep distributables
+        uses: actions/upload-artifact@v4
+        with:
+          name: pianpian-windows
+          path: |
+            out/installer/*.exe
+            out/installer/*.zip
+            out/installer/*.blockmap
+            out/installer/latest.yml
+            out/installer/update-signature.json
+            out/installer/SHA256SUMS.txt
+      - name: Publish to the configured public release repository
+        if: github.ref_type == 'tag'
+        run: npm run release:publish
+        env:
+          GH_TOKEN: ${{ secrets.PIANPIAN_RELEASE_TOKEN }}
+      - name: Remove temporary signing file
+        if: always()
+        shell: pwsh
+        run: |
+          $keyFile = Join-Path $env:RUNNER_TEMP 'pianpian-release-private.pem'
+          if (Test-Path -LiteralPath $keyFile) { Remove-Item -LiteralPath $keyFile }

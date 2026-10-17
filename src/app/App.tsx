@@ -45,6 +45,7 @@ import { DEFAULT_SERVICE_SETTINGS, getMissingServiceCredentials, toPublicService
 import { getDesktopBridge } from "../platform/electron";
 import { ResearchAssistant } from "../features/reader/ResearchAssistant";
 import { addLiteraturePaper, type LiteraturePaper } from "../domain/literature";
+import { UpdateCenter } from "../features/settings/UpdateCenter";
 
 type AppView = "library" | "reader" | "research";
 const WORKSPACE_CONTEXT: PaperRecord = {
@@ -253,6 +254,33 @@ export default function App() {
   useEffect(() => {
     saveAnalysisCache(analysisCache);
   }, [analysisCache]);
+
+  useEffect(() => {
+    const bridge = getDesktopBridge();
+    if (!bridge?.isDesktop || !bridge.on) return;
+    return bridge.on<{ requestId: string }>("zhiyan:update:prepare", ({ requestId }) => {
+      let saved = false;
+      try {
+        if (isBusy || importing || activeParsing.current.size || activeUploads.current.size || wordbookRef.current.error) throw new Error("仍有任务或未恢复的存储错误");
+        const snapshot: Record<string, string> = {
+          "zhiyan-workbench.papers.v1": JSON.stringify(papersRef.current),
+          "zhiyan-workbench.groups.v1": JSON.stringify(groups),
+          "zhiyan-workbench.wordbook.v1": JSON.stringify(wordbookRef.current.entries),
+          "zhiyan-workbench.analysis.v1": JSON.stringify([...analysisCache.values()]),
+        };
+        snapshot["zhiyan-workbench.appearance.v1"] =
+          window.localStorage.getItem("zhiyan-workbench.appearance.v1") ?? JSON.stringify({ theme: "light" });
+        for (const [key, value] of Object.entries(snapshot)) {
+          window.localStorage.setItem(key, value);
+          if (window.localStorage.getItem(key) !== value) throw new Error("记录保存未完成");
+        }
+        saved = true;
+      } catch { setStorageError(true); }
+      void bridge.invoke("zhiyan:update:saved", { requestId, saved }).catch(() => {
+        setActionError("更新前保存确认失败，请稍后重试。当前程序没有执行安装。");
+      });
+    });
+  }, [groups, analysisCache, isBusy, importing]);
 
   useEffect(() => {
     selectedPaperIdRef.current = selectedPaperId;
@@ -1054,6 +1082,7 @@ export default function App() {
       </button>
     </div>
   ) : null;
+  const updateCenter = <UpdateCenter showTrigger={false} busy={isBusy || importing || activeParsing.current.size > 0 || activeUploads.current.size > 0} />;
   const setupRequired = isDesktop && (settingsReadFailed
     || settingsLoaded && getMissingServiceCredentials(serviceSettings).length > 0);
   const settingsDialog = settingsOpen || setupRequired ? (
@@ -1086,7 +1115,7 @@ export default function App() {
 
   if (view === "research") {
     const parsedCount = papers.filter((item) => canOpenPaper(item, pipelineStates[item.id])).length;
-    return <>{storageWarning}{settingsDialog}{wordbookDialog}<main className="research-workspace">
+    return <>{storageWarning}{settingsDialog}{wordbookDialog}{updateCenter}<main className="research-workspace">
       <header className="research-workspace-header"><button type="button" className="back-button" onClick={() => setView("library")}><ArrowLeft size={17} />返回文献库</button><div><Pianpian /><strong>和篇篇聊聊</strong></div><button type="button" className="icon-button" aria-label="服务配置" onClick={() => setSettingsOpen(true)}><Settings2 size={17} /></button></header>
       <div className="research-workspace-body"><aside className="research-workspace-context"><Pianpian variant="reading" /><span className="eyebrow">你的论文阅读伙伴</span><h1>每篇论文，<br />都有个伴。</h1><p>把问题告诉篇篇，一起翻翻文献库、对照原文，再把收获整理成笔记。不受首页选中论文影响。</p><div className="research-context-stat"><strong>{papers.length}</strong><span>本地文献</span><strong>{parsedCount}</strong><span>已就绪论文</span></div><div className="research-workspace-tip"><strong>证据范围</strong><p>已解析论文可读取正文与定位引用。<br />未解析条目仅提供元数据，不作为全文证据。<br />全库与单篇对话分别保存。</p></div></aside><div className="research-workspace-chat"><ResearchAssistant scope="library" paper={WORKSPACE_CONTEXT} library={papers} onAddPaper={handleAddLiterature} available={availability.available} configurationRevision={serviceSettings.revision} onOpenSettings={() => setSettingsOpen(true)} onJump={() => {}} onJumpPaper={(paperId, blockId) => { const target = papers.find((item) => item.id === paperId); if (!target || !canOpenPaper(target, pipelineStates[paperId])) return; setSelectedPaperId(paperId); setSourceNavigation({ paperId, blockId, requestId: ++sourceNavigationSequence.current }); setView("reader"); }} /></div></div>
     </main></>;
@@ -1100,6 +1129,7 @@ export default function App() {
         {storageWarning}
         {settingsDialog}
         {wordbookDialog}
+        {updateCenter}
         <ReaderView
           researchPanel={getDesktopBridge()?.on ? <ResearchAssistant paper={selectedPaper} library={papers} onAddPaper={handleAddLiterature}
             onJump={(blockId) => setSourceNavigation({ paperId: selectedPaper.id, blockId, requestId: ++sourceNavigationSequence.current })}
@@ -1166,6 +1196,7 @@ export default function App() {
       {storageWarning}
       {settingsDialog}
       {wordbookDialog}
+      {updateCenter}
       <LibraryView
         onOpenResearch={() => setView("research")}
         papers={visiblePapers}

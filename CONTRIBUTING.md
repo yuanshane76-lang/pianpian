@@ -69,7 +69,10 @@ git worktree add -b fix/pdf-selection ../zhiyan-pdf-selection origin/main
 | `npm run test:pi-agent:smoke` | 真实 Pi SDK、本地合成 SSE 和文献元数据，验证预置 Skill 按需读取与产品工具调用；禁止外部请求 |
 | `npm run test:research-agent:e2e` | 隔离 Electron、本地合成 SSE，验证紧凑工具栏与技能浮层、编辑文献内嵌分组创建、历史增删改查/恢复模型上下文、双范围隔离、引用定位、工具确认、文档导出和流式滚动；追加 `-- --dark` 验证深色界面，截图按 light/dark 分别保存 |
 | `node scripts/packaged-research-skills-e2e.cjs <解压后的 Pianpian.exe 路径>` | 验证 Windows 压缩包内的三个 Skill、已打包 Pi 工具循环及无密钥的中文技能入口；使用隔离用户目录与合成服务 |
-| `npm run make:win` | 验证后生成 Windows x64 免安装压缩包 |
+| `npm run make:win` | 执行完整质量检查后生成 Windows x64 NSIS 安装程序、免安装 ZIP 与签名发布清单（需要仓库外的发布私钥） |
+| `npm run make:zip:legacy` | 仅生成 Forge 兼容版旧 ZIP，不包含应用内自动更新 |
+| `npm run update:e2e` | 构建后使用隔离 Electron 与本机签名 HTTP 夹具验证版本检查、失败提示、签名失败、下载进度、存储写入失败和论文/解析/对话数据备份；不启动安装器、不访问真实外网 |
+| `npm run release:publish` | 验证签名及包完整性，再将当前版本发布至公开 GitHub Releases；不会公开源码仓库或覆盖已发布版本 |
 
 启动 `npm run dev` 后，可另开终端执行桌面检查：
 

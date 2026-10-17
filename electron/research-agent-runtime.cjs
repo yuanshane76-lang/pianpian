@@ -257,7 +257,7 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
     clearPendingApprovals("会话已关闭");
   }
 
-  return { start, updateContext, prompt, abort, approve, dispose, get messageCount() { return messageCount; } };
+  return { start, updateContext, prompt, abort, approve, dispose, get messageCount() { return messageCount; }, get busy() { return busy; } };
 }
 
 module.exports = { createResearchAgentRuntime, normalizeContext };

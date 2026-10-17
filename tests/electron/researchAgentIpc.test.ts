@@ -23,6 +23,18 @@ function createIpcMain() {
 }
 
 describe("research Agent IPC", () => {
+  it("counts accepted history writes as busy and rejects new ones after the update barrier", async () => {
+    const ipcMain = createIpcMain(); let finish!: () => void; let writable = true;
+    const conversationStore = { create: () => new Promise<void>(resolve => { finish = resolve; }) };
+    const dispose = registerResearchAgentHandlers({ ipcMain, isDev: true, readSettings: () => ({}), conversationStore, canWrite: () => writable });
+    const pending = ipcMain.handlers.get("zhiyan:agent:conversations:create")!(createEvent(), {});
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    expect(dispose.isBusy()).toBe(true);
+    writable = false;
+    await expect(ipcMain.handlers.get("zhiyan:agent:conversations:create")!(createEvent(), {})).rejects.toThrow("更新");
+    finish(); await pending;
+    expect(dispose.isBusy()).toBe(false);
+  });
   it("registers only one window-close listener across repeated history restores", async () => {
     const ipcMain = createIpcMain();
     const event = createEvent();
