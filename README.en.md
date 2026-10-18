@@ -18,12 +18,13 @@
 
 Pianpian is a desktop paper reader for Chinese-speaking readers of English research. The **original PDF is the reading surface**: layout, figures, and equations stay intact, with reading assistance alongside each paragraph. Originals, reading progress, vocabulary, and analysis caches are persisted locally.
 
-Current version: `0.3.0` · Primary distribution target: `Windows x64` · Built with `Electron / React / TypeScript`
+Current version: `0.4.2` · Primary distribution target: `Windows x64` · Built with `Electron / React / TypeScript`
 
 > These language options translate the repository documentation. The application interface and reading assistance currently focus on Chinese.
 
 ## Recent updates
 
+- **Find and import papers in chat:** The research assistant searches arXiv and Crossref. After confirmation, an arXiv result downloads the official PDF to the local library and starts MinerU parsing.
 - **Meet Pianpian:** The product and reading companion share one name, with a folded-paper character generated using gpt-image-2. Ask Pianpian from the library, chat beside a paper, or request vocabulary for the current paragraph.
 - **More room for reading:** Conversation history, new chat, and reading workflows share a compact toolbar with floating pickers. Create and select a paper group inline in the metadata editor.
 - **Smoother long-paper startup:** PDF pages load on demand. Research sessions start when first opened, and Pi runs in a worker thread.
@@ -117,19 +118,20 @@ Open **服务配置** (Service settings) and configure the two independent servi
 
 For a web preview, use `npm run dev` and visit `http://127.0.0.1:4173/`. The preview also persists imported PDFs in browser storage; the desktop app stores originals as files in its user-data directory. System credential storage and real service requests require the desktop application.
 
-### Build a Windows ZIP
+### Build the Windows installer and ZIP
 
 ```powershell
 npm run make:win
 ```
 
-This runs the quality checks and builds a Windows x64 ZIP. The current output is:
+This runs the quality checks and builds a Windows x64 installer and ZIP:
 
 ```text
-out/make/zip/win32/x64/篇篇-win32-x64-0.3.0.zip
+out/installer/Pianpian-Setup-0.4.2-x64.exe
+out/installer/Pianpian-0.4.2-x64.zip
 ```
 
-Extract the **entire directory** and launch `Pianpian.exe`; Node.js is not needed on the recipient's machine. Unsigned builds may trigger a Windows security prompt. Source execution and local builds are the current entry points. ZIP users still configure their own service credentials.
+The installer supports in-app updates. Extract the **entire ZIP directory** and launch `Pianpian.exe` for a portable setup; Node.js is not needed on the recipient's machine. Windows may show a security prompt because the installer has no commercial code-signing certificate. Users configure their own service credentials.
 
 ## Data and services
 

@@ -15,6 +15,8 @@ export type ResearchAgentToolStatus =
   | "rejected";
 
 export interface ResearchAgentPaperSummary {
+  candidateId?: string;
+  arxivId?: string;
   title: string;
   authors: string[];
   year: number | null;
@@ -22,6 +24,14 @@ export interface ResearchAgentPaperSummary {
   landingUrl?: string;
   abstract?: string;
   source?: string;
+}
+
+export interface ResearchAgentImportReceipt {
+  persisted: true;
+  id: string;
+  duplicate: boolean;
+  kind: "pdf" | "metadata";
+  originalId?: string;
 }
 
 export interface ResearchAgentCitation {
@@ -124,11 +134,17 @@ function normalizePaper(value: unknown): ResearchAgentPaperSummary {
     throw new Error("论文年份无效");
   }
   const landingUrl = optionalText(source.landingUrl, "论文链接", 2_000);
+  const arxivId = optionalText(source.arxivId, "arXiv ID", 100);
+  if (arxivId && !/^(?:\d{4}\.\d{4,5}|[a-z][a-z-]*(?:\.[A-Z]{2})?\/\d{7})(?:v\d+)?$/i.test(arxivId)) {
+    throw new Error("arXiv ID无效");
+  }
   if (landingUrl && !/^https?:\/\//i.test(landingUrl)) {
     throw new Error("论文链接无效");
   }
   return {
     title: requiredText(source.title, "论文标题", 500),
+    candidateId: optionalText(source.candidateId, "检索候选 ID", 200),
+    arxivId,
     authors: normalizeAuthors(source.authors ?? []),
     year,
     doi: optionalText(source.doi, "DOI", 500),

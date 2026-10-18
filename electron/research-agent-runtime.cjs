@@ -20,6 +20,7 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
   let startingController = null;
   const pendingApprovals = new Map();
   const citationEvidence = new Map();
+  const candidateStore = new Map();
 
   function publish(event) {
     if (!disposed) emit(event);
@@ -100,6 +101,7 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
       emitApproval: (request) => approvalRequest(request, signal),
       fetchImpl,
       readLibraryPaper,
+      candidateStore,
     }).find((candidate) => candidate.name === name);
     if (!definition) throw new Error(`未注册工具：${name}`);
     if (signal?.aborted || aborted) throw new Error("请求已停止");
@@ -120,17 +122,22 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
           });
         }
       }
-      if (name === "add_paper_to_library" && output?.status === "added" && output.paper) {
+      if (name === "add_paper_to_library" && output?.status === "added" && output.paper
+        && output.result?.persisted === true) {
         const added = output.paper;
-        const exists = context.library.some((item) =>
-          item.doi && added.doi && item.doi.toLocaleLowerCase() === added.doi.toLocaleLowerCase()
-          || item.title.toLocaleLowerCase() === added.title.toLocaleLowerCase());
-        if (!exists) context.library = [{
-          id: output.result?.id || randomUUID(), title: added.title,
+        const previous = context.library.find((item) => item.id === output.result.id);
+        context.library = [{
+          id: output.result.id, originalId: output.result.originalId || previous?.originalId, title: added.title,
           authors: added.authors || [], year: added.year ?? null, doi: added.doi,
-        }, ...context.library].slice(0, 5000);
+          arxivId: added.arxivId,
+        }, ...context.library.filter((item) => item.id !== output.result.id)].slice(0, 5000);
       }
-      const completed = { ...tool, status: output?.status === "rejected" ? "rejected" : "completed", output, finishedAt: new Date().toISOString() };
+      const completed = {
+        ...tool,
+        status: output?.status === "rejected" ? "rejected" : output?.status === "failed" ? "failed" : "completed",
+        output,
+        finishedAt: new Date().toISOString(),
+      };
       toolEvent("tool_end", completed);
       return output;
     } catch (error) {
@@ -146,6 +153,7 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
     if (disposed) throw new Error("Agent 已关闭");
     piSession?.dispose();
     piSession = null;
+    candidateStore.clear();
     context = normalizeContext(nextContext);
     citationEvidence.clear();
     const service = settings[settings.aiProvider];

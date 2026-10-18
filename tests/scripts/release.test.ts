@@ -14,7 +14,15 @@ describe("public release packaging", () => {
   it("fixes identity, keeps user data and builds a real NSIS installer", () => {
     expect(config.appId).toBe("com.pianpian.desktop");
     expect(config.executableName).toBe("Pianpian");
-    expect(config.nsis).toMatchObject({ perMachine: false, deleteAppDataOnUninstall: false });
+    expect(config.nsis).toMatchObject({
+      perMachine: false,
+      deleteAppDataOnUninstall: false,
+      createStartMenuShortcut: true,
+      createDesktopShortcut: true,
+      shortcutName: "篇篇",
+      runAfterFinish: true,
+      include: "assets/installer.nsh",
+    });
     expect(config.win.target.map((target: { target: string }) => target.target)).toEqual(["nsis", "zip"]);
     expect(config.files).not.toContain("**/*");
   });
