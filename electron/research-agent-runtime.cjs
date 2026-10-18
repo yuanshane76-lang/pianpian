@@ -14,6 +14,7 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
   let piSession = null;
   let busy = false;
   let serviceKey = "";
+  let activeService = null;
   let generation = 0;
   let lifecycle = 0;
   let contextRevision = 0;
@@ -101,6 +102,7 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
       emitApproval: (request) => approvalRequest(request, signal),
       fetchImpl,
       readLibraryPaper,
+      service: activeService,
       candidateStore,
     }).find((candidate) => candidate.name === name);
     if (!definition) throw new Error(`未注册工具：${name}`);
@@ -142,7 +144,7 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
       return output;
     } catch (error) {
       if (toolGeneration !== generation || signal?.aborted || aborted) throw error;
-      const failed = { ...tool, status: "failed", error: error instanceof Error ? error.message : String(error), finishedAt: new Date().toISOString() };
+      const failed = { ...tool, status: "failed", error: safeError(error instanceof Error ? error.message : String(error), serviceKey), finishedAt: new Date().toISOString() };
       toolEvent("tool_end", failed);
       throw error;
     }
@@ -160,6 +162,7 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
     if (!service || typeof service.apiKey !== "string" || !service.apiKey.trim()) {
       throw new Error("请先在服务配置中设置当前模型密钥");
     }
+    activeService = { ...service, provider: settings.aiProvider };
     sessionId = randomUUID();
     aborted = false;
     const startGeneration = generation;
@@ -167,11 +170,11 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
     const startController = new AbortController();
     startingController = startController;
     serviceKey = service.apiKey;
-    const tools = createToolDefinitions({ getContext: () => context, emitApproval: approvalRequest, fetchImpl, readLibraryPaper });
+    const tools = createToolDefinitions({ getContext: () => context, emitApproval: approvalRequest, fetchImpl, readLibraryPaper, service: activeService });
     let nextSession;
     try {
       nextSession = await piSessionFactory({
-        service,
+        service: activeService,
         history,
         scope: context.scope,
         signal: startController.signal,

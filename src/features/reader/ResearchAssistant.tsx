@@ -49,6 +49,8 @@ const toolLabels: Record<string, string> = {
   read_current_paper: "阅读论文原文",
   search_library: "在文献库里找线索",
   search_literature: "查找相关论文",
+  search_web: "联网搜索",
+  fetch_web_page: "读取网页",
   add_paper_to_library: "确认加入文献库",
   create_document: "整理阅读笔记",
 };
@@ -79,6 +81,7 @@ function ToolCard({ tool, approvalPaper, onApprove, onReject, approving, onSaveD
   const [expanded, setExpanded] = useState(false);
   const output = isRecord(tool.output) ? tool.output : undefined;
   const papers = Array.isArray(output?.papers) ? output.papers : [];
+  const webResults = Array.isArray(output?.results) ? output.results : [];
   const document = isRecord(output?.document) && typeof output.document.markdown === "string"
     ? output.document as ResearchDocument
     : undefined;
@@ -87,6 +90,8 @@ function ToolCard({ tool, approvalPaper, onApprove, onReject, approving, onSaveD
   const summary = tool.name === "read_current_paper" ? output?.paper?.blocks
     ? `已读取 ${output.paper.blocks.length} 个原文块${tool.input.query ? ` · ${tool.input.query}` : ""}` : "读取论文原文"
     : tool.name === "read_research_skill" ? output?.title ?? "选择研究流程"
+    : tool.name === "fetch_web_page" ? output?.title || tool.input.url || "读取网页"
+    : tool.name === "search_web" ? `${tool.input.query ?? ""}${webResults.length ? ` · ${webResults.length} 条网页` : ""}`
     : tool.name === "add_paper_to_library" && output?.result?.kind === "pdf" ? output.result.duplicate ? "PDF 已在文献库中" : "PDF 已下载并保存"
     : tool.name === "add_paper_to_library" && output?.result?.kind === "metadata" ? "仅论文元数据已保存"
     : tool.name.includes("search") ? `${tool.input.query ?? ""}${papers.length ? ` · ${papers.length} 篇结果` : ""}${output?.source ? ` · ${output.source}` : ""}${output?.unavailableSources?.length ? ` · ${output.unavailableSources.join("、")}暂不可用` : ""}`
@@ -124,6 +129,16 @@ function ToolCard({ tool, approvalPaper, onApprove, onReject, approving, onSaveD
             <div className="research-result-item" key={`${paper.doi ?? paper.title}-${index}`}>
               <span className="research-result-index">{index + 1}</span>
               <div><strong>{paper.title}</strong><span>{paper.authors?.join("、") || "作者待补充"} · {paper.year ?? "年份待补充"}{paper.doi ? ` · ${paper.doi}` : ""}</span></div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {expanded && tool.status === "completed" && webResults.length ? (
+        <div className="research-result-list">
+          {webResults.slice(0, 5).map((result: any, index: number) => (
+            <div className="research-result-item" key={`${result.url ?? result.title}-${index}`}>
+              <span className="research-result-index">{index + 1}</span>
+              <div><strong>{result.title || result.url}</strong><span>{result.siteName || result.site_name || result.snippet || result.url}</span></div>
             </div>
           ))}
         </div>

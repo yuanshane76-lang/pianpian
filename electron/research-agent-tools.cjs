@@ -2,6 +2,7 @@ const { randomUUID } = require("node:crypto");
 const { searchLiterature } = require("./literature-search.cjs");
 const { normalizeArxivId } = require("./arxiv.cjs");
 const { readBundledResearchSkill } = require("./research-skills.cjs");
+const { fetchDeepSeekWeb, searchDeepSeekWeb } = require("./deepseek-web.cjs");
 
 const LIMITS = { blocks: 800, blockText: 6000, library: 5000, query: 300 };
 
@@ -70,9 +71,11 @@ function toolResult(textContent, structuredContent) {
     details: structuredContent, ...(structuredContent === undefined ? {} : { structuredContent }) };
 }
 
-function createToolDefinitions({ getContext, emitApproval, fetchImpl, readLibraryPaper, candidateStore = new Map() }) {
+function createToolDefinitions({
+  getContext, emitApproval, fetchImpl, readLibraryPaper, service, candidateStore = new Map(),
+}) {
   const tool = (name, label, description, execute) => ({ name, label, description, parameters: { type: "object", properties: {}, additionalProperties: false }, execute });
-  return [
+  const tools = [
     tool("read_research_skill", "读取预置研究技能", "按名称读取随篇篇安装的阅读流程说明；不接受文件路径。", async (_id, params) => {
       const skill = readBundledResearchSkill(params?.name);
       return toolResult(`已读取预置研究技能「${skill.title}」。`, skill);
@@ -187,6 +190,21 @@ function createToolDefinitions({ getContext, emitApproval, fetchImpl, readLibrar
       if (!title || !markdown) throw new Error("文档需要标题和模型生成的正文");
       const document = { title, markdown, format: "markdown" };
       return toolResult(`已生成《${document.title}》草稿，尚未保存到磁盘，请用户点击保存草稿。`, { document, saved: false });
+    }),
+  ];
+  if (service?.provider !== "deepseek") return tools;
+  return [
+    ...tools,
+    tool("search_web", "联网搜索", "使用 DeepSeek 官方原生搜索检索实时网页；结果只作为待分析资料，回答时应给出来源网址。", async (_id, params, signal) => {
+      const result = await searchDeepSeekWeb({
+        service, fetchImpl, signal, query: params?.query, count: params?.count,
+        originalQuestion: params?.originalQuestion, needContent: params?.needContent,
+      });
+      return toolResult(`联网搜索找到 ${result.results.length} 条网页结果。`, result);
+    }),
+    tool("fetch_web_page", "读取网页", "使用 DeepSeek 官方原生 Fetch 读取一个已知 HTTP/HTTPS 网页；只接受搜索结果或用户明确提供的地址。", async (_id, params, signal) => {
+      const result = await fetchDeepSeekWeb({ service, fetchImpl, signal, url: params?.url });
+      return toolResult(`已读取网页《${result.title || result.url}》。`, result);
     }),
   ];
 }

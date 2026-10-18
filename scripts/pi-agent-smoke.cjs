@@ -50,7 +50,7 @@ async function main() {
     await runtime.prompt("读取论文，检索相关工作并生成笔记");
     assert.equal(requests.length, 5, JSON.stringify(events.filter((event) => event.type === "agent_error")));
     const names = requests[0].tools.map((tool) => tool.function.name).sort();
-    assert.deepEqual(names, ["add_paper_to_library", "create_document", "read_current_paper", "read_research_skill", "search_library", "search_literature"]);
+    assert.deepEqual(names, ["add_paper_to_library", "create_document", "fetch_web_page", "read_current_paper", "read_research_skill", "search_library", "search_literature", "search_web"]);
     assert(JSON.stringify(requests[0].messages).includes("paper-deep-reading"));
     assert(!JSON.stringify(requests[0].messages).includes("## 获取原文证据"));
     assert(JSON.stringify(requests[1].messages).includes("## 获取原文证据"));
