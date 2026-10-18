@@ -289,6 +289,19 @@ describe("research assistant", () => {
     expect(container.querySelector(".research-result-list")?.textContent).toContain("A search result");
   });
 
+  it("renders DeepSeek web search results as a compact expandable tool card", async () => {
+    await mount();
+    await act(async () => emit({ type: "tool_end", tool: { id: "web-search", name: "search_web",
+      label: "联网搜索", status: "completed", input: { query: "DeepSeek" },
+      output: { source: "DeepSeek Search", results: [{ title: "DeepSeek API", url: "https://api.deepseek.com",
+        site_name: "DeepSeek", snippet: "Search API docs." }] } } }));
+    expect(container.querySelector('[aria-label="工具：联网搜索"]')).not.toBeNull();
+    expect(container.querySelector(".research-tool-summary")?.textContent).toContain("1 条网页");
+    expect(container.querySelector(".research-result-list")).toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>(".research-tool-heading")!.click());
+    expect(container.querySelector(".research-result-list")?.textContent).toContain("DeepSeek API");
+  });
+
   it("does not write when an approval was stopped or invalidated in the main process", async () => {
     const { invoke, onAddPaper } = await mount();
     await act(async () => emit({ type: "approval_required", approvalId: "stale", toolCallId: "stale-tool",

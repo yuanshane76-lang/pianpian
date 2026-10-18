@@ -12,6 +12,131 @@ const context = {
 };
 
 describe("research Agent", () => {
+  it("exposes DeepSeek native web tools only for DeepSeek sessions", () => {
+    const { createToolDefinitions } = require("../../electron/research-agent-tools.cjs");
+    const makeTools = (provider: string) => createToolDefinitions({
+      getContext: () => context,
+      service: { provider, apiKey: "synthetic-test-placeholder" },
+    });
+
+    expect(makeTools("deepseek").map((tool: any) => tool.name))
+      .toEqual(expect.arrayContaining(["search_web", "fetch_web_page"]));
+    expect(makeTools("aliyun").map((tool: any) => tool.name))
+      .not.toEqual(expect.arrayContaining(["search_web", "fetch_web_page"]));
+  });
+
+  it("calls DeepSeek Search and Fetch with bounded, structured results", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
+      requests.push({ url, init });
+      if (url.endsWith("/tools/search")) {
+        return new Response(JSON.stringify({
+          results: [{ title: "DeepSeek", url: "https://www.deepseek.com", snippet: "A result", content: "Page content." }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ title: "Fetched page", content: "# Full page\n\nBody." }), {
+        status: 200, headers: { "content-type": "application/json" },
+      });
+    });
+    const { createToolDefinitions } = require("../../electron/research-agent-tools.cjs");
+    const tools = createToolDefinitions({
+      getContext: () => context,
+      service: { provider: "deepseek", apiKey: "deepseek-test-key", baseUrl: "https://api.deepseek.com" },
+      fetchImpl,
+    });
+
+    const search = tools.find((tool: any) => tool.name === "search_web");
+    const searchResult = await search.execute("search-1", { query: "DeepSeek", count: 3, needContent: true });
+    expect(requests[0]).toMatchObject({
+      url: "https://api.deepseek.com/v1/tools/search",
+      init: expect.objectContaining({ method: "POST" }),
+    });
+    expect(JSON.parse(String(requests[0].init.body))).toEqual({ query: "DeepSeek", count: 3, need_content: true });
+    expect(searchResult.details).toMatchObject({
+      source: "DeepSeek Search",
+      results: [{ title: "DeepSeek", url: "https://www.deepseek.com/", content: "Page content." }],
+    });
+
+    const fetchTool = tools.find((tool: any) => tool.name === "fetch_web_page");
+    const fetchResult = await fetchTool.execute("fetch-1", { url: "https://www.deepseek.com/docs" });
+    expect(requests[1]).toMatchObject({
+      url: "https://api.deepseek.com/v1/tools/fetch",
+      init: expect.objectContaining({ method: "POST" }),
+    });
+    expect(JSON.parse(String(requests[1].init.body))).toEqual({ url: "https://www.deepseek.com/docs" });
+    expect(fetchResult.details).toEqual({
+      source: "DeepSeek Fetch",
+      url: "https://www.deepseek.com/docs",
+      title: "Fetched page",
+      content: "# Full page\n\nBody.",
+    });
+  });
+
+  it("rejects malformed or oversized DeepSeek Search responses before exposing empty evidence", async () => {
+    const { createToolDefinitions } = require("../../electron/research-agent-tools.cjs");
+    const makeSearch = (fetchImpl: any) => createToolDefinitions({
+      getContext: () => context,
+      service: { provider: "deepseek", apiKey: "deepseek-test-key", baseUrl: "https://api.deepseek.com" },
+      fetchImpl,
+    }).find((tool: any) => tool.name === "search_web");
+
+    await expect(makeSearch(async () => new Response("{}")).execute("malformed", { query: "DeepSeek" }))
+      .rejects.toThrow("响应格式");
+    const oversized = JSON.stringify({
+      results: [{ title: "Large", url: "https://example.com", content: "x".repeat(600_000) }],
+    });
+    await expect(makeSearch(async () => new Response(oversized)).execute("oversized", { query: "DeepSeek" }))
+      .rejects.toThrow("响应过大");
+  });
+
+  it("retries transient DeepSeek Search failures and times out a stalled request", async () => {
+    const { createToolDefinitions } = require("../../electron/research-agent-tools.cjs");
+    let attempts = 0;
+    const retryTools = createToolDefinitions({
+      getContext: () => context,
+      service: { provider: "deepseek", apiKey: "deepseek-test-key", baseUrl: "https://api.deepseek.com" },
+      fetchImpl: async () => {
+        attempts += 1;
+        if (attempts === 1) return new Response(JSON.stringify({ error: { message: "busy" } }), { status: 429 });
+        return new Response(JSON.stringify({ results: [] }));
+      },
+    });
+    await expect(retryTools.find((tool: any) => tool.name === "search_web").execute("retry", { query: "DeepSeek" }))
+      .resolves.toMatchObject({ details: { results: [] } });
+    expect(attempts).toBe(2);
+
+    const stalled = createToolDefinitions({
+      getContext: () => context,
+      service: { provider: "deepseek", apiKey: "deepseek-test-key", baseUrl: "https://api.deepseek.com", searchTimeoutMs: 10 },
+      fetchImpl: async (_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+      }),
+    });
+    const request = stalled.find((tool: any) => tool.name === "search_web").execute("stalled", { query: "DeepSeek" });
+    await expect(Promise.race([
+      request,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("test did not time out")), 100)),
+    ])).rejects.toThrow("超时");
+  });
+
+  it("redacts the configured model key from native web tool failures", async () => {
+    const events: any[] = [];
+    const key = "deepseek-secret";
+    const runtime = createResearchAgentRuntime({
+      emit: (event: any) => events.push(event),
+      fetchImpl: async () => { throw new Error(`upstream leaked ${key}`); },
+      piSessionFactory: async ({ tools }: any) => ({
+        prompt: async () => tools.find((tool: any) => tool.name === "search_web").execute("web", { query: "DeepSeek" }),
+        abort: async () => {},
+        dispose: () => {},
+      }),
+    });
+    await runtime.start(context, { aiProvider: "deepseek", deepseek: { apiKey: key, baseUrl: "https://api.deepseek.com" } });
+    await runtime.prompt("联网搜索");
+    expect(events.find((event) => event.type === "tool_end")?.tool.error).toBe("upstream leaked [已隐藏]");
+    runtime.dispose();
+  });
+
   it("passes restored text history to Pi and keeps identical block IDs in different library papers distinct", async () => {
     const events: any[] = [];
     const history = [{ type: "message", message: { id: "old", role: "user", content: "旧问题" } }];

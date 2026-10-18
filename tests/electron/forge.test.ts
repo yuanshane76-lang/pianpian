@@ -32,6 +32,7 @@ describe("portable package contents", () => {
     expect(ignored("electron/document-store.cjs")).toBe(false);
     expect(ignored("electron/document-tasks.cjs")).toBe(false);
     expect(ignored("electron/mineru.cjs")).toBe(false);
+    expect(ignored("electron/deepseek-web.cjs")).toBe(false);
     expect(ignored("electron/pi-agent.cjs")).toBe(false);
     expect(ignored("electron/research-agent-runtime.cjs")).toBe(false);
     expect(ignored("node_modules/@earendil-works/pi-coding-agent/dist/index.js")).toBe(false);
