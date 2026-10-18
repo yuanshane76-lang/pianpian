@@ -10,6 +10,7 @@ const { streamModel } = require("./ai.cjs");
 const { registerAiStreamHandlers } = require("./ai-stream-ipc.cjs");
 const { createDocumentStore } = require("./document-store.cjs");
 const { createDocumentTasks } = require("./document-tasks.cjs");
+const { createLiteratureImports } = require("./literature-imports.cjs");
 const { registerResearchAgentHandlers } = require("./research-agent-ipc.cjs");
 const { createConversationStore } = require("./research-conversations.cjs");
 const { createLibraryPaperReader } = require("./research-library.cjs");
@@ -118,9 +119,12 @@ app.whenReady().then(() => {
     }).finally(() => app.quit());
   });
   const documentTasks = createDocumentTasks({ documents, readSettings });
-  secureHandle("zhiyan:documents:save", (input) => documents.save(input));
+  const literatureImports = createLiteratureImports({ documents });
+  secureHandle("zhiyan:literature:download-arxiv", (arxivId) => literatureImports.start(arxivId));
+  secureHandle("zhiyan:literature:finish-import", (input) => literatureImports.finish(input));
+  secureHandle("zhiyan:documents:save", (input) => literatureImports.run(() => documents.save(input)));
   secureHandle("zhiyan:documents:read", (id) => documents.read(id));
-  secureHandle("zhiyan:documents:delete", (id) => documents.remove(id));
+  secureHandle("zhiyan:documents:delete", (id) => literatureImports.run(() => documents.remove(id)));
   secureHandle("zhiyan:documents:asset", (input) => documents.readAsset(input?.id, input?.path));
   secureHandle("zhiyan:documents:state", (id) => documentTasks.snapshot(id));
   secureHandle("zhiyan:documents:states", async (items) => {

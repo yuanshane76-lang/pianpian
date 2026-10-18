@@ -24,7 +24,7 @@ async function mount(available = true, currentPaper = paper, skills = false) {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  const onAddPaper = vi.fn(() => ({ id: "added", duplicate: false }));
+  const onAddPaper = vi.fn(async () => ({ persisted: true as const, id: "added", duplicate: false, kind: "metadata" as const }));
   const onJump = vi.fn();
   await act(async () => root.render(<ResearchAssistant paper={currentPaper} library={[currentPaper]} onAddPaper={onAddPaper} onJump={onJump} available={available} onOpenSettings={vi.fn()} />));
   return { invoke, onAddPaper, onJump, setActive: async (active: boolean) => {
@@ -163,8 +163,57 @@ describe("research assistant", () => {
     expect(approve).toBeTruthy();
     expect(container.querySelector('[aria-label="工具：确认加入文献库"]')).not.toBeNull();
     await act(async () => approve.click());
-    expect(onAddPaper).toHaveBeenCalledWith(expect.objectContaining({ title: "Result" }));
-    expect(invoke).toHaveBeenCalledWith("zhiyan:agent:approve", expect.objectContaining({ approvalId: "a1", approved: true, result: { id: "added", duplicate: false } }));
+    expect(onAddPaper).toHaveBeenCalledWith(expect.objectContaining({ title: "Result" }), expect.any(AbortSignal));
+    expect(invoke).toHaveBeenCalledWith("zhiyan:agent:approve", expect.objectContaining({ approvalId: "a1", approved: true,
+      result: { persisted: true, id: "added", duplicate: false, kind: "metadata" } }));
+  });
+
+  it("waits for asynchronous PDF persistence before completing an approval", async () => {
+    const { invoke, onAddPaper } = await mount();
+    let finish!: (value: any) => void;
+    onAddPaper.mockImplementation(() => new Promise((resolve) => { finish = resolve; }) as any);
+    await act(async () => emit({ type: "approval_required", approvalId: "pdf-approval", toolCallId: "pdf-tool",
+      paper: { candidateId: "verified", arxivId: "1706.03762v7", title: "Attention Is All You Need", authors: [], year: 2017 } }));
+    await act(async () => container.querySelector<HTMLButtonElement>(".research-approval-actions .primary-button")!.click());
+    await vi.waitFor(() => expect(onAddPaper).toHaveBeenCalledOnce());
+    expect(invoke.mock.calls.filter(([channel]) => channel === "zhiyan:agent:approve")).toHaveLength(1);
+    expect(container.querySelector<HTMLButtonElement>(".research-approval-actions .primary-button")?.disabled).toBe(true);
+    expect(container.querySelector(".research-approval-actions")?.textContent).toContain("正在下载并保存");
+    await act(async () => finish({ persisted: true, id: "paper-id", originalId: "document-id", duplicate: false, kind: "pdf" }));
+    expect(invoke).toHaveBeenLastCalledWith("zhiyan:agent:approve", expect.objectContaining({
+      approvalId: "pdf-approval", approved: true,
+      result: { persisted: true, id: "paper-id", originalId: "document-id", duplicate: false, kind: "pdf" },
+    }));
+  });
+
+  it("never reports success when the library callback returns no persistence receipt", async () => {
+    const { invoke, onAddPaper } = await mount();
+    onAddPaper.mockReturnValue(undefined as any);
+    await act(async () => emit({ type: "approval_required", approvalId: "missing-receipt", toolCallId: "missing-tool",
+      paper: { candidateId: "verified", title: "Not saved", authors: [], year: 2025 } }));
+    await act(async () => container.querySelector<HTMLButtonElement>(".research-approval-actions .primary-button")!.click());
+    await vi.waitFor(() => expect(invoke.mock.calls.filter(([channel]) => channel === "zhiyan:agent:approve")).toHaveLength(2));
+    expect(invoke).toHaveBeenLastCalledWith("zhiyan:agent:approve", expect.objectContaining({
+      approvalId: "missing-receipt", approved: false,
+    }));
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("保存");
+  });
+
+  it.each(["unmount", "agent_error", "agent_end"])("cancels an in-flight import on %s", async (termination) => {
+    const { onAddPaper } = await mount();
+    let finish!: (value: any) => void;
+    onAddPaper.mockImplementation(() => new Promise((resolve) => { finish = resolve; }) as any);
+    await act(async () => emit({ type: "approval_required", approvalId: "in-flight", toolCallId: "pending",
+      paper: { title: "Paper", authors: [], year: 2024 } }));
+    await act(async () => container.querySelector<HTMLButtonElement>(".research-approval-actions .primary-button")!.click());
+    await vi.waitFor(() => expect(onAddPaper).toHaveBeenCalledOnce());
+    const signal = (onAddPaper.mock.calls[0] as unknown as [unknown, AbortSignal])[1];
+    if (termination === "unmount") await act(async () => root.render(null));
+    else await act(async () => emit(termination === "agent_error"
+      ? { type: "agent_error", message: "执行已结束", recoverable: false }
+      : { type: "agent_end" }));
+    expect(signal.aborted).toBe(true);
+    await act(async () => finish({ persisted: true, id: "paper", duplicate: false, kind: "pdf" }));
   });
 
   it("keeps whitespace in streamed replies and exposes generated documents", async () => {

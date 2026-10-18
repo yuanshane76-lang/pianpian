@@ -12,7 +12,7 @@ export interface ResearchAgentContext {
     year: number | null;
     blocks: Array<{ id: string; pageNumber: number; text: string }>;
   } | null;
-  library: Array<{ id: string; originalId?: string; title: string; authors: string[]; year: number | null; doi?: string }>;
+  library: Array<{ id: string; originalId?: string; title: string; authors: string[]; year: number | null; doi?: string; arxivId?: string }>;
 }
 
 export function createResearchAgentContext(paper: PaperRecord, library: PaperRecord[], scope: "paper" | "library" = "paper"): ResearchAgentContext {
@@ -33,6 +33,7 @@ export function createResearchAgentContext(paper: PaperRecord, library: PaperRec
     library: library.map((item) => ({
       id: item.id,
       originalId: item.originalId,
+      arxivId: item.arxivId,
       title: item.title,
       authors: item.authors,
       year: item.year,
@@ -131,6 +132,7 @@ export const deleteResearchConversation = (id: string) => historyCall<boolean>("
 export async function approveResearchAgent(input: {
   approvalId: string;
   approved: boolean;
+  message?: string;
   paper?: ResearchAgentPaperSummary;
   result?: unknown;
 }): Promise<boolean> {

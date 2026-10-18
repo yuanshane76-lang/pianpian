@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld("zhiyan", {
       "zhiyan:documents:asset",
       "zhiyan:documents:state",
       "zhiyan:documents:states",
+      "zhiyan:literature:download-arxiv",
+      "zhiyan:literature:finish-import",
       "zhiyan:mineru:start",
       "zhiyan:mineru:status",
       "zhiyan:agent:start",

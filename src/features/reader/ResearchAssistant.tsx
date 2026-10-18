@@ -14,7 +14,7 @@ import {
   listResearchConversations, createResearchConversation, getResearchConversation, renameResearchConversation, deleteResearchConversation,
   type ConversationSummary, type ConversationScope,
 } from "../../services/researchAgent";
-import type { ResearchAgentEvent, ResearchAgentMessage, ResearchAgentPaperSummary, ResearchAgentSkill, ResearchAgentToolCall } from "../../services/researchAgentProtocol";
+import type { ResearchAgentEvent, ResearchAgentImportReceipt, ResearchAgentMessage, ResearchAgentPaperSummary, ResearchAgentSkill, ResearchAgentToolCall } from "../../services/researchAgentProtocol";
 import { getDesktopBridge } from "../../platform/electron";
 import { MarkdownContent } from "./MarkdownContent";
 import { useConversationScroll } from "./useConversationScroll";
@@ -30,7 +30,7 @@ interface ResearchAssistantProps {
   scope?: "paper" | "library";
   paper: PaperRecord;
   library: PaperRecord[];
-  onAddPaper: (paper: ResearchAgentPaperSummary) => { id: string; duplicate: boolean } | void;
+  onAddPaper: (paper: ResearchAgentPaperSummary, signal: AbortSignal) => Promise<ResearchAgentImportReceipt>;
   onJump: (blockId: string) => void;
   onJumpPaper?: (paperId: string, blockId: string) => void;
   onSaveDocument?: (document: ResearchDocument) => void;
@@ -70,11 +70,12 @@ function isRecord(value: unknown): value is Record<string, any> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function ToolCard({ tool, approvalPaper, onApprove, onReject, onSaveDocument }: {
+function ToolCard({ tool, approvalPaper, onApprove, onReject, approving, onSaveDocument }: {
   tool: ResearchAgentToolCall;
   approvalPaper?: ResearchAgentPaperSummary;
   onApprove?: () => void;
   onReject?: () => void;
+  approving?: boolean;
   onSaveDocument?: (document: ResearchDocument) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -91,7 +92,9 @@ function ToolCard({ tool, approvalPaper, onApprove, onReject, onSaveDocument }: 
     : tool.name === "read_research_skill" ? output?.title ?? "选择研究流程"
     : tool.name === "fetch_web_page" ? output?.title || tool.input.url || "读取网页"
     : tool.name === "search_web" ? `${tool.input.query ?? ""}${webResults.length ? ` · ${webResults.length} 条网页` : ""}`
-    : tool.name.includes("search") ? `${tool.input.query ?? ""}${papers.length ? ` · ${papers.length} 篇结果` : ""}`
+    : tool.name === "add_paper_to_library" && output?.result?.kind === "pdf" ? output.result.duplicate ? "PDF 已在文献库中" : "PDF 已下载并保存"
+    : tool.name === "add_paper_to_library" && output?.result?.kind === "metadata" ? "仅论文元数据已保存"
+    : tool.name.includes("search") ? `${tool.input.query ?? ""}${papers.length ? ` · ${papers.length} 篇结果` : ""}${output?.source ? ` · ${output.source}` : ""}${output?.unavailableSources?.length ? ` · ${output.unavailableSources.join("、")}暂不可用` : ""}`
     : document?.title ?? tool.input.title ?? "";
 
   return (
@@ -109,11 +112,14 @@ function ToolCard({ tool, approvalPaper, onApprove, onReject, onSaveDocument }: 
         <div className="research-approval">
           <div>
             <strong>加入《{approvalPaper.title}》？</strong>
-            <span>{approvalPaper.authors.join("、") || "作者待补充"} · {approvalPaper.year ?? "年份待补充"}</span>
+            <span>{approvalPaper.authors.join("、") || "作者待补充"} · {approvalPaper.year ?? "年份待补充"}{approvalPaper.arxivId ? " · 确认后下载并保存 PDF" : " · 仅保存论文元数据"}</span>
           </div>
           <div className="research-approval-actions">
-            <button type="button" className="primary-button compact" onClick={onApprove}><Check size={14} />确认加入</button>
-            <button type="button" className="secondary-button compact" onClick={onReject}><X size={14} />拒绝</button>
+            <button type="button" className="primary-button compact" disabled={approving} onClick={onApprove}>
+              {approving ? <LoaderCircle className="spin" size={14} /> : <Check size={14} />}
+              {approving ? approvalPaper.arxivId ? "正在下载并保存…" : "正在加入…" : approvalPaper.arxivId ? "确认下载 PDF" : "确认加入元数据"}
+            </button>
+            <button type="button" className="secondary-button compact" disabled={approving} onClick={onReject}><X size={14} />拒绝</button>
           </div>
         </div>
       ) : null}
@@ -165,6 +171,7 @@ export function ResearchAssistant({ paper, library, scope = "paper", onAddPaper,
   const [error, setError] = useState<string | null>(null);
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
   const [approvalByToolId, setApprovalByToolId] = useState<Record<string, { approvalId: string; paper: ResearchAgentPaperSummary }>>({});
+  const [confirmingApprovals, setConfirmingApprovals] = useState<Record<string, boolean>>({});
   const [streaming, setStreaming] = useState<Record<string, string>>({});
   const [skills, setSkills] = useState<ResearchAgentSkill[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
@@ -194,6 +201,11 @@ export function ResearchAssistant({ paper, library, scope = "paper", onAddPaper,
   const latestContext = useRef(paperContext);
   latestContext.current = paperContext;
   const confirmingTools = useRef(new Set<string>());
+  const approvalAbortControllers = useRef(new Map<string, AbortController>());
+  function cancelPendingImports() {
+    for (const controller of approvalAbortControllers.current.values()) controller.abort();
+    approvalAbortControllers.current.clear();
+  }
   const sessionEpoch = useRef(0);
   const activeApprovals = useRef(approvalByToolId);
   const [ready, setReady] = useState(false);
@@ -248,6 +260,7 @@ export function ResearchAssistant({ paper, library, scope = "paper", onAddPaper,
     let disposed = false;
     sessionEpoch.current += 1;
     activeApprovals.current = {};
+    cancelPendingImports();
     setTimeline([]);
     setBusy(false);
     setReady(false);
@@ -302,6 +315,7 @@ export function ResearchAssistant({ paper, library, scope = "paper", onAddPaper,
         }));
       }
       if (event.type === "agent_error") {
+        cancelPendingImports();
         activeApprovals.current = {};
         setApprovalByToolId({});
         setError(event.message);
@@ -312,6 +326,7 @@ export function ResearchAssistant({ paper, library, scope = "paper", onAddPaper,
         }
       }
       if (event.type === "agent_end") {
+        cancelPendingImports();
         activeApprovals.current = {};
         setBusy(false);
         setApprovalByToolId({});
@@ -351,6 +366,7 @@ export function ResearchAssistant({ paper, library, scope = "paper", onAddPaper,
     });
     return () => {
       disposed = true;
+      cancelPendingImports();
       sessionEpoch.current += 1;
       activeApprovals.current = {};
       startedRef.current = false;
@@ -405,22 +421,37 @@ export function ResearchAssistant({ paper, library, scope = "paper", onAddPaper,
     const stillActive = () => sessionEpoch.current === epoch
       && activeApprovals.current[toolId]?.approvalId === approval.approvalId;
     confirmingTools.current.add(toolId);
+    const controller = new AbortController();
+    approvalAbortControllers.current.set(toolId, controller);
+    setConfirmingApprovals((current) => ({ ...current, [toolId]: true }));
     let result;
     try {
       if (approved) {
         const reserved = await approveResearchAgent({ approvalId: approval.approvalId, approved: true });
         if (!stillActive()) return;
         if (!reserved) throw new Error("这条确认已失效，请重新发起加入请求");
-        result = onAddPaper(approval.paper) || { completed: true };
+        result = await onAddPaper(approval.paper, controller.signal);
+        if (!result || result.persisted !== true || typeof result.id !== "string" || !result.id
+          || typeof result.duplicate !== "boolean" || !["pdf", "metadata"].includes(result.kind)) {
+          throw new Error("文献库没有返回已保存回执，未确认加入成功");
+        }
       }
+      if (!stillActive() || controller.signal.aborted) return;
       const completed = await approveResearchAgent({ approvalId: approval.approvalId, approved, result });
       if (!completed) throw new Error("文献库写入确认已失效");
     } catch (reason) {
-      if (stillActive()) setError(reason instanceof Error ? reason.message : "文献库写入失败，请重试");
-      await approveResearchAgent({ approvalId: approval.approvalId, approved: false }).catch(() => undefined);
+      const message = reason instanceof Error ? reason.message : "文献库写入失败，请重试";
+      if (stillActive()) setError(message);
+      await approveResearchAgent({ approvalId: approval.approvalId, approved: false, message }).catch(() => undefined);
       return;
     } finally {
       confirmingTools.current.delete(toolId);
+      if (approvalAbortControllers.current.get(toolId) === controller) approvalAbortControllers.current.delete(toolId);
+      setConfirmingApprovals((current) => {
+        const next = { ...current };
+        delete next[toolId];
+        return next;
+      });
     }
     if (!stillActive()) return;
     delete activeApprovals.current[toolId];
@@ -434,6 +465,7 @@ export function ResearchAssistant({ paper, library, scope = "paper", onAddPaper,
   }
 
   async function stop() {
+    cancelPendingImports();
     activeApprovals.current = {};
     setApprovalByToolId({});
     try { await abortResearchAgent(conversationId.current); }
@@ -544,6 +576,7 @@ export function ResearchAssistant({ paper, library, scope = "paper", onAddPaper,
           if (item.type === "tool") {
             const approval = approvalByToolId[item.tool.id];
             return <ToolCard key={`tool-${item.tool.id}`} tool={item.tool} approvalPaper={approval?.paper}
+              approving={confirmingApprovals[item.tool.id]}
               onApprove={() => void approve(item.tool.id, true)} onReject={() => void approve(item.tool.id, false)}
               onSaveDocument={(draft) => void saveDocument(draft)} />;
           }

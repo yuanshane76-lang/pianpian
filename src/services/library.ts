@@ -233,7 +233,10 @@ export async function importPdfFile(file: File): Promise<PaperRecord> {
   };
 }
 
-export async function preparePdfFile(file: File): Promise<{ paper: PaperRecord; data: ArrayBuffer; duplicate: boolean }> {
+export async function preparePdfFile(
+  file: File,
+  savedOriginal?: { id: string; duplicate: boolean },
+): Promise<{ paper: PaperRecord; data: ArrayBuffer; duplicate: boolean }> {
   if (file.size > 100 * 1024 * 1024) throw new Error("PDF 文件不能超过 100 MB");
   const data = await file.arrayBuffer();
   const document = await openPdf(data);
@@ -241,7 +244,7 @@ export async function preparePdfFile(file: File): Promise<{ paper: PaperRecord; 
     const metadata = await document.getMetadata();
     const info = metadata.info as { Title?: string };
     const title = info.Title?.trim();
-    const saved = await saveOriginalPdf(file.name, data);
+    const saved = savedOriginal ?? await saveOriginalPdf(file.name, data);
     return {
       data,
       duplicate: saved.duplicate,

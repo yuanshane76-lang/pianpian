@@ -1,4 +1,4 @@
-import { ArrowLeft, BookMarked, Check, FileText, PanelLeftClose, PanelRightClose, Search, Settings2, X } from "lucide-react";
+import { ArrowLeft, BookMarked, Check, PanelLeftClose, PanelRightClose, Search, Settings2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { getDocumentOutline, type DocumentBlock } from "../../domain/documentBlocks";
 import type { PaperRecord } from "../../domain/library";
@@ -283,8 +283,7 @@ export function ReaderView(props: ReaderViewProps) {
     <div className="reader-shell">
       <header className="reader-topbar">
         <button className="back-button" onClick={onBack} type="button"><ArrowLeft size={17} />返回文献库</button>
-        <div className="reader-title"><span className="reader-title-mark">PDF 阅读</span><strong>{paper.title}</strong></div>
-        <div className="reader-surface-label"><FileText size={15} />原始排版 · MinerU 交互层</div>
+        <div className="reader-title"><strong>{paper.title}</strong></div>
         <div className="reader-toolbar">
           <button type="button" className="wordbook-button" aria-label="打开单词表" title="单词表" onClick={props.onOpenWordbook}><BookMarked size={17} /><span>单词表</span><small>{props.wordbookCount ?? 0}</small></button>
           <button className="icon-button" aria-label={leftOpen ? "收起目录" : "展开目录"} onClick={toggleOutline}><PanelLeftClose size={17} /></button>

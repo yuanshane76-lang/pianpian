@@ -1,5 +1,6 @@
 const { randomUUID } = require("node:crypto");
 const { searchLiterature } = require("./literature-search.cjs");
+const { normalizeArxivId } = require("./arxiv.cjs");
 const { readBundledResearchSkill } = require("./research-skills.cjs");
 const { fetchDeepSeekWeb, searchDeepSeekWeb } = require("./deepseek-web.cjs");
 
@@ -42,6 +43,7 @@ function normalizeContext(value) {
     authors: Array.isArray(item?.authors) ? item.authors.slice(0, 20).map((author) => text(author, 120)).filter(Boolean) : [],
     year: Number.isInteger(item?.year) ? item.year : null,
     doi: text(item?.doi, 500) || undefined,
+    arxivId: normalizeArxivId(item?.arxivId) || undefined,
   })).filter((item) => item.id && item.title) : [];
   return {
     scope,
@@ -69,7 +71,9 @@ function toolResult(textContent, structuredContent) {
     details: structuredContent, ...(structuredContent === undefined ? {} : { structuredContent }) };
 }
 
-function createToolDefinitions({ getContext, emitApproval, fetchImpl, readLibraryPaper, service }) {
+function createToolDefinitions({
+  getContext, emitApproval, fetchImpl, readLibraryPaper, service, candidateStore = new Map(),
+}) {
   const tool = (name, label, description, execute) => ({ name, label, description, parameters: { type: "object", properties: {}, additionalProperties: false }, execute });
   const tools = [
     tool("read_research_skill", "读取预置研究技能", "按名称读取随篇篇安装的阅读流程说明；不接受文件路径。", async (_id, params) => {
@@ -126,25 +130,59 @@ function createToolDefinitions({ getContext, emitApproval, fetchImpl, readLibrar
         papers, totalMatches: matches.length, truncated: papers.length < matches.length,
       });
     }),
-    tool("search_literature", "检索公开文献", "检索公开学术元数据，只返回论文候选，不下载全文。", async (_id, params, signal) => {
+    tool("search_literature", "检索公开文献", "检索 arXiv 与 Crossref。每条结果都有本次会话的 candidateId；arXiv 结果可在用户确认后下载 PDF，Crossref 结果仅能加入元数据。", async (_id, params, signal) => {
       const result = await searchLiterature(params, fetchImpl, signal);
+      for (const paper of result.papers) {
+        const candidateId = randomUUID();
+        const candidate = {
+          ...paper,
+          candidateId,
+          ...(paper.arxivId ? { arxivId: normalizeArxivId(paper.arxivId) } : {}),
+        };
+        candidateStore.set(candidateId, candidate);
+        Object.assign(paper, { candidateId });
+      }
+      while (candidateStore.size > 50) candidateStore.delete(candidateStore.keys().next().value);
       return toolResult(`公开文献检索找到 ${result.papers.length} 篇论文。`, result);
     }),
-    tool("add_paper_to_library", "请求加入文献库", "请求用户确认后，把一条论文元数据加入文献库。", async (toolCallId, params) => {
+    tool("add_paper_to_library", "请求加入文献库", "必须传入 search_literature 返回的 candidateId。请求用户确认后，arXiv 候选会下载并加入原始 PDF，其他来源只加入元数据。", async (toolCallId, params) => {
+      const candidateId = text(params?.candidateId, 200);
+      const verified = candidateStore.get(candidateId);
+      if (!candidateId || !verified) throw new Error("请先检索论文，并使用检索结果中的 candidateId");
       const paper = {
-        title: text(params?.title, 500),
-        authors: Array.isArray(params?.authors) ? params.authors.slice(0, 20).map((author) => text(author, 120)).filter(Boolean) : [],
-        year: Number.isInteger(params?.year) ? params.year : null,
-        doi: text(params?.doi, 500) || undefined,
-        landingUrl: normalizeLandingUrl(params?.landingUrl),
-        abstract: text(params?.abstract, 20000) || undefined,
-        source: text(params?.source, 200) || "Agent",
+        candidateId,
+        title: verified.title,
+        authors: verified.authors,
+        year: verified.year,
+        doi: verified.doi,
+        landingUrl: normalizeLandingUrl(verified.landingUrl),
+        abstract: verified.abstract,
+        source: verified.source,
+        ...(verified.arxivId ? { arxivId: verified.arxivId } : {}),
       };
-      if (!paper.title) throw new Error("待加入论文缺少标题");
       const approvalId = randomUUID();
       const result = await emitApproval({ approvalId, toolCallId, paper });
-      if (!result?.approved) return toolResult("用户拒绝加入文献库。", { status: "rejected", paper });
-      return toolResult(result.message || "论文已加入文献库。", { status: "added", paper, result: result.result });
+      if (!result?.approved) {
+        const failed = typeof result?.message === "string" && result.message.trim();
+        return toolResult(failed ? `加入文献库失败：${failed}` : "用户拒绝加入文献库。", {
+          status: failed ? "failed" : "rejected", paper, ...(failed ? { error: failed } : {}),
+        });
+      }
+      if (result.result?.persisted !== true || typeof result.result?.id !== "string" || !result.result.id
+        || typeof result.result.duplicate !== "boolean") {
+        throw new Error("文献库未返回已保存回执，不能确认加入成功");
+      }
+      const receipt = {
+        persisted: true,
+        id: result.result.id,
+        duplicate: result.result.duplicate,
+        ...(typeof result.result.originalId === "string" ? { originalId: result.result.originalId } : {}),
+        kind: result.result.kind === "pdf" ? "pdf" : "metadata",
+      };
+      const message = receipt.kind === "pdf"
+        ? receipt.duplicate ? `《${paper.title}》的 PDF 已在文献库中。` : `《${paper.title}》的 PDF 已下载并保存到文献库。`
+        : `《${paper.title}》的元数据已加入文献库，当前没有本地 PDF。`;
+      return toolResult(message, { status: "added", paper, result: receipt });
     }),
     tool("create_document", "生成 Markdown 文档", "展示模型生成的 Markdown 阅读笔记草稿，用户点击保存后才导出文件；本工具不写入磁盘。", async (_id, params) => {
       const title = text(params?.title, 200);
