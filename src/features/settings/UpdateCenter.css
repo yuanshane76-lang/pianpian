@@ -7,9 +7,9 @@
 .update-hero p { margin: 0; color: var(--muted-strong); font-size: 12px; }
 .update-status { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 0 28px 20px; color: var(--muted-strong); font-size: 13px; line-height: 1.7; }
 .update-status svg { flex-shrink: 0; margin-top: 3px; color: var(--teal); }
-.update-notes { margin: 0 28px 20px; font-size: 13px; }
+.update-notes { max-height: 220px; overflow: auto; margin: 0 28px 20px; font-size: 13px; }
 .update-notes summary { color: var(--ink); cursor: pointer; }
-.update-notes p { max-height: 150px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted-strong); line-height: 1.8; }
+.update-notes-content { margin-top: 10px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted-strong); line-height: 1.8; }
 .update-preservation { display: flex; align-items: flex-start; gap: 10px; margin: 0 28px 24px; padding: 14px; border-radius: 10px; background: var(--teal-soft); }
 .update-preservation > svg { flex-shrink: 0; color: var(--teal); }
 .update-preservation strong { display: block; margin-bottom: 6px; font-size: 12px; color: var(--teal-dark); }

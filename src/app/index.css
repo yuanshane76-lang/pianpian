@@ -360,6 +360,23 @@ textarea:focus-visible {
   min-height: 38px;
 }
 
+.sidebar-footer .update-trigger-icon {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.update-available-dot {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: #d34a45;
+}
+
 .settings-overlay {
   position: fixed;
   inset: 0;
@@ -2106,6 +2123,10 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
   .sidebar-groups,
   .sidebar-footer span:last-child {
     display: none;
+  }
+
+  .sidebar-footer .nav-item .update-trigger-icon {
+    display: inline-flex;
   }
 
   .nav-item {

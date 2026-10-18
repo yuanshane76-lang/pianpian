@@ -51,7 +51,7 @@ if (process.versions.electron) {
   let mode = "current";
   const next = "0.4.1", file = `Pianpian-Setup-${next}-x64.exe`;
   const info = { version: next, files: [{ url: file, sha512: crypto.createHash("sha512").update(bytes).digest("base64"), size: bytes.length }],
-    releaseDate: new Date().toISOString(), releaseNotes: "改进长论文阅读体验\n更新后继续上次的阅读。" };
+    releaseDate: new Date().toISOString(), releaseNotes: "<h1>篇篇 0.4.1</h1><ul><li>改进长论文阅读体验</li><li>更新后继续上次的阅读</li></ul>" };
   const payload = JSON.stringify({ schema: 1, version: next, file, sha512: info.files[0].sha512, size: bytes.length });
   const envelope = { payload, signature: crypto.sign(null, Buffer.from(payload), pair.privateKey).toString("base64") };
   const server = http.createServer((request, response) => {
@@ -113,6 +113,8 @@ if (process.versions.electron) {
       mode = "available";
       await dialog.getByRole("button", { name: "重新检查", exact: true }).click();
       await page.getByText("有新的篇篇，等你更新", { exact: true }).waitFor();
+      const notes = await dialog.locator(".update-notes").innerText();
+      assert(notes.includes("篇篇 0.4.1") && notes.includes("• 改进长论文阅读体验") && !notes.includes("<li>"));
       await page.screenshot({ path: path.join(output, "02-available.png") });
       await dialog.getByRole("button", { name: "下载更新", exact: true }).click();
       await page.getByRole("progressbar", { name: "更新下载进度" }).waitFor();

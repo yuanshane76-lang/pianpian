@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Clock3, FolderKanban, Heart, LibraryBig, Plus, RefreshCw, Settings2 } from "lucide-react";
 import { brand, Pianpian } from "../../brand/Pianpian";
 import { ThemeToggle } from "../settings/ThemeToggle";
@@ -13,6 +14,18 @@ interface LibrarySidebarProps {
 }
 
 export function LibrarySidebar({ activeFilter, groups, onFilterChange, onCreateGroup, onOpenSettings }: LibrarySidebarProps) {
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  useEffect(() => {
+    const bridge = getDesktopBridge();
+    if (!bridge?.isDesktop) return;
+    let active = true;
+    const reflect = (state: { phase?: string }) => {
+      if (active) setUpdateAvailable(state.phase === "available" || state.phase === "downloaded");
+    };
+    void bridge.invoke<{ phase?: string }>("zhiyan:update:state").then(reflect).catch(() => {});
+    const unsubscribe = bridge.on?.<{ phase?: string }>("zhiyan:update:event", reflect);
+    return () => { active = false; unsubscribe?.(); };
+  }, []);
   const items = [
     { id: "all", label: "全部文献", icon: LibraryBig },
     { id: "favorite", label: "收藏", icon: Heart },
@@ -74,7 +87,7 @@ export function LibrarySidebar({ activeFilter, groups, onFilterChange, onCreateG
       </div>
 
       <div className="sidebar-footer">
-        {getDesktopBridge()?.isDesktop ? <button className="nav-item" type="button" aria-label="检查更新" onClick={() => window.dispatchEvent(new Event("pianpian:updates:open"))}><RefreshCw size={17} /><span>检查更新</span></button> : null}
+        {getDesktopBridge()?.isDesktop ? <button className="nav-item" type="button" aria-label={updateAvailable ? "检查更新，有新版本" : "检查更新"} onClick={() => window.dispatchEvent(new Event("pianpian:updates:open"))}><span className="update-trigger-icon"><RefreshCw size={17} />{updateAvailable ? <span className="update-available-dot" aria-hidden="true" /> : null}</span><span>检查更新</span></button> : null}
         <button className="nav-item" type="button" aria-label="服务配置" onClick={onOpenSettings} title="模型与解析配置">
           <Settings2 size={17} />
           <span>服务配置</span>

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Check, Download, LoaderCircle, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { getDesktopBridge } from "../../platform/electron";
 import { Pianpian } from "../../brand/Pianpian";
+import { formatReleaseNotes } from "./releaseNotes";
 import "./UpdateCenter.css";
 
 interface UpdateState {
@@ -44,7 +45,15 @@ export function UpdateCenter({ showTrigger = true, busy = false }: { showTrigger
       setState(next);
       if (next.open) { previousFocus.current = document.activeElement as HTMLElement; setOpen(true); }
     });
-    return () => { window.removeEventListener("pianpian:updates:open", showFromEvent); unsubscribe?.(); };
+    let active = true;
+    void bridge.invoke<UpdateState>("zhiyan:update:check")
+      .then((next) => { if (active && next?.phase) setState(next); })
+      .catch(() => {});
+    return () => {
+      active = false;
+      window.removeEventListener("pianpian:updates:open", showFromEvent);
+      unsubscribe?.();
+    };
   }, [bridge]);
   useEffect(() => {
     if (!open) return;
@@ -75,7 +84,7 @@ export function UpdateCenter({ showTrigger = true, busy = false }: { showTrigger
         <div className="update-hero"><Pianpian variant="reading" /><div><h2>{heading}</h2><p>当前版本 {state.currentVersion || "正在读取…"}{state.latestVersion ? ` → ${state.latestVersion}` : ""}</p></div></div>
         <p className="update-status" role={state.phase === "error" ? "alert" : "status"}>{working ? <LoaderCircle size={16} className="spin" /> : state.phase === "current" ? <Check size={16} /> : null}{state.message}</p>
         {state.phase === "downloading" ? <div className="update-progress" role="progressbar" aria-label="更新下载进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(state.progress || 0)}><span style={{ width: `${state.progress || 0}%` }} /><small>{Math.round(state.progress || 0)}%</small></div> : null}
-        {state.releaseNotes ? <details className="update-notes" open><summary>这次更新了什么</summary><p>{state.releaseNotes}</p></details> : null}
+        {state.releaseNotes ? <details className="update-notes" open><summary>这次更新了什么</summary><div className="update-notes-content">{formatReleaseNotes(state.releaseNotes)}</div></details> : null}
         <div className="update-preservation" id="update-preservation"><ShieldCheck size={20} /><div><strong>论文和阅读记录不会被替换</strong><p>安装前先保存记录并备份关键数据，只更新程序。下载完成后，也由你决定何时重启。</p></div></div>
         {busy && state.phase === "downloaded" ? <p className="update-error">请先等待当前回答、论文导入或解析结束，再重启更新。</p> : null}
         {error ? <p className="update-error" role="alert">{error}</p> : null}
