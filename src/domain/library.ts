@@ -11,6 +11,7 @@ export interface LibraryGroup {
 
 export interface PaperRecord {
   recordType?: "reference";
+  arxivId?: string;
   doi?: string;
   landingUrl?: string;
   abstract?: string;

@@ -4,12 +4,18 @@ import { describe, expect, it, vi } from "vitest";
 const require = createRequire(import.meta.url);
 const { createResearchAgentRuntime, normalizeContext } = require("../../electron/research-agent-runtime.cjs");
 const { searchLiterature, isUsablePaper } = require("../../electron/literature-search.cjs");
+const { parseArxivFeed } = require("../../electron/literature-search.cjs");
 
 const context = {
   paper: { id: "paper-1", title: "Synthetic attention study", authors: ["Alice"], year: 2025,
     blocks: [{ id: "block-1", pageNumber: 1, text: "Attention selects relevant features." }] },
   library: [],
 };
+
+const metadataFetch = async (url: string) => url.startsWith("https://export.arxiv.org/")
+  ? new Response('<feed xmlns="http://www.w3.org/2005/Atom"/>')
+  : new Response(JSON.stringify({ message: { items: [{ title: ["New finding"], DOI: "10.1234/new",
+    author: [], published: { "date-parts": [[2026]] }, URL: "https://doi.org/10.1234/new" }] } }));
 
 describe("research Agent", () => {
   it("passes restored text history to Pi and keeps identical block IDs in different library papers distinct", async () => {
@@ -65,10 +71,14 @@ describe("research Agent", () => {
     let failWorker: (reason: string) => void = () => {};
     const runtime = createResearchAgentRuntime({
       emit: (event: any) => events.push(event),
+      fetchImpl: metadataFetch,
       piSessionFactory: async ({ onFailure, tools }: any) => {
         failWorker = onFailure;
         const add = tools.find((tool: any) => tool.name === "add_paper_to_library");
-        return { prompt: async () => add.execute("approval", { title: "Pending", authors: [], year: 2026 }),
+        return { prompt: async () => {
+          const result = await tools.find((tool: any) => tool.name === "search_literature").execute("search", { query: "new" });
+          return add.execute("approval", { candidateId: result.details.papers[0].candidateId });
+        },
           abort: async () => {}, dispose: () => {} };
       },
     });
@@ -107,7 +117,7 @@ describe("research Agent", () => {
       events.push(event);
       if (event.type === "approval_required") {
         queueMicrotask(() => runtime.approve({ approvalId: event.approvalId, approved: true,
-          result: { id: "saved-paper", duplicate: false } }));
+          result: { persisted: true, id: "saved-paper", duplicate: false, kind: "metadata" } }));
       }
     }, fetchImpl: async () => ({ ok: true, json: async () => ({ message: { items: [
       { title: ["Attention paper"], DOI: "10.1234/attention", author: [], published: { "date-parts": [[2024]] },
@@ -160,9 +170,13 @@ describe("research Agent", () => {
     let addTool: any;
     const runtime = createResearchAgentRuntime({
       emit: (event: any) => events.push(event),
+      fetchImpl: metadataFetch,
       piSessionFactory: async ({ tools }: any) => {
         addTool = tools.find((tool: any) => tool.name === "add_paper_to_library");
-        return { prompt: async () => addTool.execute("pending", { title: "Pending", authors: [], year: 2026 }), abort: async () => {}, dispose: () => {} };
+        return { prompt: async () => {
+          const result = await tools.find((tool: any) => tool.name === "search_literature").execute("search", { query: "new" });
+          return addTool.execute("pending", { candidateId: result.details.papers[0].candidateId });
+        }, abort: async () => {}, dispose: () => {} };
       },
     });
     await runtime.start(context, { aiProvider: "deepseek", deepseek: { apiKey: "synthetic-test-placeholder" } });
@@ -176,25 +190,27 @@ describe("research Agent", () => {
     runtime.dispose();
   });
 
-  it("makes confirmed additions visible to subsequent library tools in the same Pi session", async () => {
+  it.each([false, true])("makes confirmed additions visible to subsequent library tools (existing=%s)", async (existing) => {
     let customTools: any[] = [];
     const runtime = createResearchAgentRuntime({
+      fetchImpl: metadataFetch,
       piSessionFactory: async ({ tools }: any) => {
         customTools = tools;
         return { prompt: async () => {}, abort: async () => {}, dispose: () => {} };
       },
       emit: (event: any) => {
         if (event.type === "approval_required") queueMicrotask(() => runtime.approve({
-          approvalId: event.approvalId, approved: true, result: { id: "added" },
+          approvalId: event.approvalId, approved: true, result: { persisted: true, id: "added", duplicate: false, kind: "metadata" },
         }));
       },
     });
-    await runtime.start(context, { aiProvider: "deepseek", deepseek: { apiKey: "synthetic-placeholder" } });
-    await customTools.find((tool) => tool.name === "add_paper_to_library").execute("add", {
-      title: "New finding", authors: [], year: 2026, doi: "10.1234/new",
-    });
+    await runtime.start({ ...context, library: existing
+      ? [{ id: "added", title: "New finding", doi: "10.1234/old" }] : [] },
+    { aiProvider: "deepseek", deepseek: { apiKey: "synthetic-placeholder" } });
+    const candidate = (await customTools.find((tool) => tool.name === "search_literature").execute("search", { query: "new" })).details.papers[0];
+    await customTools.find((tool) => tool.name === "add_paper_to_library").execute("add", { candidateId: candidate.candidateId });
     const result = await customTools.find((tool) => tool.name === "search_library").execute("search", { query: "10.1234/new" });
-    expect(result.details.papers).toEqual([expect.objectContaining({ id: "added", title: "New finding" })]);
+    expect(result.details.papers).toEqual([expect.objectContaining({ id: "added", title: "New finding", doi: "10.1234/new" })]);
     runtime.dispose();
   });
 
@@ -209,6 +225,85 @@ describe("research Agent", () => {
     await expect(searchLiterature({ query: "attention" }, async () => ({ ok: false, status: 429 })))
       .rejects.toThrow("429");
     expect(isUsablePaper({ title: "Figure 3: attention map", authors: [], year: null })).toBe(false);
+  });
+
+  it("ranks the exact arXiv paper above similarly titled Crossref records", async () => {
+    const atom = `<?xml version="1.0" encoding="UTF-8"?>
+      <feed xmlns="http://www.w3.org/2005/Atom">
+        <entry>
+          <id>http://arxiv.org/abs/1706.03762v7</id>
+          <published>2017-06-12T17:57:34Z</published>
+          <title>Attention Is All You Need</title>
+          <summary>We propose a new architecture based on attention mechanisms.</summary>
+          <author><name>Ashish Vaswani</name></author>
+          <author><name>Noam Shazeer</name></author>
+        </entry>
+      </feed>`;
+    const fetchImpl = vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      if (url.startsWith("https://export.arxiv.org/api/query?")) {
+        return new Response(atom, { headers: { "content-type": "application/atom+xml" } });
+      }
+      return new Response(JSON.stringify({ message: { items: [{
+        title: ["Attention Is All You Need"], DOI: "10.9999/misindexed", author: [],
+        published: { "date-parts": [[2025]] }, URL: "https://doi.org/10.9999/misindexed",
+      }] } }), { headers: { "content-type": "application/json" } });
+    });
+
+    const result = await searchLiterature({ query: "Attention Is All You Need", limit: 5 }, fetchImpl as any);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(result.papers[0]).toMatchObject({
+      title: "Attention Is All You Need",
+      authors: ["Ashish Vaswani", "Noam Shazeer"],
+      year: 2017,
+      arxivId: "1706.03762v7",
+      landingUrl: "https://arxiv.org/abs/1706.03762v7",
+      source: "arXiv",
+    });
+    expect(result.papers).toHaveLength(1);
+    expect(result.sources).toEqual(["arXiv", "Crossref"]);
+    expect(() => parseArxivFeed('<!DOCTYPE feed [<!ENTITY x SYSTEM "file:///secret">]><feed>&x;</feed>')).toThrow("无效");
+  });
+
+  it("reports partial source outages instead of implying both indexes answered", async () => {
+    const result = await searchLiterature({ query: "verified topic" }, async (input: string | URL) => {
+      if (String(input).startsWith("https://export.arxiv.org/")) return new Response("offline", { status: 503 });
+      return new Response(JSON.stringify({ message: { items: [{
+        title: ["Verified topic paper"], DOI: "10.1234/verified", author: [],
+        published: { "date-parts": [[2024]] }, URL: "https://doi.org/10.1234/verified",
+      }] } }), { headers: { "content-type": "application/json" } });
+    });
+
+    expect(result).toMatchObject({ sources: ["Crossref"], unavailableSources: ["arXiv"] });
+  });
+
+  it("binds add requests to a candidate returned by literature search", async () => {
+    const { createToolDefinitions } = require("../../electron/research-agent-tools.cjs");
+    const candidateStore = new Map();
+    const emitApproval = vi.fn(async () => ({ approved: false }));
+    const tools = createToolDefinitions({
+      getContext: () => context,
+      candidateStore,
+      emitApproval,
+      fetchImpl: async (input: string | URL) => String(input).startsWith("https://export.arxiv.org/")
+        ? new Response(`<feed xmlns="http://www.w3.org/2005/Atom"><entry>
+          <id>http://arxiv.org/abs/2401.01234v2</id><published>2024-01-03T00:00:00Z</published>
+          <title>Verified work</title><summary>Abstract.</summary><author><name>Ada Author</name></author>
+        </entry></feed>`, { headers: { "content-type": "application/atom+xml" } })
+        : new Response(JSON.stringify({ message: { items: [] } }), { headers: { "content-type": "application/json" } }),
+    });
+    const search = tools.find((tool: any) => tool.name === "search_literature");
+    const add = tools.find((tool: any) => tool.name === "add_paper_to_library");
+    const candidate = (await search.execute("search", { query: "Verified work" })).details.papers[0];
+
+    await expect(add.execute("invented", { ...candidate, candidateId: "not-from-search" }))
+      .rejects.toThrow("检索结果");
+    expect(emitApproval).not.toHaveBeenCalled();
+    await add.execute("verified", candidate);
+    expect(emitApproval).toHaveBeenCalledWith(expect.objectContaining({
+      paper: expect.objectContaining({ title: "Verified work", arxivId: "2401.01234v2" }),
+    }));
   });
 
   it("requires a real configured model and rejects empty document bodies", async () => {
@@ -255,16 +350,19 @@ describe("research Agent", () => {
     expect((await search.execute("query", { query: "Shaw 2024" })).details.papers).toHaveLength(0);
   });
 
-  it("normalizes DOI links and rejects invalid URLs before requesting approval", async () => {
+  it("ignores model-supplied metadata and requires a persisted receipt before reporting an addition", async () => {
     const { createToolDefinitions } = require("../../electron/research-agent-tools.cjs");
-    const emitApproval = vi.fn(async (_request: any) => ({ approved: false }));
-    const add = createToolDefinitions({ getContext: () => context, emitApproval }).find((tool: any) => tool.name === "add_paper_to_library");
-    const params = { title: "A paper", authors: [], year: 2024 };
-    await add.execute("doi", { ...params, landingUrl: "doi.org/10.1234/example" });
+    const emitApproval = vi.fn(async (_request: any): Promise<any> => ({ approved: false }));
+    const candidateStore = new Map([["verified", { title: "A paper", authors: [], year: 2024, landingUrl: "doi.org/10.1234/example" }]]);
+    const add = createToolDefinitions({ getContext: () => context, emitApproval, candidateStore }).find((tool: any) => tool.name === "add_paper_to_library");
+    await add.execute("doi", { candidateId: "verified", title: "Invented", landingUrl: "javascript:alert(1)" });
     expect(emitApproval.mock.calls[0][0].paper.landingUrl).toBe("https://doi.org/10.1234/example");
-    await add.execute("empty", { ...params, landingUrl: "" });
-    expect(emitApproval.mock.calls[1][0].paper.landingUrl).toBeUndefined();
-    await expect(add.execute("invalid", { ...params, landingUrl: "javascript:alert(1)" })).rejects.toThrow("论文链接无效");
-    expect(emitApproval).toHaveBeenCalledTimes(2);
+    expect(emitApproval.mock.calls[0][0].paper.title).toBe("A paper");
+    emitApproval.mockResolvedValueOnce({ approved: true, result: { id: "not-confirmed", duplicate: false } });
+    await expect(add.execute("missing-receipt", { candidateId: "verified" })).rejects.toThrow("已保存回执");
+    emitApproval.mockResolvedValueOnce({ approved: true, result: { persisted: true, id: "saved", duplicate: false, kind: "metadata" } });
+    expect((await add.execute("saved", { candidateId: "verified" })).details).toMatchObject({
+      status: "added", result: { persisted: true, id: "saved", kind: "metadata" },
+    });
   });
 });

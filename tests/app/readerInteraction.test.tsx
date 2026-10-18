@@ -71,6 +71,19 @@ async function mount(response: () => Promise<string>, streamResponse?: (onDelta:
 }
 
 describe("paragraph translation interaction", () => {
+  it("keeps the reader top bar focused on the paper title", async () => {
+    const { container, root } = await mount(async () => "");
+    const title = container.querySelector(".reader-title")?.textContent || "";
+
+    expect(title).toContain(paper.title);
+    expect(container.querySelector(".reader-surface-label")).toBeNull();
+    expect(title).not.toContain("PDF 阅读");
+    expect(title).not.toContain("MinerU 交互层");
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
   it("routes each result tab to its own operation and restores generated results without new calls", async () => {
     let value = "模型使用注意力机制。";
     const { container, root, stream } = await mount(async () => value);

@@ -44,7 +44,8 @@ import { ServiceSettingsDialog } from "../features/settings/ServiceSettingsDialo
 import { DEFAULT_SERVICE_SETTINGS, getMissingServiceCredentials, toPublicServiceSettings, type PublicServiceSettings } from "../domain/serviceSettings";
 import { getDesktopBridge } from "../platform/electron";
 import { ResearchAssistant } from "../features/reader/ResearchAssistant";
-import { addLiteraturePaper, type LiteraturePaper } from "../domain/literature";
+import { addLiteraturePaper, upgradeLiteraturePaperWithPdf, type LiteraturePaper } from "../domain/literature";
+import type { ResearchAgentImportReceipt, ResearchAgentPaperSummary } from "../services/researchAgentProtocol";
 import { UpdateCenter } from "../features/settings/UpdateCenter";
 
 type AppView = "library" | "reader" | "research";
@@ -480,22 +481,24 @@ export default function App() {
     setErrorMessage(null);
     try {
       const { paper } = await preparePdfFile(file);
-      const existing = papersRef.current.find((item) => item.id === paper.id);
+      const existing = papersRef.current.find((item) => item.id === paper.id
+        || paper.originalId && item.originalId === paper.originalId);
+      const imported = existing ?? paper;
       invalidateAnalysisRequests();
       if (!existing) papersRef.current = [paper, ...papersRef.current];
       setPapers((current) => existing ? current : [paper, ...current]);
-      setSelectedPaperId(paper.id);
+      setSelectedPaperId(imported.id);
       setSelectedBlock(null);
       setSelectionText("");
       setAnswer(null);
       setView("library");
       if (!existing || !canOpenPaper(existing, pipelineStates[existing.id])) {
-        queuedImports.current.add(paper.id);
+        queuedImports.current.add(imported.id);
         if (serviceSettingsRef.current.mineru.configured) {
-          queuedImports.current.delete(paper.id);
-          void handleEnhance(existing ?? paper);
+          queuedImports.current.delete(imported.id);
+          void handleEnhance(imported);
         } else {
-          updatePipeline(paper.id, { stage: "partial", source: "mineru", error: undefined,
+          updatePipeline(imported.id, { stage: "partial", source: "mineru", error: undefined,
             mineruMessage: "原始 PDF 已保存，配置 MinerU 后自动解析" });
         }
       }
@@ -686,14 +689,72 @@ export default function App() {
     );
   }
 
-  function handleAddLiterature(item: LiteraturePaper) {
-    const next = addLiteraturePaper(papersRef.current, item);
-    if (!next.duplicate) {
+  async function handleAddLiterature(item: ResearchAgentPaperSummary, signal: AbortSignal): Promise<ResearchAgentImportReceipt> {
+    const ensureActive = () => {
+      if (signal.aborted) throw new DOMException("加入文献已取消", "AbortError");
+    };
+    ensureActive();
+    const literature: LiteraturePaper = {
+      title: item.title, authors: item.authors, year: item.year, doi: item.doi,
+      landingUrl: item.landingUrl, abstract: item.abstract, source: item.source,
+      arxivId: item.arxivId,
+    };
+    if (!item.arxivId) {
+      const next = addLiteraturePaper(papersRef.current, literature);
+      if (!next.duplicate) {
+        if (!savePapers(next.papers)) throw new Error("文献库保存失败，请检查本机存储空间");
+        papersRef.current = next.papers;
+        setPapers(next.papers);
+      }
+      return { persisted: true, id: next.id, duplicate: next.duplicate, kind: "metadata" };
+    }
+
+    const bridge = getDesktopBridge();
+    if (!bridge) throw new Error("下载 arXiv PDF 需要在篇篇桌面版中操作");
+    const downloaded = await bridge.invoke<{ id: string; name: string; duplicate: boolean; importId: string }>(
+      "zhiyan:literature:download-arxiv", item.arxivId,
+    );
+    let committed = false;
+    try {
+      ensureActive();
+      const existingDocument = papersRef.current.find((paper) => paper.originalId === downloaded.id);
+      let prepared: PaperRecord;
+      if (existingDocument) {
+        prepared = existingDocument;
+      } else {
+        const bytes = await bridge.invoke<Uint8Array>("zhiyan:documents:read", downloaded.id);
+        ensureActive();
+        const pdfData = new ArrayBuffer(bytes.byteLength);
+        new Uint8Array(pdfData).set(bytes);
+        const file = new File([pdfData], downloaded.name, { type: "application/pdf" });
+        prepared = (await preparePdfFile(file, { id: downloaded.id, duplicate: downloaded.duplicate })).paper;
+      }
+      ensureActive();
+      const imported = {
+        ...prepared,
+        title: item.title,
+        authors: item.authors,
+        year: item.year,
+        arxivId: item.arxivId,
+        doi: item.doi,
+        landingUrl: item.landingUrl,
+        abstract: item.abstract,
+      };
+      const next = upgradeLiteraturePaperWithPdf(papersRef.current, literature, imported);
+      ensureActive();
       if (!savePapers(next.papers)) throw new Error("文献库保存失败，请检查本机存储空间");
       papersRef.current = next.papers;
       setPapers(next.papers);
+      committed = true;
+      const persistedPaper = next.papers.find((paper) => paper.id === next.id)!;
+      if (!canOpenPaper(persistedPaper, pipelineStates[persistedPaper.id])) void handleEnhance(persistedPaper);
+      return { persisted: true, id: next.id, originalId: persistedPaper.originalId, duplicate: next.duplicate, kind: "pdf" };
+    } finally {
+      await bridge.invoke("zhiyan:literature:finish-import", {
+        importId: downloaded.importId,
+        retained: committed || papersRef.current.some((paper) => paper.originalId === downloaded.id),
+      }).catch(() => undefined);
     }
-    return { id: next.id, duplicate: next.duplicate };
   }
 
   function handleUpdateMetadata(paperId: string, patch: PaperMetadataPatch) {

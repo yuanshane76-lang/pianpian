@@ -808,7 +808,6 @@ textarea:focus-visible {
 }
 
 .eyebrow,
-.reader-title-mark,
 .outline-label {
   color: var(--teal);
   font-size: 10px;
@@ -1542,7 +1541,6 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
 .pdf-paragraph-hint svg { flex-shrink: 0; color: var(--teal); }
 .pdf-block-hover-label.pdf-paragraph-hint.is-below { top: calc(100% + 7px); bottom: auto; }
 .pdf-layout-notice { flex-shrink: 0; padding: 7px 16px; color: var(--muted-strong); background: var(--surface-inset); border-bottom: 1px solid var(--line); font-size: 11px; }
-.reader-surface-label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted-strong); font-size: 12px; white-space: nowrap; }
 .reader-structure-hint { flex: 1; color: var(--muted); font-size: 11px; }
 .pdf-feedback { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 12px; padding: 7px; color: var(--teal); }
 .pdf-missing { padding: 44px; line-height: 1.7; }
@@ -2385,7 +2383,7 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
 
 @media (max-width: 840px) and (max-height: 560px) {
   .reader-topbar { flex-wrap: nowrap; min-height: 44px; padding: 0 12px; }
-  .reader-topbar .reader-title, .reader-surface-label { display: none; }
+  .reader-topbar .reader-title { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

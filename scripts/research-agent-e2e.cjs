@@ -2,6 +2,25 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
+function syntheticPdf() {
+  const stream = "BT /F1 22 Tf 60 730 Td (Research Agent Fixture) Tj /F1 12 Tf 0 -60 Td " +
+    "(The model uses attention to select useful features.) Tj 0 -20 Td " +
+    "(An ablation study evaluates the model.) Tj ET";
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Count 1 /Kids [3 0 R] >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
+  ];
+  let data = "%PDF-1.4\n";
+  const offsets = [];
+  objects.forEach((object, index) => { offsets.push(Buffer.byteLength(data)); data += `${index + 1} 0 obj\n${object}\nendobj\n`; });
+  const xref = Buffer.byteLength(data);
+  data += `xref\n0 6\n0000000000 65535 f \n${offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")}`;
+  data += `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return [...Buffer.from(data)];
+}
+
 if (process.versions.electron) {
   const { app, dialog, ipcMain } = require("electron");
   app.setPath("userData", process.env.ZHIYAN_AGENT_USER_DATA);
@@ -16,10 +35,30 @@ if (process.versions.electron) {
     await documents.saveTask(paper.originalId, { state: "done", batchId: "synthetic-agent", resultBatchId: "synthetic-agent" });
   };
   globalThis.agentRemoteRequests = 0;
+  globalThis.arxivMineruStarts = 0;
   globalThis.agentTestRequests = [];
   globalThis.agentLifecycle = [];
   const nativeHandle = ipcMain.handle.bind(ipcMain);
   ipcMain.handle = (channel, handler) => nativeHandle(channel, async (...args) => {
+    if (channel === "zhiyan:mineru:start") {
+      const id = args[1];
+      globalThis.arxivMineruStarts++;
+      const batchId = "synthetic-arxiv-import";
+      const result = { layoutVersion: 3, title: "Attention Is All You Need", pageCount: 1, blocks: [{
+        id: "synthetic-arxiv-paragraph", kind: "paragraph", text: "Attention Is All You Need",
+        pageNumber: 1, order: 0, bbox: [.1, .1, .9, .2],
+        pageBounds: [{ pageNumber: 1, bbox: [.1, .1, .9, .2] }],
+      }] };
+      await documents.saveParse(id, { ...result, resultBatchId: batchId });
+      await documents.saveTask(id, { state: "done", batchId, resultBatchId: batchId, progress: 1 });
+      return { batchId };
+    }
+    if (channel === "zhiyan:mineru:status") {
+      const id = args[1];
+      const task = await documents.loadTask(id);
+      const result = task?.resultBatchId === task?.batchId ? await documents.loadParse(id) : null;
+      return result ? { state: "done", batchId: task.batchId, result } : { state: "idle" };
+    }
     if (!["zhiyan:agent:start", "zhiyan:agent:abort"].includes(channel)) return handler(...args);
     const entry = { channel, startedAt: Date.now() };
     globalThis.agentLifecycle.push(entry);
@@ -35,6 +74,20 @@ if (process.versions.electron) {
       { title: ["Synthetic evidence paper"], DOI: "10.1234/evidence", author: [],
         published: { "date-parts": [[2024]] }, URL: "https://doi.org/10.1234/evidence" },
     ] } }), { headers: { "content-type": "application/json" } });
+    if (String(url).startsWith("https://export.arxiv.org/api/query?")) {
+      const searchQuery = new URL(String(url)).searchParams.get("search_query") || "";
+      const entry = searchQuery.toLowerCase().includes("attention is all you need")
+        ? `<entry><id>http://arxiv.org/abs/1706.03762v7</id><published>2017-06-12T17:57:34Z</published>
+          <title>Attention Is All You Need</title><summary>We propose a new architecture based on attention.</summary>
+          <author><name>Ashish Vaswani</name></author><author><name>Noam Shazeer</name></author></entry>`
+        : "";
+      return new Response(`<feed xmlns="http://www.w3.org/2005/Atom">${entry}</feed>`, {
+        headers: { "content-type": "application/atom+xml" },
+      });
+    }
+    if (String(url) === "https://arxiv.org/pdf/1706.03762v7") {
+      return new Response(Buffer.from(syntheticPdf()), { headers: { "content-type": "application/pdf" } });
+    }
     globalThis.agentRemoteRequests++;
     throw new Error("External services are disabled in this synthetic desktop test");
   };
@@ -51,20 +104,23 @@ if (process.versions.electron) {
         : String(rawQuestion || "");
       const toolMessages = body.messages.slice(userIndex + 1).filter((message) =>
         message.role === "tool" || message.role === "toolResult" || message.tool_call_id);
-      const related = { title: "Synthetic attention paper", authors: ["Synthetic Team"], year: 2025,
-        doi: "10.1234/attention", landingUrl: "https://doi.org/10.1234/attention", source: "Crossref" };
       const globalScope = body.messages.some((message) => message.role === "system" && String(message.content).includes("当前会话范围：整个本地文献库"));
       let retrievedPaperId;
+      let candidateId;
       for (const message of toolMessages) {
         try {
           const result = JSON.parse(typeof message.content === "string" ? message.content : message.content?.map((part) => part.text || "").join(""));
           if (result.papers?.[0]?.id) retrievedPaperId = result.papers[0].id;
+          if (result.papers?.[0]?.candidateId) candidateId = result.papers[0].candidateId;
         } catch { /* Synthetic non-search tool output. */ }
       }
       const taskCalls = question.includes("全库检索验收") ? [{ name: "search_library", arguments: '{"query":"ablation"}' },
         { name: "read_current_paper", arguments: JSON.stringify({ paperId: retrievedPaperId || "missing" }) }]
-        : question.includes("滚动验收") ? [] : question.includes("加入")
-        ? [{ name: "add_paper_to_library", arguments: JSON.stringify(related) }]
+        : question.includes("滚动验收") ? []
+        : question.includes("加入")
+          ? [{ name: "search_literature", arguments: JSON.stringify({
+            query: question.includes("Attention Is All You Need") ? "Attention Is All You Need" : "attention", limit: 2,
+          }) }, { name: "add_paper_to_library", arguments: JSON.stringify({ candidateId: candidateId || "missing" }) }]
         : question.includes("文档")
           ? [{ name: "read_current_paper", arguments: "{}" },
             { name: "create_document", arguments: JSON.stringify({ title: "阅读笔记", markdown: "# 阅读笔记\n\nThe model uses attention. [第 1 页]" }) }]
@@ -131,24 +187,6 @@ if (process.versions.electron) {
   fs.mkdirSync(output, { recursive: true });
   fs.mkdirSync(path.join(userData, "session"));
   const report = { profile: "Isolated desktop, real Pi SDK, local synthetic SSE model and Crossref fixture, synthetic paper; zero external requests", checks: [], errors: [] };
-  function syntheticPdf() {
-    const stream = "BT /F1 22 Tf 60 730 Td (Research Agent Fixture) Tj /F1 12 Tf 0 -60 Td " +
-      "(The model uses attention to select useful features.) Tj 0 -20 Td " +
-      "(An ablation study evaluates the model.) Tj ET";
-    const objects = [
-      "<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Count 1 /Kids [3 0 R] >>",
-      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
-      "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-      `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
-    ];
-    let data = "%PDF-1.4\n";
-    const offsets = [];
-    objects.forEach((object, index) => { offsets.push(Buffer.byteLength(data)); data += `${index + 1} 0 obj\n${object}\nendobj\n`; });
-    const xref = Buffer.byteLength(data);
-    data += `xref\n0 6\n0000000000 65535 f \n${offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")}`;
-    data += `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
-    return [...Buffer.from(data)];
-  }
   (async () => {
     const launchOptions = {
       executablePath: require("electron"),
@@ -212,16 +250,35 @@ if (process.versions.electron) {
       report.checks.push("Streaming-compatible multi-turn timeline renders read and search tool cards");
 
       await send("把第1篇加入文献库");
-      await page.getByRole("button", { name: "确认加入", exact: true }).waitFor();
-      await page.getByRole("button", { name: "确认加入", exact: true }).scrollIntoViewIfNeeded();
+      await page.getByRole("button", { name: "确认加入元数据", exact: true }).waitFor();
+      await page.getByRole("button", { name: "确认加入元数据", exact: true }).scrollIntoViewIfNeeded();
       await capture("03-confirmation.png");
-      await page.getByRole("button", { name: "确认加入", exact: true }).click();
+      await page.getByRole("button", { name: "确认加入元数据", exact: true }).click();
       await page.locator('[aria-label="停止回答"]').waitFor({ state: "detached" });
       await page.getByRole("button", { name: "发送给篇篇", exact: true }).waitFor();
       const entries = await page.evaluate(() => JSON.parse(localStorage.getItem("zhiyan-workbench.papers.v1")));
       assert.equal(entries.length, 1);
       assert.equal(entries[0].recordType, "reference");
-      report.checks.push("Confirmed tool writes one reference record to the real local library");
+      assert.equal(entries[0].originalId, undefined);
+      report.checks.push("Confirmed Crossref result writes metadata only and does not claim a local PDF");
+
+      await send("查找《Attention Is All You Need》并加入论文列表");
+      await page.getByRole("button", { name: "确认下载 PDF", exact: true }).waitFor();
+      await page.getByRole("button", { name: "确认下载 PDF", exact: true }).scrollIntoViewIfNeeded();
+      await capture("03-arxiv-confirmation.png");
+      await page.getByRole("button", { name: "确认下载 PDF", exact: true }).click();
+      await page.getByText("PDF 已下载并保存", { exact: true }).waitFor();
+      const imported = await page.evaluate(() => JSON.parse(localStorage.getItem("zhiyan-workbench.papers.v1"))
+        .find((item) => item.arxivId === "1706.03762v7"));
+      assert(imported);
+      assert.equal(imported.recordType, undefined);
+      assert.equal(imported.title, "Attention Is All You Need");
+      assert.match(imported.originalId, /^[a-f0-9]{64}$/);
+      await page.waitForFunction(() => JSON.parse(localStorage.getItem("zhiyan-workbench.papers.v1"))
+        .find((item) => item.arxivId === "1706.03762v7")?.parseStatus === "ready");
+      assert.equal(await electron.evaluate(() => globalThis.arxivMineruStarts), 1);
+      await page.locator('[aria-label="停止回答"]').waitFor({ state: "detached" });
+      report.checks.push("Verified arXiv candidate downloads and persists a local PDF, creates a readable paper record, and starts MinerU parsing");
 
       await page.getByRole("button", { name: "历史对话", exact: true }).click();
       await page.getByRole("button", { name: /重命名对话/ }).first().click();
@@ -252,11 +309,11 @@ if (process.versions.electron) {
       await send("把第1篇加入文献库");
       await page.getByRole("button", { name: "拒绝", exact: true }).click();
       await page.getByRole("button", { name: "发送给篇篇" }).waitFor();
-      assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("zhiyan-workbench.papers.v1")).length), 1);
+      assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("zhiyan-workbench.papers.v1")).length), 2);
       report.checks.push("Rejected write leaves the library unchanged");
 
       await send("把第1篇加入文献库");
-      await page.getByRole("button", { name: "确认加入", exact: true }).waitFor();
+      await page.getByRole("button", { name: "确认加入元数据", exact: true }).waitFor();
       await page.getByRole("button", { name: "停止回答", exact: true }).click();
       await page.getByRole("button", { name: "发送给篇篇" }).waitFor();
       report.checks.push("Stop cancels a pending approval without hanging");
@@ -315,10 +372,9 @@ if (process.versions.electron) {
       assert.equal(overflow, false);
       report.checks.push("1000px desktop layout has no horizontal overflow");
       await page.getByRole("button", { name: "返回文献库", exact: true }).click();
-      await page.getByText("文献条目 · 全文待导入", { exact: true }).waitFor();
-      await page.locator(".paper-row").first().click();
+      await page.locator(".paper-row").filter({ hasText: "Synthetic attention paper" }).click();
       assert(await page.getByRole("button", { name: "打开阅读", exact: true }).isDisabled());
-      report.checks.push("Library accurately separates references from readable local PDFs");
+      report.checks.push("Library accurately separates metadata-only references from readable local PDFs");
 
       const fixture = await page.evaluate(async (bytes) => {
         const saved = await window.zhiyan.invoke("zhiyan:documents:save", { name: "research-agent-fixture.pdf", data: new Uint8Array(bytes) });
@@ -427,6 +483,7 @@ if (process.versions.electron) {
       report.checks.push("Reload retains paper history; homepage stays global despite a selected paper, searches parsed body, and navigates a paper-qualified citation while keeping both histories isolated");
       assert.deepEqual(report.errors, []);
       assert.equal(await electron.evaluate(() => globalThis.agentRemoteRequests), 0);
+      assert.equal(await electron.evaluate(() => globalThis.arxivMineruStarts), 1);
       await electron.close();
       electron = await _electron.launch(launchOptions);
       page = await electron.firstWindow();
@@ -443,6 +500,7 @@ if (process.versions.electron) {
       assert(restartedRequest.some((item) => item.role === "assistant" && JSON.stringify(item.content).includes("本地消融实验证据")));
       assert.deepEqual(report.errors, []);
       assert.equal(await electron.evaluate(() => globalThis.agentRemoteRequests), 0);
+      assert.equal(await electron.evaluate(() => globalThis.arxivMineruStarts), 0);
       await capture("12-restarted-history.png");
       report.checks.push("Closing and relaunching the real Electron process retains history and restores previous user and assistant text into the next model request");
       report.status = "passed";
