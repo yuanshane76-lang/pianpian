@@ -7,6 +7,7 @@ import { ReaderAssistant } from "./ReaderAssistant";
 import { ThemeToggle } from "../settings/ThemeToggle";
 import { hasPageBounds } from "../../domain/pdfLayout";
 import type { ParagraphOperation } from "../../domain/analysis";
+import { formatResearchCitation } from "../../domain/researchCitation";
 
 interface ReaderViewProps {
   researchPanel?: ReactNode;
@@ -28,12 +29,15 @@ interface ReaderViewProps {
   onSelectText: (block: DocumentBlock, text: string) => void;
   onAnalyzeParagraph: (block: DocumentBlock) => void;
   onAnalyzeChart?: (block: DocumentBlock) => void;
+  onAnalyzeEquation?: (block: DocumentBlock) => void;
   paragraphAnalysisRequestId?: number;
   pendingParagraphActions?: ParagraphOperation[];
   paragraphInsightText?: string;
   onTranslate: () => void;
   onReadChart: () => void;
   chartReading: import("../../domain/learning").ChartReading | null;
+  onReadEquation: () => void;
+  equationReading: import("../../domain/learning").EquationReading | null;
   onExplain: (force?: boolean) => void;
   explanation: string | null;
   onAsk: (question: string) => void;
@@ -52,6 +56,8 @@ interface ReaderViewProps {
   guide: { overview: string; terms: Array<{ term: string; translation: string; definition: string }> } | null;
   onGuide: () => void;
   vocabulary: import("../../domain/vocabulary").AcademicTerm[];
+  paragraphReadingMode?: "standard" | "grandma";
+  onParagraphReadingModeChange?: (mode: "standard" | "grandma") => void;
 }
 
 function getDefaultReaderPanelWidths() {
@@ -98,6 +104,9 @@ export function ReaderView(props: ReaderViewProps) {
   const [focusTarget, setFocusTarget] = useState<{ id: string; requestId: number; pageNumber?: number; regionId?: string; flash?: boolean }>();
   const [navigationTarget, setNavigationTarget] = useState<{ page: number; requestId: number }>();
   const [chartAnalysisRequestId, setChartAnalysisRequestId] = useState<number>();
+  const [equationAnalysisRequestId, setEquationAnalysisRequestId] = useState<number>();
+  const [draftAppend, setDraftAppend] = useState<{ id: number; text: string }>();
+  const draftSequence = useRef(0);
   const outline = useMemo(() => getDocumentOutline(blocks), [blocks]);
   const resizeRef = useRef<{ side: "outline" | "assistant"; startX: number; startWidth: number; pointerId: number }>();
   const widthsRef = useRef(defaultPanelWidths);
@@ -205,6 +214,15 @@ export function ReaderView(props: ReaderViewProps) {
     setSearchQuery("");
     select(block);
     setFocusTarget({ id: block.id, requestId: ++focusSequence.current, flash: true });
+  }
+
+  function addToConversation(block: DocumentBlock, text: string) {
+    if (!props.researchPanel) return;
+    setDraftAppend({
+      id: ++draftSequence.current,
+      text: formatResearchCitation({ paperTitle: paper.title, pageNumber: block.pageNumber, blockId: block.id, text }),
+    });
+    setRightOpen(true);
   }
 
   function clampWidth(side: "outline" | "assistant", value: number) {
@@ -324,11 +342,23 @@ export function ReaderView(props: ReaderViewProps) {
               if (props.aiAvailable) props.onAnalyzeChart?.(block);
               else { select(block, pageNumber, regionId); onOpenSettings(); }
             }}
+            onAnalyzeEquation={(block, pageNumber = block.pageNumber, regionId) => {
+              setEquationAnalysisRequestId((current) => (current ?? 0) + 1);
+              setPage(pageNumber);
+              setRightOpen(true);
+              props.onPosition({ mode: "pdf", page: pageNumber, blockId: block.id, ...(regionId ? { regionId } : {}) });
+              if (props.aiAvailable) props.onAnalyzeEquation?.(block);
+              else { select(block, pageNumber, regionId); onOpenSettings(); }
+            }}
+             onAddToConversation={props.researchPanel ? (block, pageNumber = block.pageNumber, regionId) => {
+               select(block, pageNumber, regionId);
+               addToConversation(block, selectedBlock?.id === block.id ? props.selectionText || block.text : block.text);
+             } : undefined}
             onVisiblePage={(visiblePage) => { setPage(visiblePage); props.onPosition({ mode: "pdf", page: visiblePage }); }}
             onReimport={props.onReimport} blocks={visibleBlocks} activeBlockId={selectedBlock?.id ?? null} onSelect={select} onSelectText={(block, text, pageNumber, regionId) => { select(block, pageNumber, regionId); props.onSelectText(block, text); }} focusTarget={focusTarget} onVisibleBlock={(block, pageNumber = block.pageNumber, regionId) => props.onPosition({ mode: "pdf", page: pageNumber, blockId: block.id, ...(regionId ? { regionId } : {}) })} />
         </main>
         {rightOpen ? <div className="reader-resizer reader-resizer-right" role="separator" aria-label="调整篇篇侧栏宽度" title="拖动调整篇篇侧栏宽度" aria-orientation="vertical" aria-valuemin={panelLimits.assistant.min} aria-valuemax={clampWidth("assistant", panelLimits.assistant.max)} aria-valuenow={assistantWidth} tabIndex={0} onKeyDown={(event) => handleResizeKeyDown("assistant", event)} onPointerDown={(event) => startResize("assistant", event)} /> : null}
-        {rightOpen ? <ReaderAssistant chartAnalysisRequestId={chartAnalysisRequestId} researchPanel={props.researchPanel} vocabularyBlock={props.vocabularyBlock} onSaveTerm={props.onSaveTerm} isTermSaved={props.isTermSaved} originalId={paper.originalId} selectedBlock={selectedBlock} answer={props.streamingOutput?.operation === "qa" ? props.streamingOutput.text : answer} isBusy={isBusy} onTranslate={onTranslate} onReadChart={props.onReadChart} chartReading={props.chartReading} onExplain={props.onExplain} explanation={props.streamingOutput?.operation === "explain" ? props.streamingOutput.text : props.explanation} onAsk={props.aiAvailable ? onAsk : onOpenSettings} translation={props.streamingOutput?.operation === "translate" ? props.streamingOutput.text : props.translation} selectionText={props.selectionText} serviceLabel={props.serviceLabel} serviceModel={props.serviceModel} aiAvailable={props.aiAvailable} onOpenSettings={onOpenSettings} actionError={actionError} pendingAction={props.pendingAction} pendingParagraphActions={props.pendingParagraphActions} paragraphAnalysisRequestId={props.paragraphAnalysisRequestId} paragraphInsightText={props.paragraphInsightText} streamingOutput={props.streamingOutput} insight={props.insight} onInsight={props.aiAvailable ? props.onInsight : onOpenSettings} guide={props.guide} onGuide={props.aiAvailable ? props.onGuide : onOpenSettings} vocabulary={props.vocabulary} onJump={(id) => { const block = blocks.find((item) => item.id === id); if (block) navigate(block); }} /> : null}
+          {rightOpen ? <ReaderAssistant chartAnalysisRequestId={chartAnalysisRequestId} equationAnalysisRequestId={equationAnalysisRequestId} researchPanel={props.researchPanel} draftAppend={draftAppend} paragraphReadingMode={props.paragraphReadingMode ?? "standard"} onParagraphReadingModeChange={props.onParagraphReadingModeChange ?? (() => undefined)} vocabularyBlock={props.vocabularyBlock} onSaveTerm={props.onSaveTerm} isTermSaved={props.isTermSaved} originalId={paper.originalId} selectedBlock={selectedBlock} answer={props.streamingOutput?.operation === "qa" ? props.streamingOutput.text : answer} isBusy={isBusy} onTranslate={onTranslate} onReadChart={props.onReadChart} chartReading={props.chartReading} onReadEquation={props.onReadEquation} equationReading={props.equationReading} onExplain={props.onExplain} explanation={props.streamingOutput?.operation === "explain" ? props.streamingOutput.text : props.explanation} onAsk={props.aiAvailable ? onAsk : onOpenSettings} translation={props.streamingOutput?.operation === "translate" ? props.streamingOutput.text : props.translation} selectionText={props.selectionText} serviceLabel={props.serviceLabel} serviceModel={props.serviceModel} aiAvailable={props.aiAvailable} onOpenSettings={onOpenSettings} actionError={actionError} pendingAction={props.pendingAction} pendingParagraphActions={props.pendingParagraphActions} paragraphAnalysisRequestId={props.paragraphAnalysisRequestId} paragraphInsightText={props.paragraphInsightText} streamingOutput={props.streamingOutput} insight={props.insight} onInsight={props.aiAvailable ? props.onInsight : onOpenSettings} guide={props.guide} onGuide={props.aiAvailable ? props.onGuide : onOpenSettings} vocabulary={props.vocabulary} onJump={(id) => { const block = blocks.find((item) => item.id === id); if (block) navigate(block); }} /> : null}
       </div>
     </div>
   );

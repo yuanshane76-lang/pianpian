@@ -190,6 +190,70 @@ describe("paragraph translation interaction", () => {
     expect(stream).toHaveBeenCalledOnce();
     await act(async () => root.unmount()); container.remove();
   });
+  it("routes an equation to formula reading and renders its structured result", async () => {
+    const value = JSON.stringify({
+      summary: "计算模型输出的损失",
+      variables: ["θ 是模型参数", "y 是真实标签"],
+      role: "定义训练时要最小化的目标",
+      caveats: ["需要结合论文的损失函数定义"],
+    });
+    const source = {
+      ...paper,
+      blockData: [
+        { ...paper.blockData[0], kind: "equation", text: String.raw`L(\theta)=\sum_i \ell(f_\theta(x_i), y_i)` },
+        paper.blockData[1],
+      ],
+    };
+    const { container, root, stream } = await mount(async () => value, undefined, source);
+    await act(async () => (container.querySelector(".pdf-block-hit-area") as HTMLElement).click());
+    expect(container.querySelector(".selected-context h2")?.textContent).toBe("公式理解");
+    expect(container.querySelector(".chart-context")).toBeNull();
+    const read = container.querySelector<HTMLButtonElement>(".equation-context .secondary-button")!;
+    expect(read.textContent).toContain("解读公式");
+    await act(async () => read.click());
+    expect(stream.mock.calls[0][1]).toMatchObject({ operation: "equation", block: { kind: "equation" } });
+    expect(container.querySelector(".assistant-equation-reading")?.textContent).toContain("计算模型输出的损失");
+    await act(async () => read.click());
+    expect(stream).toHaveBeenCalledOnce();
+    await act(async () => root.unmount()); container.remove();
+  });
+  it("does not cache a malformed formula response and lets the user retry", async () => {
+    let value = '{"summary":"只有含义"}';
+    const source = {
+      ...paper,
+      blockData: [{ ...paper.blockData[0], kind: "equation", text: String.raw`x_i = \mu + \epsilon_i` }, paper.blockData[1]],
+    };
+    const { container, root, stream } = await mount(async () => value, undefined, source);
+    await act(async () => (container.querySelector(".pdf-block-hit-area") as HTMLElement).click());
+    await act(async () => container.querySelector<HTMLButtonElement>(".equation-context .secondary-button")!.click());
+    expect(container.querySelector(".assistant-action-error")?.textContent).toContain("结构不完整");
+    expect(container.querySelector(".assistant-equation-reading")).toBeNull();
+    value = JSON.stringify({ summary: "表示带噪观测", variables: ["x_i 是观测值"], role: "定义观测模型", caveats: [] });
+    await act(async () => container.querySelector<HTMLButtonElement>(".equation-context .secondary-button")!.click());
+    expect(stream).toHaveBeenCalledTimes(2);
+    expect(container.querySelector(".assistant-equation-reading")?.textContent).toContain("表示带噪观测");
+    await act(async () => root.unmount()); container.remove();
+  });
+  it("cancels formula reading when another formula is selected and ignores late output", async () => {
+    let finish!: (value: string) => void;
+    const source = {
+      ...paper,
+      blockData: [
+        { ...paper.blockData[0], kind: "equation", text: String.raw`x_i = \mu + \epsilon_i` },
+        { ...paper.blockData[1], kind: "equation", text: String.raw`y_i = f_\theta(x_i)` },
+      ],
+    };
+    const { container, root, stream } = await mount(() => new Promise((resolve) => { finish = resolve; }), undefined, source);
+    const blocks = container.querySelectorAll<HTMLElement>(".pdf-block-hit-area");
+    await act(async () => blocks[0].click());
+    await act(async () => container.querySelector<HTMLButtonElement>(".equation-context .secondary-button")!.click());
+    await act(async () => blocks[1].click());
+    await act(async () => finish(JSON.stringify({ summary: "旧公式", variables: ["x"], role: "旧作用", caveats: [] })));
+    expect(stream).toHaveBeenCalledOnce();
+    expect(container.querySelector(".assistant-equation-reading")).toBeNull();
+    expect(container.querySelector(".assistant-action-error")).toBeNull();
+    await act(async () => root.unmount()); container.remove();
+  });
   it("renders chart-reading deltas before the structured result is complete", async () => {
     const value = JSON.stringify({ summary: "比较模型成绩", encoding: "NQ 是准确率，越高越好", findings: ["RAG 为 44.5"], role: "支持方法有效性", caveats: ["不能比较不同数据集的分数"] });
     const source = { ...paper, blockData: [{ ...paper.blockData[0], kind: "table", text: "<table><tr><td>RAG</td><td>44.5</td></tr></table>", caption: "Table 1. Results" }, paper.blockData[1]] };
@@ -227,6 +291,30 @@ describe("paragraph translation interaction", () => {
     const call = stream.mock.calls[0] as unknown as [string, { block: { text: string } }];
     expect(call[1].block.text).toBe(paper.blockData[0].text);
     expect(container.querySelector(".assistant-translation")?.textContent).toContain("模型使用注意力机制");
+    await act(async () => root.unmount()); container.remove();
+  });
+
+  it("sends grandma mode to later paragraph analysis requests and separates its cache", async () => {
+    const { container, root, stream } = await mount(async () => "通俗译文");
+    await act(async () => (container.querySelector(".pdf-block-hit-area") as HTMLElement).click());
+    const toggle = container.querySelector<HTMLInputElement>('[role="switch"][aria-label="祖母模式"]')!;
+    await act(async () => toggle.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="translate"]')!.click());
+    expect(stream.mock.calls[0][1]).toMatchObject({ operation: "translate", readingMode: "grandma" });
+    await act(async () => root.unmount()); container.remove();
+  });
+
+  it("regenerates a paragraph after switching from standard to grandma mode instead of reusing standard output", async () => {
+    let result = "标准译文";
+    const { container, root, stream } = await mount(async () => result);
+    await act(async () => (container.querySelector(".pdf-block-hit-area") as HTMLElement).click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="translate"]')!.click());
+    expect(stream).toHaveBeenCalledOnce();
+    await act(async () => container.querySelector<HTMLInputElement>('[role="switch"][aria-label="祖母模式"]')!.click());
+    result = "祖母译文";
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="translate"]')!.click());
+    expect(stream).toHaveBeenCalledTimes(2);
+    expect(stream.mock.calls[1][1]).toMatchObject({ readingMode: "grandma" });
     await act(async () => root.unmount()); container.remove();
   });
 

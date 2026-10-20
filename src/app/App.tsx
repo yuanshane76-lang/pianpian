@@ -14,6 +14,7 @@ import {
   getCachedAnalysis,
   setCachedAnalysis,
   type AnalysisCacheEntry,
+  type ParagraphReadingMode,
   type ParagraphOperation,
 } from "../domain/analysis";
 import {
@@ -32,7 +33,7 @@ import { loadGroups, loadPapers, preparePdfFile, saveGroups, savePapers } from "
 import { deleteOriginalPdf } from "../services/originalPdf";
 import { getAnalysisAvailability, getTranslationTarget, isVisualBlock } from "../domain/readingFlow";
 import { canOpenPaper, hasCompletePageBounds, type PaperPipelineState } from "../domain/pipeline";
-import { parseChartReading, parseParagraphInsight, parseReadingGuide } from "../domain/learning";
+import { parseChartReading, parseEquationReading, parseParagraphInsight, parseReadingGuide } from "../domain/learning";
 import { loadChartImage } from "../services/chartImage";
 import { extractAcademicVocabulary, type AcademicTerm } from "../domain/vocabulary";
 import { academicTermKey, addWordbookTerm, resolveWordbookSourceBlock, type WordbookSource, type WordbookEntry } from "../domain/wordbook";
@@ -63,6 +64,7 @@ interface ParagraphAnalysis {
   requestId: number;
   paperId: string;
   signature: string;
+  readingMode: ParagraphReadingMode;
   pending: ParagraphOperation[];
   outputs: Record<ParagraphOperation, string>;
 }
@@ -103,8 +105,10 @@ export default function App() {
   const [isBusy, setIsBusy] = useState(false);
   const [pendingAction, setPendingAction] = useState<AiRequest["operation"] | null>(null);
   const [paragraphAnalysis, setParagraphAnalysis] = useState<ParagraphAnalysis | null>(null);
+  const [paragraphReadingMode, setParagraphReadingMode] = useState<ParagraphReadingMode>("standard");
   const activeParagraphAnalysisRef = useRef<string | null>(null);
   const activeChartAnalysisRef = useRef<string | null>(null);
+  const activeEquationAnalysisRef = useRef<string | null>(null);
   const [importing, setImporting] = useState(false);
   const importingRef = useRef(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -137,6 +141,7 @@ export default function App() {
     setParagraphAnalysis(null);
     activeParagraphAnalysisRef.current = null;
     activeChartAnalysisRef.current = null;
+    activeEquationAnalysisRef.current = null;
     if (!importingRef.current) setIsBusy(false);
   }
 
@@ -260,6 +265,10 @@ export default function App() {
   }, [selectedPaperId]);
 
   useEffect(() => {
+    setParagraphReadingMode("standard");
+  }, [selectedPaperId]);
+
+  useEffect(() => {
     selectedBlockRef.current = selectedBlock;
   }, [selectedBlock]);
 
@@ -268,6 +277,9 @@ export default function App() {
   papersRef.current = papers;
   const translationTarget = getTranslationTarget(selectedBlock, selectionText);
   const targetSignature = translationTarget ? getDocumentBlockSignature(translationTarget) : "";
+  function paragraphResultKey(paperId: string, signature: string, mode: ParagraphReadingMode = paragraphReadingMode) {
+    return `${paperId}:${signature}:${mode}`;
+  }
   const visualSignature = selectedBlock && isVisualBlock(selectedBlock) ? getDocumentVisualSignature(selectedBlock) : "";
   const availability = getAnalysisAvailability(serviceSettings);
   const documentSignature = useMemo(() => getDocumentSourceSignature(selectedPaper?.blockData ?? []), [selectedPaper?.blockData]);
@@ -289,13 +301,18 @@ export default function App() {
   errorContextRef.current = `${selectedPaperId}:${targetSignature || visualSignature}:${serviceIdentity}`;
   const vocabularyBlock = selectedBlock?.kind === "paragraph" ? selectedBlock : null;
   const vocabularySignature = vocabularyBlock ? getDocumentContentSignature(vocabularyBlock) : "";
-  const guideKey = vocabularyBlock ? buildParagraphCacheIdentity(selectedPaperId ?? "", vocabularyBlock, "vocabulary", serviceIdentity, documentSignature).key : "";
-  const insightKey = translationTarget ? buildParagraphCacheIdentity(selectedPaperId ?? "", translationTarget, "insight", serviceIdentity, documentSignature).key : "";
+  const guideKey = vocabularyBlock ? buildParagraphCacheIdentity(selectedPaperId ?? "", vocabularyBlock, "vocabulary", serviceIdentity, documentSignature, paragraphReadingMode).key : "";
+  const insightKey = translationTarget ? buildParagraphCacheIdentity(selectedPaperId ?? "", translationTarget, "insight", serviceIdentity, documentSignature, paragraphReadingMode).key : "";
   const chartKey = buildAnalysisCacheKey(selectedPaperId ?? "", selectedBlock?.id ?? "", "chart", `${serviceIdentity}:${selectedPaper?.originalId}:${documentSignature}:${visualSignature}`);
   const chartReading = useMemo(() => {
     const entry = analysisCache.get(chartKey);
     try { return entry ? parseChartReading(entry.value) : null; } catch { return null; }
   }, [analysisCache, chartKey]);
+  const equationKey = buildAnalysisCacheKey(selectedPaperId ?? "", selectedBlock?.id ?? "", "equation", `${serviceIdentity}:${selectedPaper?.originalId}:${documentSignature}:${visualSignature}`);
+  const equationReading = useMemo(() => {
+    const entry = analysisCache.get(equationKey);
+    try { return entry ? parseEquationReading(entry.value) : null; } catch { return null; }
+  }, [analysisCache, equationKey]);
   const readingGuide = useMemo(() => {
     const entry = analysisCache.get(guideKey);
     try { return entry ? parseReadingGuide(entry.value) : null; } catch { return null; }
@@ -382,7 +399,7 @@ export default function App() {
     activeControllers.add(controller);
     const sourceBlocks = request.paper.blockData ?? [];
     const selectedIndex = sourceBlocks.findIndex((block) => block.id === request.block?.id);
-    const isSelection = ["translate", "explain", "insight", "chart", "vocabulary"].includes(request.operation);
+    const isSelection = ["translate", "explain", "insight", "chart", "equation", "vocabulary"].includes(request.operation);
     const contextBlocks = request.operation === "vocabulary"
       ? request.block ? [request.block] : []
       : isSelection
@@ -771,14 +788,14 @@ export default function App() {
     const requestIdentity = serviceIdentity;
     const sourceSignature = getDocumentBlockSignature(target);
     const requestId = analysisRequestIdRef.current;
-    const cacheIdentity = buildParagraphCacheIdentity(selectedPaper.id, target, "translate", serviceIdentity, documentSignature);
+    const cacheIdentity = buildParagraphCacheIdentity(selectedPaper.id, target, "translate", serviceIdentity, documentSignature, paragraphReadingMode);
     const key = cacheIdentity.key;
     const cached = getCachedAnalysis(analysisCache, key);
     if (cached) {
       setStreamingOutput(null);
       setTranslations((current) => ({
         ...current,
-        [`${selectedPaper.id}:${sourceSignature}`]: cached.value,
+        [paragraphResultKey(selectedPaper.id, sourceSignature)]: cached.value,
       }));
       return;
     }
@@ -790,6 +807,7 @@ export default function App() {
         operation: "translate",
         paper: selectedPaper,
         block: target,
+        readingMode: paragraphReadingMode,
       }, (delta) => {
         setStreamingOutput((current) => current?.operation === "translate" && current.paperId === selectedPaper.id
           ? { ...current, text: current.text + delta } : current);
@@ -810,7 +828,7 @@ export default function App() {
       });
       setTranslations((current) => ({
         ...current,
-        [`${selectedPaper.id}:${sourceSignature}`]: value,
+        [paragraphResultKey(selectedPaper.id, sourceSignature, paragraphReadingMode)]: value,
       }));
     } finally {
       if (analysisRequestIdRef.current === requestId) {
@@ -882,17 +900,19 @@ export default function App() {
     const requestId = analysisRequestIdRef.current;
     const documentSignature = getDocumentSourceSignature(selectedPaper.blockData ?? []);
     const paperId = selectedPaper.id;
-    const cacheIdentity = buildParagraphCacheIdentity(paperId, translationTarget, "explain", requestIdentity, documentSignature);
+    const cacheIdentity = buildParagraphCacheIdentity(paperId, translationTarget, "explain", requestIdentity, documentSignature, paragraphReadingMode);
     const cached = getCachedAnalysis(analysisCache, cacheIdentity.key);
     if (cached && !force) {
-      setExplanations((current) => ({ ...current, [`${paperId}:${signature}`]: cached.value }));
+      setExplanations((current) => ({ ...current, [paragraphResultKey(paperId, signature)]: cached.value }));
       return;
     }
     setIsBusy(true);
     setPendingAction("explain");
     setStreamingOutput({ operation: "explain", paperId, text: "" });
     try {
-      const value = await requestAnalysis({ operation: "explain", paper: selectedPaper, block: translationTarget }, (delta) => {
+      const value = await requestAnalysis({
+        operation: "explain", paper: selectedPaper, block: translationTarget, readingMode: paragraphReadingMode,
+      }, (delta) => {
         setStreamingOutput((current) => current?.operation === "explain" && current.paperId === paperId
           ? { ...current, text: current.text + delta } : current);
       });
@@ -900,7 +920,7 @@ export default function App() {
       if (serviceIdentityRef.current === requestIdentity && analysisRequestIdRef.current === requestId &&
           getDocumentSourceSignature(currentPaper?.blockData ?? []) === documentSignature) {
         setStreamingOutput(null);
-        setExplanations((current) => ({ ...current, [`${paperId}:${signature}`]: value }));
+        setExplanations((current) => ({ ...current, [paragraphResultKey(paperId, signature, paragraphReadingMode)]: value }));
         setAnalysisCache((current) => {
           const next = new Map(current);
           setCachedAnalysis(next, { ...cacheIdentity, value, createdAt: new Date().toISOString() });
@@ -921,7 +941,7 @@ export default function App() {
     const paper = selectedPaper;
     const signature = getDocumentBlockSignature(block);
     const identity = serviceIdentity;
-    const activeKey = `${paper.id}:${identity}:${signature}`;
+    const activeKey = `${paper.id}:${identity}:${paragraphReadingMode}:${signature}`;
     if (activeParagraphAnalysisRef.current === activeKey) return;
     invalidateAnalysisRequests();
     selectedBlockRef.current = block;
@@ -934,10 +954,10 @@ export default function App() {
     const outputs: Record<ParagraphOperation, string> = { translate: "", explain: "", insight: "", vocabulary: "" };
     const pending: ParagraphOperation[] = [];
     for (const operation of PARAGRAPH_OPERATIONS) {
-      const cacheIdentity = buildParagraphCacheIdentity(paper.id, block, operation, identity, documentSignature);
+      const cacheIdentity = buildParagraphCacheIdentity(paper.id, block, operation, identity, documentSignature, paragraphReadingMode);
       const cached = getCachedAnalysis(analysisCache, cacheIdentity.key)?.value ??
-        (operation === "translate" ? translations[`${paper.id}:${signature}`]
-          : operation === "explain" ? explanations[`${paper.id}:${signature}`] : undefined);
+        (paragraphReadingMode === "standard" && operation === "translate" ? translations[paragraphResultKey(paper.id, signature)]
+          : paragraphReadingMode === "standard" && operation === "explain" ? explanations[paragraphResultKey(paper.id, signature)] : undefined);
       try {
         if (!cached) throw new Error();
         if (operation === "insight") parseParagraphInsight(cached);
@@ -948,7 +968,7 @@ export default function App() {
       }
     }
     activeParagraphAnalysisRef.current = activeKey;
-    setParagraphAnalysis({ requestId, paperId: paper.id, signature, pending, outputs });
+    setParagraphAnalysis({ requestId, paperId: paper.id, signature, readingMode: paragraphReadingMode, pending, outputs });
     setIsBusy(pending.length > 0);
 
     function stillCurrent() {
@@ -961,7 +981,7 @@ export default function App() {
     // Each operation settles independently so a failure cannot cancel sibling results.
     await Promise.all(pending.map(async (operation) => {
       try {
-        const value = await requestAnalysis({ operation, paper, block }, (delta) => {
+        const value = await requestAnalysis({ operation, paper, block, readingMode: paragraphReadingMode }, (delta) => {
           if (!stillCurrent()) return;
           setParagraphAnalysis((current) => current?.requestId === requestId
             ? { ...current, outputs: { ...current.outputs, [operation]: current.outputs[operation] + delta } } : current);
@@ -969,16 +989,16 @@ export default function App() {
         if (!stillCurrent()) return;
         if (operation === "insight") parseParagraphInsight(value);
         if (operation === "vocabulary") parseReadingGuide(value);
-        const cacheIdentity = buildParagraphCacheIdentity(paper.id, block, operation, identity, documentSignature);
+        const cacheIdentity = buildParagraphCacheIdentity(paper.id, block, operation, identity, documentSignature, paragraphReadingMode);
         setAnalysisCache((current) => {
           const next = new Map(current);
           setCachedAnalysis(next, { ...cacheIdentity, value, createdAt: new Date().toISOString() });
           return next;
         });
         if (operation === "translate") {
-          setTranslations((current) => ({ ...current, [`${paper.id}:${signature}`]: value }));
+          setTranslations((current) => ({ ...current, [paragraphResultKey(paper.id, signature, paragraphReadingMode)]: value }));
         } else if (operation === "explain") {
-          setExplanations((current) => ({ ...current, [`${paper.id}:${signature}`]: value }));
+          setExplanations((current) => ({ ...current, [paragraphResultKey(paper.id, signature, paragraphReadingMode)]: value }));
         }
         setParagraphAnalysis((current) => current?.requestId === requestId
           ? { ...current, outputs: { ...current.outputs, [operation]: value } } : current);
@@ -1005,7 +1025,7 @@ export default function App() {
   async function handleLearning(operation: "vocabulary" | "insight") {
     const block = operation === "vocabulary" ? vocabularyBlock : translationTarget;
     if (!selectedPaper || !block) return;
-    const cacheIdentity = buildParagraphCacheIdentity(selectedPaper.id, block, operation, serviceIdentity, documentSignature);
+    const cacheIdentity = buildParagraphCacheIdentity(selectedPaper.id, block, operation, serviceIdentity, documentSignature, paragraphReadingMode);
     const key = cacheIdentity.key;
     const cached = analysisCache.get(key);
     if (cached) {
@@ -1021,7 +1041,9 @@ export default function App() {
     setIsBusy(true); setPendingAction(operation);
     setStreamingOutput({ operation, paperId: requestPaper.id, text: "" });
     try {
-      const value = await requestAnalysis({ operation, paper: requestPaper, block }, (delta) => {
+      const value = await requestAnalysis({
+        operation, paper: requestPaper, block, readingMode: paragraphReadingMode,
+      }, (delta) => {
         setStreamingOutput((current) => current?.operation === operation && current.paperId === requestPaper.id
           ? { ...current, text: current.text + delta } : current);
       });
@@ -1045,7 +1067,7 @@ export default function App() {
   }
 
   async function handleReadChart(target = selectedBlock) {
-    if (!selectedPaper || !target || !isVisualBlock(target)) return;
+    if (!selectedPaper || !target || !["image", "table"].includes(target.kind)) return;
     const block = target;
     const paper = selectedPaper;
     const identity = serviceIdentity;
@@ -1106,6 +1128,66 @@ export default function App() {
     }
   }
 
+  async function handleReadEquation(target = selectedBlock) {
+    if (!selectedPaper || !target || target.kind !== "equation") return;
+    const block = target;
+    const paper = selectedPaper;
+    const identity = serviceIdentity;
+    const sourceSignature = getDocumentSourceSignature(paper.blockData ?? []);
+    const visual = getDocumentVisualSignature(block);
+    const key = buildAnalysisCacheKey(paper.id, block.id, "equation", `${identity}:${paper.originalId}:${sourceSignature}:${visual}`);
+    if (activeEquationAnalysisRef.current === key) return;
+    invalidateAnalysisRequests();
+    selectedBlockRef.current = block;
+    setSelectedBlock(block);
+    setSelectionText("");
+    setActionError(null);
+    if (!availability.available) { setSettingsOpen(true); return; }
+    const cached = analysisCache.get(key);
+    if (cached) {
+      try { parseEquationReading(cached.value); return; } catch { /* Regenerate invalid entries. */ }
+    }
+    const requestId = analysisRequestIdRef.current;
+    activeEquationAnalysisRef.current = key;
+    function stillCurrent() {
+      const currentPaper = papersRef.current.find((item) => item.id === paper.id);
+      const currentBlock = currentPaper?.blockData?.find((item) => item.id === block.id);
+      return analysisRequestIdRef.current === requestId && serviceIdentityRef.current === identity &&
+        selectedPaperIdRef.current === paper.id && currentBlock && getDocumentVisualSignature(currentBlock) === visual &&
+        getDocumentSourceSignature(currentPaper?.blockData ?? []) === sourceSignature;
+    }
+    setIsBusy(true);
+    setPendingAction("equation");
+    setStreamingOutput({ operation: "equation", paperId: paper.id, text: "" });
+    try {
+      const value = await requestAnalysis({ operation: "equation", paper, block }, (delta) => {
+        if (!stillCurrent()) return;
+        setStreamingOutput((current) => current?.operation === "equation" && current.paperId === paper.id
+          ? { ...current, text: current.text + delta } : current);
+      });
+      parseEquationReading(value);
+      if (!stillCurrent()) return;
+      setAnalysisCache((current) => {
+        const next = new Map(current);
+        setCachedAnalysis(next, { key, paperId: paper.id, scopeId: block.id, operation: "equation",
+          sourceSignature: `${identity}:${paper.originalId}:${sourceSignature}:${visual}`, value, createdAt: new Date().toISOString() });
+        return next;
+      });
+    } catch (error) {
+      const failure = error as { name?: unknown; message?: unknown } | null;
+      if (stillCurrent() && failure?.name !== "AbortError") {
+        setActionError(typeof failure?.message === "string" ? failure.message : "公式解读失败，请重试");
+      }
+    } finally {
+      if (analysisRequestIdRef.current === requestId) {
+        activeEquationAnalysisRef.current = null;
+        setIsBusy(false);
+        setPendingAction(null);
+        setStreamingOutput(null);
+      }
+    }
+  }
+
   const storageWarning = storageError ? (
     <div className="storage-warning" role="alert">
       <AlertTriangle size={18} aria-hidden="true" />
@@ -1155,7 +1237,8 @@ export default function App() {
 
   if (view === "reader" && selectedPaper && canOpenPaper(selectedPaper, pipelineStates[selectedPaper.id])) {
     const currentParagraphAnalysis = paragraphAnalysis?.paperId === selectedPaper.id &&
-      paragraphAnalysis.signature === targetSignature ? paragraphAnalysis : null;
+      paragraphAnalysis.signature === targetSignature &&
+      paragraphAnalysis.readingMode === paragraphReadingMode ? paragraphAnalysis : null;
     return (
       <>
         {storageWarning}
@@ -1177,7 +1260,7 @@ export default function App() {
             .some((source) => source.paperId === selectedPaper.id && source.contentSignature === vocabularySignature))}
           selectedBlock={translationTarget ?? selectedBlock}
           selectionText={selectionText}
-          translation={currentParagraphAnalysis?.outputs.translate ?? translations[`${selectedPaper.id}:${targetSignature}`] ?? null}
+          translation={currentParagraphAnalysis?.outputs.translate ?? translations[paragraphResultKey(selectedPaper.id, targetSignature)] ?? null}
           answer={answer}
           isBusy={isBusy}
           onBack={() => { invalidateAnalysisRequests(); setView("library"); }}
@@ -1191,11 +1274,14 @@ export default function App() {
           onSelectText={(block, text) => { invalidateAnalysisRequests(); setSelectedBlock(block); setSelectionText(text); setActionError(null); }}
           onAnalyzeParagraph={(block) => void handleAnalyzeParagraph(block)}
           onAnalyzeChart={(block) => void withAnalysisError(() => handleReadChart(block))}
+          onAnalyzeEquation={(block) => void withAnalysisError(() => handleReadEquation(block))}
           onTranslate={() => void withAnalysisError(handleTranslate)}
           onReadChart={() => void withAnalysisError(() => handleReadChart())}
           chartReading={chartReading}
+          onReadEquation={() => void withAnalysisError(() => handleReadEquation())}
+          equationReading={equationReading}
           onExplain={(force) => void withAnalysisError(() => handleExplain(force))}
-          explanation={currentParagraphAnalysis?.outputs.explain ?? explanations[`${selectedPaper.id}:${targetSignature}`] ?? null}
+          explanation={currentParagraphAnalysis?.outputs.explain ?? explanations[paragraphResultKey(selectedPaper.id, targetSignature)] ?? null}
           onAsk={(question) => void withAnalysisError(() => handleAsk(question))}
           onOpenSettings={() => setSettingsOpen(true)}
           actionError={actionError}
@@ -1217,6 +1303,11 @@ export default function App() {
           guide={readingGuide}
           onGuide={() => void withAnalysisError(() => handleLearning("vocabulary"))}
           vocabulary={vocabulary}
+          paragraphReadingMode={paragraphReadingMode}
+          onParagraphReadingModeChange={(mode) => {
+            invalidateAnalysisRequests();
+            setParagraphReadingMode(mode);
+          }}
         />
       </>
     );

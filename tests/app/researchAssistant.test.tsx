@@ -12,7 +12,7 @@ const paper = { id: "p1", title: "Paper", authors: [], year: 2024, sourcePath: "
     { id: "b1", pageNumber: 1, order: 0, kind: "paragraph" as const, text: "Evidence." },
   ] };
 
-async function mount(available = true, currentPaper = paper, skills = false) {
+async function mount(available = true, currentPaper = paper, skills = false, draftAppend?: { id: number; text: string }) {
   const invoke = vi.fn(async (channel: string, input?: any): Promise<any> => {
     if (channel === "zhiyan:agent:start") return { sessionId: "s1" };
     if (channel === "zhiyan:agent:skills") return skills ? [{ name: "reading", title: "论文精读", prompt: "请精读当前论文" }] : [];
@@ -26,11 +26,11 @@ async function mount(available = true, currentPaper = paper, skills = false) {
   root = createRoot(container);
   const onAddPaper = vi.fn(async () => ({ persisted: true as const, id: "added", duplicate: false, kind: "metadata" as const }));
   const onJump = vi.fn();
-  await act(async () => root.render(<ResearchAssistant paper={currentPaper} library={[currentPaper]} onAddPaper={onAddPaper} onJump={onJump} available={available} onOpenSettings={vi.fn()} />));
+  await act(async () => root.render(<ResearchAssistant paper={currentPaper} library={[currentPaper]} onAddPaper={onAddPaper} onJump={onJump} available={available} onOpenSettings={vi.fn()} draftAppend={draftAppend} />));
   return { invoke, onAddPaper, onJump, setActive: async (active: boolean) => {
-    await act(async () => root.render(<ResearchAssistant paper={currentPaper} library={[currentPaper]} onAddPaper={onAddPaper} onJump={onJump} available={available} active={active} onOpenSettings={vi.fn()} />));
+    await act(async () => root.render(<ResearchAssistant paper={currentPaper} library={[currentPaper]} onAddPaper={onAddPaper} onJump={onJump} available={available} active={active} onOpenSettings={vi.fn()} draftAppend={draftAppend} />));
   }, rerender: async (id: string) => {
-    await act(async () => root.render(<ResearchAssistant paper={{ ...currentPaper, id }} library={[currentPaper]} onAddPaper={onAddPaper} onJump={onJump} available={available} onOpenSettings={vi.fn()} />));
+    await act(async () => root.render(<ResearchAssistant paper={{ ...currentPaper, id }} library={[currentPaper]} onAddPaper={onAddPaper} onJump={onJump} available={available} onOpenSettings={vi.fn()} draftAppend={draftAppend} />));
   } };
 }
 
@@ -39,6 +39,22 @@ afterEach(async () => {
   container?.remove();
   delete window.zhiyan;
   vi.unstubAllGlobals();
+});
+
+describe("research citation drafting", () => {
+  it("keeps an initial citation when the conversation panel first mounts", async () => {
+    const append = "《Paper》第 1 页\n> Evidence.";
+    await mount(true, paper, false, { id: 1, text: append });
+    expect(container.querySelector<HTMLTextAreaElement>("textarea")?.value).toContain(append);
+  });
+
+  it("appends a citation to the conversation draft without sending it", async () => {
+    await mount();
+    const append = "《Paper》第 1 页\n> Evidence.";
+    await act(async () => root.render(<ResearchAssistant paper={paper} library={[paper]} onAddPaper={vi.fn(async () => ({ persisted: true as const, id: "added", duplicate: false, kind: "metadata" as const }))} onJump={vi.fn()} available onOpenSettings={vi.fn()} draftAppend={{ id: 1, text: append }} />));
+    expect(container.querySelector<HTMLTextAreaElement>("textarea")?.value).toContain(append);
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="发送给篇篇"]')?.disabled).toBe(false);
+  });
 });
 
 describe("research assistant", () => {

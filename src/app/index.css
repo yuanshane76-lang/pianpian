@@ -1523,7 +1523,8 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
 .hiddenCanvasElement { position: absolute; top: 0; left: 0; width: 0; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
 .pdf-structure-overlay { position: absolute; inset: 0; pointer-events: none; }
 .pdf-block-layer { position: absolute; inset: 0; }
-.pdf-block-hit-area { position: absolute; box-sizing: border-box; padding: 0; margin: 0; min-width: 0; border: 1px solid transparent; border-radius: 2px; background: transparent; cursor: pointer; pointer-events: auto; transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease; }
+.pdf-block-region { position: absolute; pointer-events: none; }
+.pdf-block-hit-area { position: absolute; inset: 0; box-sizing: border-box; width: 100%; height: 100%; padding: 0; margin: 0; min-width: 0; border: 1px solid transparent; border-radius: 2px; background: transparent; cursor: pointer; pointer-events: auto; transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease; }
 .pdf-block-hit-area:hover, .pdf-block-hit-area.is-hovered, .pdf-block-hit-area.is-active { background: rgba(50, 126, 255, 0.10); border-color: rgba(38, 111, 238, 0.86); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.42) inset; }
 .pdf-block-hit-area.is-focus-flash { border-color: var(--teal); background: rgba(16, 132, 126, 0.22); box-shadow: 0 0 0 3px rgba(16, 132, 126, 0.24), 0 0 16px rgba(16, 132, 126, 0.28); animation: pdf-block-focus-flash 1.6s ease-out; }
 @keyframes pdf-block-focus-flash {
@@ -1536,10 +1537,13 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
 .pdf-block-hit-area:focus-visible { outline: 2px solid #246fee; outline-offset: 2px; }
 .pdf-block-hover-label { position: absolute; top: -22px; left: -1px; display: none; padding: 3px 6px; border-radius: 3px 3px 0 0; color: white; background: #246fee; font-size: 10px; line-height: 16px; white-space: nowrap; pointer-events: none; }
 .pdf-block-hit-area:hover .pdf-block-hover-label, .pdf-block-hit-area.is-hovered .pdf-block-hover-label, .pdf-block-hit-area.is-active .pdf-block-hover-label { display: block; }
-.pdf-block-hover-label.pdf-paragraph-hint { top: auto; bottom: calc(100% + 7px); left: 0; z-index: 4; width: max-content; max-width: min(210px, 100%); padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--ink); background: var(--surface-raised); box-shadow: 0 3px 12px #18252d20; font-size: 11px; line-height: 17px; white-space: normal; text-align: left; overflow-wrap: anywhere; }
-.pdf-block-hit-area:is(:hover, :focus-visible, .is-hovered, .is-active) .pdf-paragraph-hint { display: inline-flex; align-items: center; gap: 6px; }
+.pdf-block-actions { position: absolute; left: 0; bottom: calc(100% + 7px); z-index: 4; display: none; align-items: center; gap: 6px; pointer-events: auto; }
+.pdf-block-actions.is-visible { display: inline-flex; }
+.pdf-block-hover-label.pdf-paragraph-hint { position: static; display: inline-flex; align-items: center; gap: 6px; width: max-content; max-width: min(210px, 100%); padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--ink); background: var(--surface-raised); box-shadow: 0 3px 12px #18252d20; font-size: 11px; line-height: 17px; white-space: normal; text-align: left; overflow-wrap: anywhere; pointer-events: none; }
 .pdf-paragraph-hint svg { flex-shrink: 0; color: var(--teal); }
-.pdf-block-hover-label.pdf-paragraph-hint.is-below { top: calc(100% + 7px); bottom: auto; }
+.pdf-block-actions.is-below { top: calc(100% + 7px); bottom: auto; }
+.pdf-block-citation-action { display: inline-flex; align-items: center; gap: 5px; min-height: 31px; padding: 6px 9px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--teal-dark); background: var(--surface-raised); box-shadow: 0 3px 12px #18252d20; font-size: 11px; white-space: nowrap; cursor: pointer; }
+.pdf-block-citation-action:hover, .pdf-block-citation-action:focus-visible { border-color: var(--teal); background: var(--teal-soft); }
 .pdf-layout-notice { flex-shrink: 0; padding: 7px 16px; color: var(--muted-strong); background: var(--surface-inset); border-bottom: 1px solid var(--line); font-size: 11px; }
 .reader-structure-hint { flex: 1; color: var(--muted); font-size: 11px; }
 .pdf-feedback { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 12px; padding: 7px; color: var(--teal); }
@@ -1567,6 +1571,14 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
 .assistant-chart-reading ul { padding-left: 18px; margin: 6px 0 0; }
 .assistant-chart-reading li + li { margin-top: 8px; }
 .chart-reading-progress { display: flex; align-items: center; gap: 8px; color: var(--teal); font-size: 12px; }
+.equation-source { margin: 12px 0 18px; padding: 12px; overflow-x: auto; background: var(--pdf-paper); border: 1px solid var(--line); border-radius: 5px; }
+.equation-source .translation-content { margin: 0; min-width: max-content; }
+.equation-reading-progress { display: flex; align-items: center; gap: 8px; color: var(--teal); font-size: 12px; }
+.assistant-equation-reading { margin-top: 20px; font-size: 13px; line-height: 1.85; overflow-wrap: anywhere; }
+.assistant-equation-reading > strong { display: block; margin-top: 18px; color: var(--ink); font-size: 12px; }
+.assistant-equation-reading p { margin: 6px 0 0; white-space: pre-wrap; }
+.assistant-equation-reading ul { padding-left: 18px; margin: 6px 0 0; }
+.assistant-equation-reading li + li { margin-top: 8px; }
 .paper-figure { margin: 20px 0; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-inset); }
 .figure-image-button { position: relative; display: block; width: 100%; padding: 0; background: transparent; border: 0; cursor: zoom-in; }
 .figure-image-button img { display: block; max-width: 100%; max-height: 560px; object-fit: contain; margin: 0 auto; }
@@ -2292,6 +2304,10 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
 .reader-assistant .section-heading { margin: 0 0 18px; gap: 12px; color: var(--assistant-ink); }
 .reader-assistant h2, .reader-assistant h3 { margin: 0; font-size: 13px; font-weight: 650; line-height: 1.5; }
 .reader-assistant .context-count { color: var(--assistant-muted); font-size: 11px; white-space: nowrap; }
+.paragraph-context-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.grandma-mode-toggle { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; color: var(--assistant-muted); font-size: 11px; white-space: nowrap; cursor: pointer; }
+.grandma-mode-toggle input { width: 30px; height: 18px; margin: 0; accent-color: var(--teal); cursor: pointer; }
+.grandma-mode-toggle:has(input:checked) { color: var(--teal-dark); font-weight: 600; }
 .reader-assistant .assistant-copy { color: var(--assistant-ink); font-size: 14px; line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; }
 .reader-assistant .muted-copy { color: var(--assistant-muted); font-size: 13px; }
 .reader-assistant .text-button { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
@@ -2368,6 +2384,9 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
 .reader-assistant .assistant-chart-preview { margin: 0 0 16px; }
 .reader-assistant .assistant-chart-reading { color: var(--assistant-ink); font-size: 14px; }
 .reader-assistant .assistant-chart-reading strong { font-size: 13px; }
+.reader-assistant .equation-source { margin: 0 0 16px; background: var(--assistant-soft); border-color: var(--assistant-line); }
+.reader-assistant .assistant-equation-reading { color: var(--assistant-ink); font-size: 14px; }
+.reader-assistant .assistant-equation-reading strong { font-size: 13px; }
 
 @media (max-width: 560px) {
   .assistant-composer textarea { font-size: 16px; }

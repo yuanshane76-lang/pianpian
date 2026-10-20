@@ -38,6 +38,7 @@ interface ResearchAssistantProps {
   configurationRevision?: string;
   onOpenSettings: () => void;
   active?: boolean;
+  draftAppend?: { id: number; text: string };
 }
 
 type TimelineItem =
@@ -164,7 +165,7 @@ function updateTimeline(items: TimelineItem[], next: TimelineItem): TimelineItem
   return items.map((item, itemIndex) => itemIndex === index ? next : item);
 }
 
-export function ResearchAssistant({ paper, library, scope = "paper", onAddPaper, onJump, onJumpPaper, onSaveDocument, available, onOpenSettings, configurationRevision, active = true }: ResearchAssistantProps) {
+export function ResearchAssistant({ paper, library, scope = "paper", onAddPaper, onJump, onJumpPaper, onSaveDocument, available, onOpenSettings, configurationRevision, active = true, draftAppend }: ResearchAssistantProps) {
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [question, setQuestion] = useState("");
   const [busy, setBusy] = useState(false);
@@ -188,6 +189,7 @@ export function ResearchAssistant({ paper, library, scope = "paper", onAddPaper,
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
   const [deleting, setDeleting] = useState<string | null>(null);
+  const lastDraftAppend = useRef<number>();
   const conversationId = useRef<string | undefined>();
   const conversationScope = useMemo<ConversationScope>(() => scope === "library" ? { scope } : { scope, paperId: paper.id, paperTitle: paper.title }, [scope, paper.id, paper.title]);
   const { scrollRef, contentRef, onScroll, followLatest } = useConversationScroll([timeline, streaming, error]);
@@ -200,6 +202,7 @@ export function ResearchAssistant({ paper, library, scope = "paper", onAddPaper,
   const startedRef = useRef(false);
   const latestContext = useRef(paperContext);
   latestContext.current = paperContext;
+
   const confirmingTools = useRef(new Set<string>());
   const approvalAbortControllers = useRef(new Map<string, AbortController>());
   function cancelPendingImports() {
@@ -374,6 +377,13 @@ export function ResearchAssistant({ paper, library, scope = "paper", onAddPaper,
       if (ownedId) void abortResearchAgent(ownedId).catch(() => undefined);
     };
   }, [scope, paper.id, configurationRevision, available, selection.sequence]);
+
+  useEffect(() => {
+    if (!draftAppend || draftAppend.id === lastDraftAppend.current) return;
+    lastDraftAppend.current = draftAppend.id;
+    setQuestion((current) => current ? `${current.trimEnd()}\n\n${draftAppend.text}` : draftAppend.text);
+    questionRef.current?.focus();
+  }, [draftAppend]);
 
   useEffect(() => {
     if (!startedRef.current) return;

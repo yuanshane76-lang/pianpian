@@ -499,11 +499,11 @@ describe("paragraph quick analysis", () => {
   });
 
   it("selects on a single click without AI calls and exposes the double-click hint", async () => {
-    const { blocks, stream } = await mount();
+    const { container, blocks, stream } = await mount();
     await act(async () => blocks[0].click());
     expect(blocks[0].getAttribute("aria-pressed")).toBe("true");
     expect(stream).not.toHaveBeenCalled();
-    expect(blocks[0].querySelector('[role="tooltip"]')?.textContent ?? "").toContain("双击分析整段");
+    expect(container.querySelector('[role="tooltip"]')?.textContent ?? "").toContain("双击分析整段");
   });
 
   it("starts translation, explanation, insight and vocabulary together on a paragraph double-click", async () => {
