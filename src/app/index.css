@@ -1594,6 +1594,7 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
 .pdf-missing p { color: var(--muted-strong); }
 .assistant-translation { padding: 0; margin: 0; }
 .assistant-translation p { color: var(--assistant-ink); font-size: 14px; line-height: 1.9; white-space: pre-wrap; overflow-wrap: anywhere; margin: 10px 0 0; }
+.assistant-translation .translation-content .markdown-content p { white-space: normal; }
 .translation-math { display: inline-flex; align-items: baseline; max-width: 100%; padding-block: 0.2em; vertical-align: baseline; overflow-x: auto; overflow-y: hidden; }
 .translation-math > .katex { flex: 0 0 auto; }
 .translation-math-display { display: block; }
