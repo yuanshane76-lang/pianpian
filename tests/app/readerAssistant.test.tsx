@@ -219,16 +219,25 @@ describe("reader assistant layout", () => {
     expect(content.textContent).toContain("BART [32]");
   });
 
+  it("renders translation Markdown and academic superscripts", async () => {
+    await mount({ translation: "**先说背景。 ** 大语言模型。代码 <sup>8</sup>" });
+    const content = container.querySelector(".assistant-translation")!;
+    expect(content.querySelector("strong")?.textContent).toBe("先说背景。");
+    expect(content.querySelector("sup")?.textContent).toBe("8");
+    expect(content.textContent).not.toContain("**");
+    expect(content.textContent).not.toContain("<sup>");
+  });
+
   it("supports inline and display math without losing paragraph breaks", async () => {
     const translation = String.raw`概率 $p_{\theta}(y_i)$ 与分数 \(\frac{a}{b}\)。
 
 $$\sum_{i=1}^{n} x_i^2$$
 \[\theta = \frac{1}{n}\sum_i x_i\]`;
     await mount({ translation });
-    const content = container.querySelector(".assistant-translation p")!;
+    const content = container.querySelector(".assistant-translation .markdown-content")!;
     expect(content.querySelectorAll(".katex")).toHaveLength(4);
     expect(content.querySelectorAll(".katex-display")).toHaveLength(2);
-    expect(content.textContent).toContain("\n\n");
+    expect(content.querySelectorAll("p").length).toBeGreaterThan(1);
     expect(content.querySelectorAll(".mfrac").length).toBeGreaterThan(0);
   });
 

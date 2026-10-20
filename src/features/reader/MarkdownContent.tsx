@@ -4,15 +4,27 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
 import { remarkMathRendering } from "./markdownMath";
+import { remarkMarkdownCompatibility } from "./markdownCompatibility";
 import { renderMathHtml } from "./mathRendering";
 import { citationRehype, citationRemark, type MarkdownCitation } from "./markdownCitations";
 
-export function MarkdownContent({ text, citations = [], onCitation }: {
-  text: string; citations?: MarkdownCitation[]; onCitation?: (blockId: string) => void;
+export type MarkdownMathReplacement = {
+  source: string;
+  formula: string | null;
+  display: boolean;
+};
+
+export function MarkdownContent({ text, citations = [], onCitation, mathReplacements = [] }: {
+  text: string;
+  citations?: MarkdownCitation[];
+  onCitation?: (blockId: string) => void;
+  mathReplacements?: MarkdownMathReplacement[];
 }) {
   const numbering = useRef({ text: "", numbers: new Map<string, number>() });
   const citationContext = useRef({ citations, onCitation });
+  const mathContext = useRef(mathReplacements);
   citationContext.current = { citations, onCitation };
+  mathContext.current = mathReplacements;
   // Appending streamed Markdown must not renumber a source already shown.
   if (!text.startsWith(numbering.current.text)) numbering.current = { text, numbers: new Map() };
   numbering.current.text = text;
@@ -32,6 +44,20 @@ export function MarkdownContent({ text, citations = [], onCitation }: {
       },
       a: ({ node, children, href }) => {
         const { citations, onCitation } = citationContext.current;
+        const inlineTag = node?.properties["data-inline-tag"];
+        if (inlineTag === "sup" || inlineTag === "sub") {
+          const Tag = inlineTag;
+          return <Tag>{children}</Tag>;
+        }
+        const translationMath = href?.match(/^zhiyan-translation-math:(\d+)$/);
+        if (translationMath) {
+          const replacement = mathContext.current[Number(translationMath[1])];
+          if (!replacement) return <span>{children}</span>;
+          const html = replacement.formula === null ? null : renderMathHtml(replacement.formula, replacement.display);
+          if (html === null) return <span>{replacement.source}</span>;
+          const className = replacement.display ? "translation-math translation-math-display" : "translation-math";
+          return <span className={className} dangerouslySetInnerHTML={{ __html: html }} />;
+        }
         const citation = href?.match(/^zhiyan-citation:(\d+)$/);
         const source = citation ? citations[Number(citation[1])] : undefined;
         const number = Number(node?.properties["data-citation-number"]);
@@ -43,8 +69,11 @@ export function MarkdownContent({ text, citations = [], onCitation }: {
       img: ({ alt }) => <span>{alt}</span>,
       table: ({ children }) => <div className="markdown-table"><table>{children}</table></div>,
     }), []);
-  return <div className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath, remarkMathRendering, citationRemark(citations)]} skipHtml
+  return <div className="markdown-content"><ReactMarkdown remarkPlugins={[
+    remarkGfm, remarkMath, remarkMathRendering, remarkMarkdownCompatibility, citationRemark(citations),
+  ]} skipHtml
     rehypePlugins={[citationRehype(citations, numbering.current.numbers)]}
-    urlTransform={(url) => /^zhiyan-citation:\d+$/.test(url) ? url : defaultUrlTransform(url)}
+    urlTransform={(url) => /^zhiyan-(?:citation:\d+|inline:(?:sup|sub)|translation-math:\d+)$/.test(url)
+      ? url : defaultUrlTransform(url)}
     components={components}>{text}</ReactMarkdown></div>;
 }

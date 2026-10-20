@@ -1,6 +1,4 @@
-import "katex/dist/katex.min.css";
-import { useLayoutEffect, useRef } from "react";
-import { renderMathHtml } from "./mathRendering";
+import { MarkdownContent } from "./MarkdownContent";
 
 const DELIMITERS = [
   { left: "$$", right: "$$", display: true },
@@ -15,46 +13,47 @@ function isEscaped(text: string, index: number) {
   return slashes % 2 === 1;
 }
 
-function renderTranslation(text: string) {
-  const fragment = document.createDocumentFragment();
+function maskTranslationMath(text: string) {
+  const replacements: Array<{ source: string; formula: string | null; display: boolean }> = [];
+  let masked = "";
   let plainStart = 0;
   let index = 0;
-  while (index < text.length) {
-    const delimiter = isEscaped(text, index) ? undefined : DELIMITERS.find((item) => text.startsWith(item.left, index));
-    if (!delimiter) { index += 1; continue; }
-    const formulaStart = index + delimiter.left.length;
-    let formulaEnd = formulaStart;
-    // Delimiter recovery must not depend on balanced braces in malformed TeX.
-    while (formulaEnd < text.length && (isEscaped(text, formulaEnd) || !text.startsWith(delimiter.right, formulaEnd))) formulaEnd += 1;
-    if (formulaEnd === text.length) break;
-    if (index > plainStart) fragment.append(document.createTextNode(text.slice(plainStart, index)));
-    const end = formulaEnd + delimiter.right.length;
-    const source = text.slice(index, end);
-    const wrapper = document.createElement("span");
-    const html = renderMathHtml(text.slice(formulaStart, formulaEnd), delimiter.display);
-    if (html === null) {
-      fragment.append(document.createTextNode(source));
-    } else {
-      wrapper.className = delimiter.display ? "translation-math translation-math-display" : "translation-math";
-      wrapper.innerHTML = html;
-      fragment.append(wrapper);
-    }
+  const appendReplacement = (end: number, replacement: { source: string; formula: string | null; display: boolean }) => {
+    masked += text.slice(plainStart, index);
+    masked += `[](zhiyan-translation-math:${replacements.length})`;
+    replacements.push(replacement);
     plainStart = end;
     index = end;
+  };
+
+  while (index < text.length) {
+    if (!isEscaped(text, index) && text.startsWith("\\$", index)) {
+      appendReplacement(index + 2, { source: "\\$", formula: null, display: false });
+      continue;
+    }
+    const delimiter = isEscaped(text, index) ? undefined : DELIMITERS.find((item) => text.startsWith(item.left, index));
+    if (!delimiter) {
+      index += 1;
+      continue;
+    }
+    const formulaStart = index + delimiter.left.length;
+    let formulaEnd = formulaStart;
+    while (formulaEnd < text.length &&
+      (isEscaped(text, formulaEnd) || !text.startsWith(delimiter.right, formulaEnd))) formulaEnd += 1;
+    if (formulaEnd === text.length) break;
+    const end = formulaEnd + delimiter.right.length;
+    appendReplacement(end, {
+      source: text.slice(index, end),
+      formula: text.slice(formulaStart, formulaEnd),
+      display: delimiter.display,
+    });
   }
-  if (plainStart < text.length) fragment.append(document.createTextNode(text.slice(plainStart)));
-  return fragment;
+
+  masked += text.slice(plainStart);
+  return { masked, replacements };
 }
 
 export function TranslationContent({ text }: { text: string }) {
-  const contentRef = useRef<HTMLParagraphElement>(null);
-
-  useLayoutEffect(() => {
-    const content = contentRef.current;
-    if (!content) return;
-    // React owns the host, while the renderer owns its children.
-    content.replaceChildren(renderTranslation(text));
-  }, [text]);
-
-  return <p ref={contentRef} className="translation-content" />;
+  const { masked, replacements } = maskTranslationMath(text);
+  return <div className="translation-content"><MarkdownContent text={masked} mathReplacements={replacements} /></div>;
 }

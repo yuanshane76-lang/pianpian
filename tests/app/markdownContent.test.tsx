@@ -24,6 +24,15 @@ afterEach(async () => {
 });
 
 describe("assistant Markdown math", () => {
+  it("renders safe inline tags alongside Markdown instead of showing their source", async () => {
+    const content = await render("**先说背景。 ** 大语言模型。\n\n代码 <sup>δ</sup> 和 <sub>i</sub>。");
+    expect(content.querySelector("strong")?.textContent).toBe("先说背景。");
+    expect(content.querySelector("sup")?.textContent).toBe("δ");
+    expect(content.querySelector("sub")?.textContent).toBe("i");
+    expect(content.textContent).not.toContain("<sup>");
+    expect(content.textContent).not.toContain("**");
+  });
+
   it("turns only verified citation text into buttons and keeps code and incomplete markers inert", async () => {
     await render("");
     const onCitation = vi.fn();
