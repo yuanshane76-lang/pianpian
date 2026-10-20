@@ -16,6 +16,8 @@ const { createConversationStore } = require("./research-conversations.cjs");
 const { createLibraryPaperReader } = require("./research-library.cjs");
 const { configureBrand, brand } = require("./brand.cjs");
 const { registerUpdateService } = require("./update-service.cjs");
+const semanticScholar = require("./semantic-scholar.cjs");
+const { isAllowedExternalUrl } = require("./external-links.cjs");
 
 configureBrand(app);
 app.setAppUserModelId("com.pianpian.desktop");
@@ -74,8 +76,7 @@ function createWindow() {
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    const allowed = ["https://mineru.net/", "https://help.aliyun.com/", "https://bailian.console.aliyun.com/", "https://platform.deepseek.com/"];
-    if (allowed.some((prefix) => url.startsWith(prefix))) shell.openExternal(url);
+    if (isAllowedExternalUrl(url)) shell.openExternal(url);
     return { action: "deny" };
   });
   window.webContents.on("will-navigate", (event) => event.preventDefault());
@@ -156,6 +157,16 @@ app.whenReady().then(() => {
   });
   secureHandle("zhiyan:mineru:start", (id) => documentTasks.start(id));
   secureHandle("zhiyan:mineru:status", (id) => documentTasks.status(id));
+  const radar = semanticScholar.createClient({
+    readApiKey: () => readSettings().semanticScholar.apiKey,
+  });
+  secureHandle("zhiyan:radar:related", (input) => {
+    if (!input || typeof input !== "object") throw new Error("相似文献检索参数无效");
+    const title = typeof input.title === "string" ? input.title : "";
+    const doi = typeof input.doi === "string" ? input.doi : undefined;
+    if (!title.trim() && !doi) throw new Error("当前论文缺少标题和 DOI，无法检索相似工作");
+    return radar.findRelatedPapers({ seed: { title, doi }, limit: input.limit });
+  });
   secureHandle("zhiyan:settings:get", () => summary(readSettings()));
   secureHandle("zhiyan:settings:save", (input) => {
     const next = update(readSettings(), input);

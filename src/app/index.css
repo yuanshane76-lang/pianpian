@@ -1599,7 +1599,8 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
 .cloud-approval > label { display: flex; gap: 8px; font-size: 13px; align-items: center; margin: 20px 0; }
 .assistant-explanation, .assistant-insight { margin: 0; padding: 0; }
 .assistant-explanation p { margin-top: 10px; white-space: pre-wrap; }
-.assistant-tabs { display: flex; gap: 22px; padding: 0 20px; background: var(--surface); border-bottom: 1px solid var(--assistant-line); }
+.assistant-tabs { display: flex; gap: 12px; padding: 0 14px; overflow-x: auto; scrollbar-width: none; background: var(--surface); border-bottom: 1px solid var(--assistant-line); }
+.assistant-tabs::-webkit-scrollbar { display: none; }
 .assistant-tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 0 0 2px; color: var(--assistant-muted); background: transparent; border: 0; border-bottom: 2px solid transparent; font-size: 13px; white-space: nowrap; }
 .assistant-tabs button.is-active { color: var(--teal-dark); border-bottom-color: var(--teal); font-weight: 650; }
 .assistant-tabs button span { display: inline-grid; place-items: center; min-width: 22px; height: 20px; padding: 0 5px; color: var(--assistant-muted); background: var(--assistant-soft); border-radius: 4px; font-size: 11px; font-variant-numeric: tabular-nums; }
@@ -2573,3 +2574,22 @@ html[data-theme="dark"] .reader-assistant {
   --assistant-line: #2b3338;
   --assistant-soft: #20262b;
 }
+
+/* 相似论文雷达：只做公开元数据检索，不调用模型。 */
+.radar-tab-panel { flex: 1; min-height: 0; overflow: hidden; }
+.radar-panel { display: flex; flex-direction: column; gap: 12px; height: 100%; padding: 20px; overflow-y: auto; overscroll-behavior: contain; }
+.radar-panel .section-heading { margin: 0; }
+.radar-status { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted-strong); font-size: 12px; }
+.radar-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; padding: 12px; color: var(--danger-ink); background: var(--danger-bg); border: 1px solid var(--danger-line); border-radius: 6px; font-size: 12px; line-height: 1.7; }
+.radar-error span { flex: 1; min-width: 0; }
+.radar-summary { margin: 0; color: var(--muted-strong); font-size: 12px; }
+.radar-list { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.radar-card { padding: 12px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: 7px; }
+.radar-card-head { display: flex; align-items: baseline; gap: 8px; }
+.radar-rank { flex: 0 0 auto; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.radar-candidate-title { min-width: 0; color: var(--ink); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.radar-meta { margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.radar-abstract { display: -webkit-box; margin: 8px 0 0; overflow: hidden; color: var(--muted-strong); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; -webkit-line-clamp: 4; -webkit-box-orient: vertical; }
+.radar-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+.radar-citation { color: var(--muted); font-size: 11px; }
+.radar-source { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
