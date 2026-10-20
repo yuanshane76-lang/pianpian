@@ -3,6 +3,7 @@ import { parse, Allow } from "partial-json";
 export interface ParagraphInsight { summary: string; role: string }
 export interface ReadingGuide { overview: string; terms: Array<{ term: string; translation: string; definition: string }> }
 export interface ChartReading { summary: string; encoding: string; findings: string[]; role: string; caveats: string[] }
+export interface EquationReading { summary: string; variables: string[]; role: string; caveats: string[] }
 
 function parseObject(text: string): Record<string, unknown> {
   try {
@@ -48,6 +49,35 @@ export function previewChartReading(text: string): ChartReading | null {
       findings: list("findings"), role: field("role", 1800), caveats: list("caveats"),
     };
     return reading.summary || reading.encoding || reading.findings.length || reading.role || reading.caveats.length ? reading : null;
+  } catch { return null; }
+}
+export function parseEquationReading(text: string): EquationReading {
+  const value = parseObject(text);
+  function textList(list: unknown): string[] {
+    if (!Array.isArray(list)) throw new Error("模型返回的结构不完整，请重试");
+    return list.slice(0, 8).map((item) => requiredText(item, 1000));
+  }
+  return {
+    summary: requiredText(value.summary, 1500),
+    variables: textList(value.variables),
+    role: requiredText(value.role, 1800),
+    caveats: textList(value.caveats),
+  };
+}
+export function previewEquationReading(text: string): EquationReading | null {
+  try {
+    const value = parse(text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""), Allow.STR | Allow.OBJ | Allow.ARR);
+    const field = (key: string, maximum: number) => typeof value?.[key] === "string" ? value[key].slice(0, maximum) : "";
+    const list = (key: string) => Array.isArray(value?.[key])
+      ? value[key].filter((item: unknown) => typeof item === "string" && item.trim()).slice(0, 8)
+        .map((item: string) => item.slice(0, 1000)) : [];
+    const reading: EquationReading = {
+      summary: field("summary", 1500),
+      variables: list("variables"),
+      role: field("role", 1800),
+      caveats: list("caveats"),
+    };
+    return reading.summary || reading.variables.length || reading.role || reading.caveats.length ? reading : null;
   } catch { return null; }
 }
 export function parseReadingGuide(text: string): ReadingGuide {

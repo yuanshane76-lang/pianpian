@@ -73,6 +73,15 @@ describe("continuous PDF page geometry", () => {
     expect(onAnalyzeChart).toHaveBeenCalledWith(block);
     expect(onAnalyzeParagraph).not.toHaveBeenCalled();
   });
+  it("double-clicks an equation through the formula analysis callback", async () => {
+    const block: DocumentBlock = { ...paragraph, id: "equation", kind: "equation", text: String.raw`L(\theta)=\sum_i \ell_i` };
+    const onAnalyzeEquation = vi.fn();
+    const onAnalyzeParagraph = vi.fn();
+    const { container } = await mount([block], { onAnalyzeEquation, onAnalyzeParagraph });
+    await act(async () => container.querySelector(".pdf-block-hit-area")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+    expect(onAnalyzeEquation).toHaveBeenCalledWith(block);
+    expect(onAnalyzeParagraph).not.toHaveBeenCalled();
+  });
   it("selects and analyzes the canonical complete paragraph from its continuation page", async () => {
     const merged = { ...paragraph, text: "First page starts the paragraph. The next page continues it.", pageBounds: [
       { pageNumber: 1, bbox: paragraph.bbox! },

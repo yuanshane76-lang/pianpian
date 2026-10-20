@@ -25,6 +25,15 @@ describe("analysis cache", () => {
     expect(buildParagraphCacheIdentity("paper", { ...block, bbox: [.1, .1, .9, .2] }, "vocabulary", "service", "changed-document")).toEqual(vocabulary);
   });
 
+  it("keeps grandma-mode paragraph results separate from standard results", () => {
+    const block: DocumentBlock = { id: "block", kind: "paragraph", pageNumber: 1, order: 0, text: "Attention selects useful features." };
+    const standard = buildParagraphCacheIdentity("paper", block, "translate", "service", "document", "standard");
+    const grandma = buildParagraphCacheIdentity("paper", block, "translate", "service", "document", "grandma");
+    expect(standard.key).not.toBe(grandma.key);
+    expect(standard.sourceSignature).not.toBe(grandma.sourceSignature);
+    expect(grandma.sourceSignature).toContain(":grandma");
+  });
+
   it("hits only when the source signature and operation are unchanged", () => {
     const cache = new Map<string, AnalysisCacheEntry>();
     const key = buildAnalysisCacheKey("paper-a", "block-1", "translate", "source-v1");

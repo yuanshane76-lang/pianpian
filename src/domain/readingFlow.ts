@@ -10,7 +10,7 @@ export function getTranslationTarget(block: DocumentBlock | null, selection: str
 }
 
 export function isVisualBlock(block: DocumentBlock | null): boolean {
-  return block?.kind === "table" || block?.kind === "image";
+  return block?.kind === "table" || block?.kind === "image" || block?.kind === "equation";
 }
 
 export function getAnalysisAvailability(settings: PublicServiceSettings) {

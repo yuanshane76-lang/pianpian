@@ -1,7 +1,8 @@
 import { getDocumentBlockSignature, getDocumentContentSignature, type DocumentBlock } from "./documentBlocks";
 
-export type AnalysisOperation = "translate" | "explain" | "qa" | "insight" | "guide" | "chart" | "vocabulary";
+export type AnalysisOperation = "translate" | "explain" | "qa" | "insight" | "guide" | "chart" | "equation" | "vocabulary";
 export type ParagraphOperation = "translate" | "explain" | "insight" | "vocabulary";
+export type ParagraphReadingMode = "standard" | "grandma";
 
 export interface AnalysisCacheEntry {
   key: string;
@@ -28,13 +29,15 @@ export function buildParagraphCacheIdentity(
   operation: ParagraphOperation,
   serviceIdentity: string,
   documentSignature: string,
+  readingMode: ParagraphReadingMode = "standard",
 ): Omit<AnalysisCacheEntry, "value" | "createdAt"> {
   const signature = getDocumentBlockSignature(block);
   const contentSignature = getDocumentContentSignature(block);
   const scopeId = operation === "vocabulary" ? contentSignature : operation === "insight" ? block.id : `${block.id}:${signature}`;
-  const sourceSignature = operation === "vocabulary" ? `${serviceIdentity}:paragraph-v1:${contentSignature}`
-    : operation === "insight" ? `${serviceIdentity}:${documentSignature}:${signature}`
-    : `${serviceIdentity}:${signature}`;
+  const modeSuffix = readingMode === "grandma" ? ":grandma" : "";
+  const sourceSignature = operation === "vocabulary" ? `${serviceIdentity}:paragraph-v1:${contentSignature}${modeSuffix}`
+    : operation === "insight" ? `${serviceIdentity}:${documentSignature}:${signature}${modeSuffix}`
+    : `${serviceIdentity}:${signature}${modeSuffix}`;
   return { key: buildAnalysisCacheKey(paperId, scopeId, operation, sourceSignature), paperId, scopeId, operation, sourceSignature };
 }
 

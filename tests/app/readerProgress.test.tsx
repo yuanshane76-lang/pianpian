@@ -23,7 +23,7 @@ function props(): ComponentProps<typeof ReaderView> {
       originalId: "original", importedAt: "2026-10-09", groupId: "group-inbox", favorite: false,
       blocks: 1, blockData: [paragraph], parseStatus: "ready" },
     selectedBlock: null, selectionText: "", translation: null, answer: null,
-    isBusy: false, chartReading: null, explanation: null, actionError: null, processingStatus: "",
+    isBusy: false, chartReading: null, onReadEquation: vi.fn(), equationReading: null, explanation: null, actionError: null, processingStatus: "",
     aiAvailable: true, serviceLabel: "模型", serviceModel: "model",
     pendingAction: null, streamingOutput: null, insight: null, guide: null, vocabulary: [],
     onBack: vi.fn(), onSelectBlock: vi.fn(), onSelectText: vi.fn(), onAnalyzeParagraph: vi.fn(),

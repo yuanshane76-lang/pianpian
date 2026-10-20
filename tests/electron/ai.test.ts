@@ -56,6 +56,24 @@ describe("real translation transport", () => {
     }
   });
 
+  it("adds an extremely plain-language instruction to grandma-mode paragraph requests", async () => {
+    const settings = { ...DEFAULT, aiProvider: "deepseek", deepseek: { ...DEFAULT.deepseek, apiKey: "unit-test-secret" } };
+    const fetchImpl = vi.fn().mockResolvedValue(sseResponse('{"choices":[{"delta":{"content":"用大白话解释"}}]}'));
+    await callModel(settings, {
+      operation: "explain",
+      readingMode: "grandma",
+      paper: {},
+      block: { text: "Attention weighs features." },
+    }, fetchImpl);
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.messages[0].content).toContain("祖母模式");
+    expect(body.messages[0].content).toContain("极通俗");
+    expect(body.messages[0].content).toContain("不要假设读者熟悉专业术语");
+    expect(body.messages[0].content).toContain("先用一句话说清楚");
+    expect(body.messages[0].content).toContain("复杂句要拆开");
+    expect(body.messages[0].content).toContain("通俗不等于删减");
+  });
+
   it("rejects the removed whole-paper overview operation before a model call", async () => {
     const settings = { ...DEFAULT, aiProvider: "deepseek", deepseek: { ...DEFAULT.deepseek, apiKey: "unit-test-secret" } };
     const fetchImpl = vi.fn();
@@ -143,10 +161,33 @@ describe("real translation transport", () => {
     expect(body.messages[0].content).toContain("findings");
   });
 
+  it("reads an extracted equation with nearby paragraphs without requiring an image", async () => {
+    const settings = { ...DEFAULT, aiProvider: "deepseek", deepseek: { ...DEFAULT.deepseek, apiKey: "unit-test-secret" } };
+    const fetchImpl = vi.fn().mockResolvedValue(sseResponse('{"choices":[{"delta":{"content":"{}"}}]}'));
+    await callModel(settings, {
+      operation: "equation",
+      paper: {
+        blockData: [
+          { id: "before", text: "The loss is minimized over the training set." },
+          { id: "formula", kind: "equation", text: String.raw`L(\theta)=\sum_i \ell(f_\theta(x_i), y_i)` },
+          { id: "after", text: "We optimize the parameters with gradient descent." },
+        ],
+      },
+      block: { id: "formula", kind: "equation", text: String.raw`L(\theta)=\sum_i \ell(f_\theta(x_i), y_i)`, pageNumber: 4 },
+    }, fetchImpl);
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.messages[1].content).toContain(String.raw`L(\theta)=\sum_i \ell(f_\theta(x_i), y_i)`);
+    expect(body.messages[1].content).toContain("gradient descent");
+    expect(body.messages[0].content).toContain("variables");
+    expect(body.messages[1].content).not.toEqual(expect.arrayContaining([{ type: "image_url" }]));
+    expect(body.thinking).toEqual({ type: "disabled" });
+  });
+
   it("does not translate visual blocks or accept remote chart image URLs", async () => {
     const settings = { ...DEFAULT, aiProvider: "deepseek", deepseek: { ...DEFAULT.deepseek, apiKey: "unit-test-secret" } };
     const fetchImpl = vi.fn();
     await expect(callModel(settings, { operation: "translate", paper: {}, block: { kind: "table", text: "A 1" } }, fetchImpl)).rejects.toThrow("读图表");
+    await expect(callModel(settings, { operation: "translate", paper: {}, block: { kind: "equation", text: "x+y" } }, fetchImpl)).rejects.toThrow("解读公式");
     await expect(callModel(settings, { operation: "chart", paper: {}, block: { kind: "image" }, imageDataUrl: "https://example.com/image.png" }, fetchImpl)).rejects.toThrow("图片");
     expect(fetchImpl).not.toHaveBeenCalled();
   });

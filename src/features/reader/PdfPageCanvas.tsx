@@ -7,12 +7,14 @@ import { findPageBlockAtPoint, hasPageBounds } from "../../domain/pdfLayout";
 import { renderPdfTextLayer } from "../../services/pdfTextLayer";
 import { BlockList } from "./BlockList";
 
-export function PdfPageCanvas({ pdfPage, layout, blocks, activeBlockId, focusFlashRegionId, onSelect, onSelectText, onAnalyzeParagraph, onAnalyzeChart, onReady }: {
+export function PdfPageCanvas({ pdfPage, layout, blocks, activeBlockId, focusFlashRegionId, onSelect, onSelectText, onAnalyzeParagraph, onAnalyzeChart, onAnalyzeEquation, onAddToConversation, onReady }: {
   pdfPage?: PDFPageProxy; layout: PdfPageLayout; blocks: DocumentBlock[]; activeBlockId: string | null; focusFlashRegionId?: string | null;
   onSelect: (block: DocumentBlock) => void; onSelectText: (block: DocumentBlock, text: string) => void;
   onReady: (page: number, ready: boolean) => void;
   onAnalyzeParagraph?: (block: DocumentBlock) => void;
   onAnalyzeChart?: (block: DocumentBlock) => void;
+  onAnalyzeEquation?: (block: DocumentBlock) => void;
+  onAddToConversation?: (block: DocumentBlock) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -84,14 +86,23 @@ export function PdfPageCanvas({ pdfPage, layout, blocks, activeBlockId, focusFla
     window.getSelection()?.removeAllRanges();
     onAnalyzeChart(block);
   }
+  function analyzeEquation(block: DocumentBlock) {
+    if (block.kind !== "equation" || !onAnalyzeEquation) return;
+    window.getSelection()?.removeAllRanges();
+    onAnalyzeEquation(block);
+  }
   function canAnalyze(block: DocumentBlock | null) {
     return Boolean(block && (block.kind === "paragraph" ? onAnalyzeParagraph
-      : ["image", "table"].includes(block.kind) && onAnalyzeChart));
+      : ["image", "table"].includes(block.kind) ? onAnalyzeChart
+      : block.kind === "equation" && onAnalyzeEquation));
   }
 
   return <div className="pdf-page-stage" ref={stageRef} data-page-number={layout.pageNumber}
     data-rendered={interactive ? "true" : "false"} style={{ width: layout.width, height: layout.height }}
-    onPointerMove={(event) => setHoveredBlockId(blockAt(event.clientX, event.clientY)?.id ?? null)}
+    onPointerMove={(event) => {
+      const action = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-block-action-for]") : null;
+      setHoveredBlockId(action?.dataset.blockActionFor ?? blockAt(event.clientX, event.clientY)?.id ?? null);
+    }}
     onPointerLeave={() => setHoveredBlockId(null)}
     onMouseDown={(event) => {
       if (event.detail > 1 && canAnalyze(blockAt(event.clientX, event.clientY))) event.preventDefault();
@@ -113,6 +124,9 @@ export function PdfPageCanvas({ pdfPage, layout, blocks, activeBlockId, focusFla
       } else if (["image", "table"].includes(block.kind) && onAnalyzeChart) {
         event.preventDefault();
         analyzeChart(block);
+      } else if (block.kind === "equation" && onAnalyzeEquation) {
+        event.preventDefault();
+        analyzeEquation(block);
       }
     }}>
     <canvas ref={canvasRef} aria-label={`论文原文第 ${layout.pageNumber} 页，包含原始图表和公式`} />
@@ -121,7 +135,12 @@ export function PdfPageCanvas({ pdfPage, layout, blocks, activeBlockId, focusFla
       <BlockList blocks={positionedBlocks} activeBlockId={activeBlockId} hoveredBlockId={hoveredBlockId} focusFlashRegionId={focusFlashRegionId}
         onSelect={(block) => { window.getSelection()?.removeAllRanges(); onSelect(block); }}
         onAnalyzeParagraph={onAnalyzeParagraph ? analyzeParagraph : undefined}
-        onAnalyzeChart={onAnalyzeChart ? analyzeChart : undefined} />
+        onAnalyzeChart={onAnalyzeChart ? analyzeChart : undefined}
+        onAnalyzeEquation={onAnalyzeEquation ? analyzeEquation : undefined}
+        onAddToConversation={onAddToConversation ? (block) => {
+          window.getSelection()?.removeAllRanges();
+          onAddToConversation(block);
+        } : undefined} />
     </div> : null}
     {!interactive ? <div className="pdf-page-loading" role={error ? "alert" : "status"}>
       {error || <><LoaderCircle size={16} className="spin" />正在加载第 {layout.pageNumber} 页…</>}

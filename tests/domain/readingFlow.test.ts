@@ -31,8 +31,8 @@ describe("reading paragraphs and selected text", () => {
     expect(getTranslationTarget(block, "Second sentence.")?.text).toBe("Second sentence.");
   });
 
-  it("never routes a table or figure selection to paragraph translation", () => {
-    for (const kind of ["table", "image"] as const) {
+  it("never routes a table, figure, or equation selection to paragraph translation", () => {
+    for (const kind of ["table", "image", "equation"] as const) {
       const block = { id: "visual", kind, text: "Table 1", pageNumber: 1, order: 0 };
       expect(getTranslationTarget(block, "")).toBeNull();
       expect(getTranslationTarget(block, "Table")).toBeNull();

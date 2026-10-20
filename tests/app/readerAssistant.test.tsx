@@ -15,7 +15,7 @@ async function mount(overrides: Partial<ComponentProps<typeof ReaderAssistant>> 
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
   const props: ComponentProps<typeof ReaderAssistant> = {
     selectedBlock: { id: "p1-b1", kind: "paragraph", pageNumber: 1, order: 0, text: "Retrieval augments the language model with external knowledge." },
-    originalId: "paper", chartReading: null, onReadChart: vi.fn(),
+    originalId: "paper", chartReading: null, onReadChart: vi.fn(), equationReading: null, onReadEquation: vi.fn(),
     answer: null, isBusy: false,
     onTranslate: vi.fn(), onExplain: vi.fn(), explanation: null, onAsk: vi.fn(),
     translation: "检索为语言模型补充外部知识。", selectionText: "", serviceLabel: "DeepSeek",
@@ -23,6 +23,7 @@ async function mount(overrides: Partial<ComponentProps<typeof ReaderAssistant>> 
     pendingAction: null, insight: null, streamingOutput: null, onInsight: vi.fn(), guide: null,
     onGuide: vi.fn(), vocabulary: [],
     onJump: vi.fn(),
+    paragraphReadingMode: "standard", onParagraphReadingModeChange: vi.fn(),
     ...overrides,
   };
   await act(async () => root!.render(<ReaderAssistant {...props} />));
@@ -66,7 +67,47 @@ describe("chart result streaming", () => {
   });
 });
 
+describe("equation result streaming", () => {
+  it("renders the formula reading surface during streaming and completion", async () => {
+    const props = await mount({
+      selectedBlock: { id: "equation", kind: "equation", pageNumber: 1, order: 0, text: String.raw`L(\theta)=\sum_i \ell_i` },
+      isBusy: true, pendingAction: "equation",
+      streamingOutput: { operation: "equation", text: '{"summary":"**损失函数**衡量误差","variables":["' },
+    });
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain("解读公式");
+    expect(container.querySelector(".selected-context h2")?.textContent).toBe("公式理解");
+    const surface = container.querySelector(".assistant-equation-reading")!;
+    expect(surface).not.toBeNull();
+    expect(surface.getAttribute("aria-busy")).toBe("true");
+    expect(surface.querySelector(".markdown-content strong")?.textContent).toBe("损失函数");
+    const reading = {
+      summary: "**损失函数**衡量误差",
+      variables: ["θ 是模型参数", "y 是标签"],
+      role: "定义训练目标",
+      caveats: ["需要结合上下文"],
+    };
+    await act(async () => root!.render(<ReaderAssistant {...props} isBusy={false} pendingAction={null}
+      streamingOutput={null} equationReading={reading} />));
+    expect(container.querySelector(".assistant-equation-reading")).toBe(surface);
+    expect(surface.getAttribute("aria-busy")).toBe("false");
+    expect(surface.textContent).toContain("定义训练目标");
+    expect(surface.querySelectorAll(".markdown-content strong")).toHaveLength(1);
+  });
+});
+
 describe("reader assistant layout", () => {
+  it("offers a grandma-mode switch without duplicating the PDF selection action", async () => {
+    const props = await mount({
+      selectionText: "Retrieval augments the language model.",
+      researchPanel: <div>聊聊内容</div>,
+    });
+    const toggle = container.querySelector<HTMLInputElement>('[role="switch"][aria-label="祖母模式"]')!;
+    expect(toggle.checked).toBe(false);
+    await act(async () => toggle.click());
+    expect(props.onParagraphReadingModeChange).toHaveBeenCalledWith("grandma");
+    expect(container.querySelector(".assistant-citation-button")).toBeNull();
+  });
+
   it("has no whole-paper overview and displays independent insight and vocabulary loading from quick analysis", async () => {
     await mount({ isBusy: true, pendingParagraphActions: ["translate", "explain", "insight", "vocabulary"] });
     expect(container.querySelector(".assistant-overview")).toBeNull();
@@ -182,7 +223,7 @@ describe("reader assistant layout", () => {
     expect(composer).not.toBeNull();
     expect(container.querySelector(".assistant-scroll")?.contains(composer)).toBe(false);
     const textarea = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="向论文提问"]')!;
-    expect(container.querySelector("label")?.htmlFor).toBe(textarea.id);
+    expect(container.querySelector(`label[for="${textarea.id}"]`)).not.toBeNull();
     expect(container.textContent).not.toContain("按快捷键");
   });
 

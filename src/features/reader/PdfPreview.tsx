@@ -23,6 +23,8 @@ interface Props {
   onSelectText: (block: DocumentBlock, text: string, pageNumber?: number, regionId?: string) => void;
   onAnalyzeParagraph?: (block: DocumentBlock, pageNumber?: number, regionId?: string) => void;
   onAnalyzeChart?: (block: DocumentBlock, pageNumber?: number, regionId?: string) => void;
+  onAnalyzeEquation?: (block: DocumentBlock, pageNumber?: number, regionId?: string) => void;
+  onAddToConversation?: (block: DocumentBlock, pageNumber?: number, regionId?: string) => void;
   focusTarget?: { id: string; requestId: number; pageNumber?: number; regionId?: string; flash?: boolean };
   onVisibleBlock?: (block: DocumentBlock, pageNumber?: number, regionId?: string) => void;
 }
@@ -325,7 +327,15 @@ export function PdfPreview(props: Props) {
               onAnalyzeChart={props.onAnalyzeChart ? (block) => {
                 const canonical = canonicalBlocks.get(block.id)!;
                 props.onAnalyzeChart?.(canonical, ...regionLocation(block, canonical));
-              } : undefined} onReady={onReady} />
+               } : undefined}
+              onAnalyzeEquation={props.onAnalyzeEquation ? (block) => {
+                const canonical = canonicalBlocks.get(block.id)!;
+                props.onAnalyzeEquation?.(canonical, ...regionLocation(block, canonical));
+               } : undefined}
+               onAddToConversation={props.onAddToConversation ? (block) => {
+                 const canonical = canonicalBlocks.get(block.id)!;
+                 props.onAddToConversation?.(canonical, ...regionLocation(block, canonical));
+               } : undefined} onReady={onReady} />
             : <div className="pdf-page-placeholder" aria-label={`论文原文第 ${item.pageNumber} 页`} />}
         </div>)}
       </div>

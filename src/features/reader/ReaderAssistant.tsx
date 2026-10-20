@@ -6,6 +6,7 @@ import type { AcademicTerm } from "../../domain/vocabulary";
 import { VocabularyPanel } from "./VocabularyPanel";
 import { isVisualBlock } from "../../domain/readingFlow";
 import { ChartContext } from "./ChartContext";
+import { EquationContext } from "./EquationContext";
 import { TranslationContent } from "./TranslationContent";
 import { MarkdownContent } from "./MarkdownContent";
 import { previewParagraphInsight } from "../../domain/learning";
@@ -15,6 +16,7 @@ interface ReaderAssistantProps {
   researchPanel?: ReactNode;
   radarPanel?: ReactNode;
   originalId?: string; chartReading: import("../../domain/learning").ChartReading | null; onReadChart: () => void;
+  equationReading: import("../../domain/learning").EquationReading | null; onReadEquation: () => void;
   selectedBlock: DocumentBlock | null; answer: string | null; isBusy: boolean;
   onTranslate: () => void; onExplain: (force?: boolean) => void; explanation: string | null; onAsk: (question: string) => void;
   translation: string | null; selectionText: string; serviceLabel: string; serviceModel: string; aiAvailable: boolean; onOpenSettings: () => void;
@@ -22,6 +24,7 @@ interface ReaderAssistantProps {
   pendingParagraphActions?: ParagraphOperation[];
   paragraphAnalysisRequestId?: number;
   chartAnalysisRequestId?: number;
+  equationAnalysisRequestId?: number;
   paragraphInsightText?: string;
   streamingOutput: { operation: import("../../services/ai").AiRequest["operation"]; text: string } | null;
   onInsight: () => void; guide: { overview: string; terms: Array<{ term: string; translation: string; definition: string }> } | null;
@@ -30,6 +33,9 @@ interface ReaderAssistantProps {
   onSaveTerm?: (term: AcademicTerm) => void;
   isTermSaved?: (term: AcademicTerm) => boolean;
   onJump: (blockId: string) => void;
+  paragraphReadingMode?: "standard" | "grandma";
+  onParagraphReadingModeChange?: (mode: "standard" | "grandma") => void;
+  draftAppend?: { id: number; text: string };
 }
 
 const PARAGRAPH_TABS = [
@@ -45,11 +51,13 @@ export function ReaderAssistant({
   streamingOutput, insight, onInsight, guide, onGuide, vocabulary,
   onJump,
   originalId, chartReading, onReadChart,
+  equationReading, onReadEquation,
   pendingParagraphActions = [], paragraphAnalysisRequestId, paragraphInsightText,
-  chartAnalysisRequestId,
+  chartAnalysisRequestId, equationAnalysisRequestId,
   vocabularyBlock, onSaveTerm, isTermSaved,
   researchPanel,
   radarPanel,
+  paragraphReadingMode = "standard", onParagraphReadingModeChange = () => undefined, draftAppend,
 }: ReaderAssistantProps) {
   const [question, setQuestion] = useState("");
   const [tab, setTab] = useState<"assist" | "vocabulary" | "radar" | "research">("assist");
@@ -72,16 +80,20 @@ export function ReaderAssistant({
   const copyTimer = useRef<ReturnType<typeof setTimeout>>();
   const copyRequest = useRef(0);
   const visual = isVisualBlock(selectedBlock);
+  const equation = selectedBlock?.kind === "equation";
   const translating = pendingAction === "translate" || pendingParagraphActions.includes("translate");
   const explaining = pendingAction === "explain" || pendingParagraphActions.includes("explain");
   const translationText = translation || (streamingOutput?.operation === "translate" ? streamingOutput.text : "");
   const chartStreamingText = streamingOutput?.operation === "chart" ? streamingOutput.text : "";
+  const equationStreamingText = streamingOutput?.operation === "equation" ? streamingOutput.text : "";
   const insightLoading = pendingAction === "insight" || pendingParagraphActions.includes("insight");
   const vocabularyLoading = pendingAction === "vocabulary" || pendingParagraphActions.includes("vocabulary");
   const displayedInsight = paragraphInsightText !== undefined ? previewParagraphInsight(paragraphInsightText)
     : insight ?? (streamingOutput?.operation === "insight" ? previewParagraphInsight(streamingOutput.text) : null);
   const activeResearchPanel = researchPanel && isValidElement(researchPanel) && typeof researchPanel.type !== "string"
-    ? cloneElement(researchPanel as ReactElement<{ active?: boolean }>, { active: tab === "research" })
+    ? cloneElement(researchPanel as ReactElement<{ active?: boolean; draftAppend?: { id: number; text: string } }>, {
+      active: tab === "research", draftAppend,
+    })
     : researchPanel;
   useEffect(() => {
     if (paragraphAnalysisRequestId === undefined) return;
@@ -89,11 +101,22 @@ export function ReaderAssistant({
     setParagraphTab("translate");
   }, [paragraphAnalysisRequestId]);
   useEffect(() => {
+    if (!draftAppend) return;
+    setResearchMounted(true);
+    setTab("research");
+  }, [draftAppend]);
+  useEffect(() => {
     if (pendingAction === "chart") setTab("assist");
+  }, [pendingAction]);
+  useEffect(() => {
+    if (pendingAction === "equation") setTab("assist");
   }, [pendingAction]);
   useEffect(() => {
     if (chartAnalysisRequestId !== undefined) setTab("assist");
   }, [chartAnalysisRequestId]);
+  useEffect(() => {
+    if (equationAnalysisRequestId !== undefined) setTab("assist");
+  }, [equationAnalysisRequestId]);
   useEffect(() => {
     scrollRef.current?.scrollTo?.({ top: 0 });
   }, [selectedBlock?.id, selectionText, tab, paragraphTab]);
@@ -199,7 +222,7 @@ export function ReaderAssistant({
       <button className={`assistant-service ${!aiAvailable ? "is-unavailable" : ""}`} type="button" onClick={onOpenSettings} title={aiAvailable ? `${serviceLabel} · ${serviceModel} · 服务配置` : "配置 AI 服务"} aria-label="助手服务配置"><span className="status-dot" /><span>{serviceLabel}</span><Settings2 size={13} /></button>
     </div>
     <div className="assistant-tabs" role="tablist" aria-label="篇篇阅读视图">
-      <button ref={(element) => { tabsRef.current[tabIndex("assist")] = element; }} id={`${id}-assist-tab`} aria-controls={`${id}-assist-panel`} tabIndex={tab === "assist" ? 0 : -1} className={tab === "assist" ? "is-active" : ""} role="tab" aria-selected={tab === "assist"} onKeyDown={(event) => changeTab(event, tabIndex("assist"))} onClick={() => setTab("assist")} type="button"><BookOpen size={15} />{visual ? "读图表" : "读懂这段"}</button>
+      <button ref={(element) => { tabsRef.current[tabIndex("assist")] = element; }} id={`${id}-assist-tab`} aria-controls={`${id}-assist-panel`} tabIndex={tab === "assist" ? 0 : -1} className={tab === "assist" ? "is-active" : ""} role="tab" aria-selected={tab === "assist"} onKeyDown={(event) => changeTab(event, tabIndex("assist"))} onClick={() => setTab("assist")} type="button"><BookOpen size={15} />{equation ? "解读公式" : visual ? "读图表" : "读懂这段"}</button>
       <button ref={(element) => { tabsRef.current[tabIndex("vocabulary")] = element; }} id={`${id}-vocabulary-tab`} aria-controls={`${id}-vocabulary-panel`} tabIndex={tab === "vocabulary" ? 0 : -1} className={tab === "vocabulary" ? "is-active" : ""} role="tab" aria-selected={tab === "vocabulary"} onKeyDown={(event) => changeTab(event, tabIndex("vocabulary"))} onClick={() => setTab("vocabulary")} type="button">{vocabularyLoading ? <LoaderCircle className="spin" size={15} /> : <Languages size={15} />}学术词汇 <span>{vocabulary.length}</span></button>
       {radarPanel ? <button ref={(element) => { tabsRef.current[tabIndex("radar")] = element; }} id={`${id}-radar-tab`} aria-controls={`${id}-radar-panel`} tabIndex={tab === "radar" ? 0 : -1} className={tab === "radar" ? "is-active" : ""} role="tab" aria-selected={tab === "radar"} onKeyDown={(event) => changeTab(event, tabIndex("radar"))} onClick={openRadar} type="button"><Radar size={15} />相似论文</button> : null}
       {researchPanel ? <button ref={(element) => { tabsRef.current[tabIndex("research")] = element; }} id={`${id}-research-tab`} aria-controls={`${id}-research-panel`} tabIndex={tab === "research" ? 0 : -1} className={tab === "research" ? "is-active" : ""} role="tab" aria-selected={tab === "research"} onKeyDown={(event) => changeTab(event, tabIndex("research"))} onClick={openResearch} type="button"><MessageCircle size={15} />聊聊</button> : null}
@@ -209,8 +232,19 @@ export function ReaderAssistant({
         loading={vocabularyLoading} hasParagraph={(vocabularyBlock ?? selectedBlock)?.kind === "paragraph"}
         onSaveTerm={onSaveTerm} isTermSaved={isTermSaved} /> : <>
         <section className="assistant-section selected-context">
-          <div className="section-heading"><h2>{visual ? selectedBlock?.kind === "table" ? "表格理解" : "图表理解" : selectionText ? "选中句子" : "段落理解"}</h2><span className="context-count">{selectedBlock ? `第 ${selectedBlock.pageNumber} 页` : "未选择"}</span></div>
-          {selectedBlock && visual ? <ChartContext originalId={originalId} block={selectedBlock} reading={chartReading} streamingText={chartStreamingText} busy={isBusy} loading={pendingAction === "chart"} aiAvailable={aiAvailable} onRead={onReadChart} onOpenSettings={onOpenSettings} />
+          <div className="section-heading">
+            <h2>{equation ? "公式理解" : visual ? selectedBlock?.kind === "table" ? "表格理解" : "图表理解" : selectionText ? "选中句子" : "段落理解"}</h2>
+            <div className="paragraph-context-actions">
+              {!visual ? <label className="grandma-mode-toggle" title="只影响接下来生成的段落内容">
+                <span>祖母模式</span>
+                <input type="checkbox" role="switch" aria-label="祖母模式" checked={paragraphReadingMode === "grandma"} onChange={(event) => onParagraphReadingModeChange(event.target.checked ? "grandma" : "standard")} />
+              </label> : null}
+              <span className="context-count">{selectedBlock ? `第 ${selectedBlock.pageNumber} 页` : "未选择"}</span>
+            </div>
+          </div>
+          {selectedBlock && visual ? equation
+            ? <EquationContext block={selectedBlock} reading={equationReading} streamingText={equationStreamingText} busy={isBusy} loading={pendingAction === "equation"} aiAvailable={aiAvailable} onRead={onReadEquation} onOpenSettings={onOpenSettings} />
+            : <ChartContext originalId={originalId} block={selectedBlock} reading={chartReading} streamingText={chartStreamingText} busy={isBusy} loading={pendingAction === "chart"} aiAvailable={aiAvailable} onRead={onReadChart} onOpenSettings={onOpenSettings} />
             : selectedBlock ? <>
           <div className="paragraph-tabs" role="tablist" aria-label="段落分析">
             {PARAGRAPH_TABS.map(({ operation, label, icon: Icon }, index) => <button key={operation} type="button"
