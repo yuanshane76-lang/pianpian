@@ -23,7 +23,7 @@ async function render(element: React.ReactElement) {
 
 function assistantProps(overrides: Partial<ComponentProps<typeof ReaderAssistant>> = {}) {
   return {
-    selectedBlock: null, chartReading: null, onReadChart: vi.fn(),
+    selectedBlock: null, chartReading: null, onReadChart: vi.fn(), equationReading: null, onReadEquation: vi.fn(),
     answer: null, isBusy: false,
     onTranslate: vi.fn(), onExplain: vi.fn(), explanation: null, onAsk: vi.fn(),
     translation: null, selectionText: "", serviceLabel: "DeepSeek", serviceModel: "deepseek-flash",
