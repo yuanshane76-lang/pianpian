@@ -1,4 +1,4 @@
-import { DEFAULT_GROUP_ID, type PaperRecord } from "./library";
+import { DEFAULT_GROUP_ID, normalizeDoi, type PaperRecord } from "./library";
 
 export interface LiteraturePaper {
   candidateId?: string;
@@ -12,14 +12,10 @@ export interface LiteraturePaper {
   source?: string;
 }
 
-function normalizedDoi(value = ""): string {
-  return value.trim().replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, "").toLocaleLowerCase();
-}
-
 function matchesLiteraturePaper(paper: PaperRecord, item: LiteraturePaper, doi: string): boolean {
   const normalizedSource = (value = "") => value.trim().replace(/\/$/, "").toLocaleLowerCase();
   if (item.arxivId && paper.arxivId) return paper.arxivId.toLocaleLowerCase() === item.arxivId.toLocaleLowerCase();
-  if (doi) return normalizedDoi(paper.doi) === doi || normalizedDoi(paper.sourcePath) === doi;
+  if (doi) return normalizeDoi(paper.doi) === doi || normalizeDoi(paper.sourcePath) === doi;
   if (item.landingUrl) return [paper.landingUrl, paper.sourcePath]
     .some((source) => normalizedSource(source) === normalizedSource(item.landingUrl))
     || paper.title.trim().toLocaleLowerCase() === item.title.trim().toLocaleLowerCase();
@@ -33,7 +29,7 @@ export function addLiteraturePaper(papers: PaperRecord[], item: LiteraturePaper,
 } {
   const title = item.title.trim();
   if (!title) throw new Error("论文标题不能为空");
-  const doi = normalizedDoi(item.doi || (/^https?:\/\/(?:dx\.)?doi\.org\//i.test(item.landingUrl || "") ? item.landingUrl : ""));
+  const doi = normalizeDoi(item.doi || (/^https?:\/\/(?:dx\.)?doi\.org\//i.test(item.landingUrl || "") ? item.landingUrl : ""));
   const existing = papers.find((paper) => matchesLiteraturePaper(paper, item, doi));
   if (existing) return { papers, id: existing.id, duplicate: true };
   const id = crypto.randomUUID();
@@ -54,7 +50,7 @@ export function upgradeLiteraturePaperWithPdf(
 ): { papers: PaperRecord[]; id: string; duplicate: boolean } {
   if (!prepared.originalId) throw new Error("已准备的论文缺少原始 PDF 身份");
   const sameDocument = papers.find((paper) => paper.originalId === prepared.originalId);
-  const doi = normalizedDoi(item.doi || (/^https?:\/\/(?:dx\.)?doi\.org\//i.test(item.landingUrl || "") ? item.landingUrl : ""));
+  const doi = normalizeDoi(item.doi || (/^https?:\/\/(?:dx\.)?doi\.org\//i.test(item.landingUrl || "") ? item.landingUrl : ""));
   const references = papers.filter((paper) => !paper.originalId && matchesLiteraturePaper(paper, item, doi));
   if (sameDocument) {
     const updated = {

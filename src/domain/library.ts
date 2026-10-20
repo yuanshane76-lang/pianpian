@@ -40,6 +40,21 @@ export interface PaperMetadataPatch {
   authors: string[];
   year: number | null;
   groupId: string;
+  doi?: string;
+}
+
+export function normalizeDoi(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value
+    .replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, "")
+    .replace(/^doi:\s*/i, "")
+    .trim()
+    .toLocaleLowerCase();
+}
+
+export function isValidDoi(value: string): boolean {
+  const normalized = normalizeDoi(value);
+  return Boolean(normalized) && normalized.length <= 300 && /^10\.\d{4,9}\/\S+$/i.test(normalized);
 }
 
 export function normalizeGroupName(value: string): string {
@@ -90,6 +105,11 @@ export function updatePaperMetadata(
       authors: [...new Set(patch.authors.map((author) => author.trim()).filter(Boolean))],
       year: patch.year,
       groupId: patch.groupId,
+      ...(patch.doi === undefined
+        ? {}
+        : normalizeDoi(patch.doi)
+          ? { doi: normalizeDoi(patch.doi) }
+          : { doi: undefined }),
     };
   });
 }
@@ -110,6 +130,7 @@ export function filterPapers(
     const searchable = [
       paper.title,
       ...paper.authors,
+      paper.doi ?? "",
       paper.year ? String(paper.year) : "",
       groupNames.get(paper.groupId) ?? "",
     ]

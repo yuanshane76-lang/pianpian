@@ -20,7 +20,7 @@ function ignorePackageFile(file) {
   }
   if (parts[0] === "electron") {
     if (parts.length === 1) return false;
-    return parts.length !== 2 || !["main.cjs", "brand.cjs", "preload.cjs", "resource.cjs", "secret-store.cjs", "settings.cjs", "ipc-security.cjs", "ai.cjs", "ai-stream-ipc.cjs", "document-store.cjs", "document-tasks.cjs", "mineru.cjs", "arxiv.cjs", "arxiv-pdf-download.cjs", "literature-imports.cjs", "deepseek-web.cjs", "research-agent-runtime.cjs", "research-agent-tools.cjs", "research-agent-ipc.cjs", "research-citations.cjs", "literature-search.cjs", "pi-agent.cjs", "pi-worker-session.cjs", "pi-agent-worker.cjs", "research-skills.cjs", "research-conversations.cjs", "research-library.cjs", "update-controller.cjs", "update-signature.cjs", "update-backup.cjs", "update-service.cjs", "update-support.cjs"].includes(parts[1]);
+    return parts.length !== 2 || !["main.cjs", "brand.cjs", "preload.cjs", "resource.cjs", "secret-store.cjs", "settings.cjs", "ipc-security.cjs", "ai.cjs", "ai-stream-ipc.cjs", "document-store.cjs", "document-tasks.cjs", "mineru.cjs", "arxiv.cjs", "arxiv-pdf-download.cjs", "literature-imports.cjs", "deepseek-web.cjs", "semantic-scholar.cjs", "external-links.cjs", "research-agent-runtime.cjs", "research-agent-tools.cjs", "research-agent-ipc.cjs", "research-citations.cjs", "literature-search.cjs", "pi-agent.cjs", "pi-worker-session.cjs", "pi-agent-worker.cjs", "research-skills.cjs", "research-conversations.cjs", "research-library.cjs", "update-controller.cjs", "update-signature.cjs", "update-backup.cjs", "update-service.cjs", "update-support.cjs"].includes(parts[1]);
   }
   if (parts[0] === "dist") {
     if (parts.length === 1 || relative === "dist/index.html") return false;

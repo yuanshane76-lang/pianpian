@@ -1208,6 +1208,7 @@ export default function App() {
           researchPanel={getDesktopBridge()?.on ? <ResearchAssistant paper={selectedPaper} library={papers} onAddPaper={handleAddLiterature}
             onJump={(blockId) => setSourceNavigation({ paperId: selectedPaper.id, blockId, requestId: ++sourceNavigationSequence.current })}
             available={availability.available} configurationRevision={serviceSettings.revision} onOpenSettings={() => setSettingsOpen(true)} /> : undefined}
+          library={papers}
           paper={selectedPaper}
           sourceNavigation={sourceNavigation}
           onSourceNavigationConsumed={(requestId) => setSourceNavigation((current) =>

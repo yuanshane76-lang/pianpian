@@ -51,6 +51,23 @@ describe("desktop settings IPC boundary", () => {
     expect(second.revision).not.toContain("test");
   });
 
+  it("keeps the literature search key optional and falls back to the anonymous pool", () => {
+    const withKey = update(DEFAULT, {
+      aiProvider: "deepseek",
+      semanticScholar: { apiKey: "s2-test" },
+    });
+    expect(withKey.semanticScholar.apiKey).toBe("s2-test");
+    expect((summary(withKey) as { semanticScholar: { configured: boolean } }).semanticScholar.configured).toBe(true);
+    expect(JSON.stringify(summary(withKey))).not.toContain("s2-test");
+
+    // A blank draft keeps the saved key; only an explicit clear removes it.
+    const blank = update(withKey, { aiProvider: "deepseek", semanticScholar: { apiKey: "" } });
+    expect(blank.semanticScholar.apiKey).toBe("s2-test");
+    const cleared = update(blank, { aiProvider: "deepseek", semanticScholar: { clearApiKey: true } });
+    expect(cleared.semanticScholar.apiKey).toBe("");
+    expect((summary(cleared) as { semanticScholar: { configured: boolean } }).semanticScholar.configured).toBe(false);
+  });
+
   it("resolves the current draft key and model for a connection test", () => {
     const settings = update(DEFAULT, {
       aiProvider: "deepseek",

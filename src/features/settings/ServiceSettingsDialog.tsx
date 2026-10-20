@@ -26,12 +26,12 @@ export function ServiceSettingsDialog({ onClose, onSaved, required = false, init
   const [loaded, setLoaded] = useState(Boolean(initialSettings));
   const [readError, setReadError] = useState(readFailed);
   const [provider, setProvider] = useState<AiProvider>(initialSettings?.aiProvider ?? "deepseek");
-  const [serviceArea, setServiceArea] = useState<"model" | "parser">(
+  const [serviceArea, setServiceArea] = useState<"model" | "parser" | "search">(
     required && initialSettings && getMissingServiceCredentials(initialSettings)[0] === "parser" ? "parser" : "model",
   );
   const [model, setModel] = useState({ aliyun: initialSettings?.aliyun.model ?? "qwen-plus", deepseek: initialSettings?.deepseek.model ?? "deepseek-flash" });
-  const [keys, setKeys] = useState({ aliyun: "", deepseek: "", mineru: "" });
-  const [clearKeys, setClearKeys] = useState({ aliyun: false, deepseek: false, mineru: false });
+  const [keys, setKeys] = useState({ aliyun: "", deepseek: "", mineru: "", semanticScholar: "" });
+  const [clearKeys, setClearKeys] = useState({ aliyun: false, deepseek: false, mineru: false, semanticScholar: false });
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState("");
@@ -49,7 +49,7 @@ export function ServiceSettingsDialog({ onClose, onSaved, required = false, init
     kind: "area" | "provider",
   ) {
     const refs = kind === "area" ? serviceTabRefs.current : providerRefs.current;
-    const count = refs.length;
+    const count = kind === "area" ? 3 : refs.length;
     let next = index;
     if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (index + 1) % count;
     else if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (index + count - 1) % count;
@@ -58,7 +58,7 @@ export function ServiceSettingsDialog({ onClose, onSaved, required = false, init
     else return;
     event.preventDefault();
     refs[next]?.focus();
-    if (kind === "area") setServiceArea(next === 0 ? "model" : "parser");
+    if (kind === "area") setServiceArea((["model", "parser", "search"] as const)[next] ?? "model");
     else setProvider(next === 0 ? "aliyun" : "deepseek");
   }
 
@@ -137,12 +137,13 @@ export function ServiceSettingsDialog({ onClose, onSaved, required = false, init
       aliyun: { apiKey: keys.aliyun, model: model.aliyun, baseUrl: current.aliyun.baseUrl, clearApiKey: clearKeys.aliyun },
       deepseek: { apiKey: keys.deepseek, model: model.deepseek, baseUrl: current.deepseek.baseUrl, clearApiKey: clearKeys.deepseek },
       mineru: { apiKey: keys.mineru, endpoint: current.mineru.endpoint, clearApiKey: clearKeys.mineru },
+      semanticScholar: { apiKey: keys.semanticScholar, clearApiKey: clearKeys.semanticScholar },
     };
     try {
       const settings = await desktop.invoke<PublicServiceSettings>("zhiyan:settings:save", input);
       setCurrent(settings);
-      setKeys({ aliyun: "", deepseek: "", mineru: "" });
-      setClearKeys({ aliyun: false, deepseek: false, mineru: false });
+      setKeys({ aliyun: "", deepseek: "", mineru: "", semanticScholar: "" });
+      setClearKeys({ aliyun: false, deepseek: false, mineru: false, semanticScholar: false });
       const remaining = getMissingServiceCredentials(settings);
       if (required && remaining.length) {
         setServiceArea(remaining[0]);
@@ -178,7 +179,7 @@ export function ServiceSettingsDialog({ onClose, onSaved, required = false, init
     }
   }
 
-  function keyField(name: "aliyun" | "deepseek" | "mineru", label: string) {
+  function keyField(name: "aliyun" | "deepseek" | "mineru" | "semanticScholar", label: string) {
     const hasDraftKey = Boolean(keys[name].trim());
     const keyStatus = clearKeys[name]
       ? "待删除"
@@ -259,6 +260,18 @@ export function ServiceSettingsDialog({ onClose, onSaved, required = false, init
             >
               <strong>论文解析</strong><span>MinerU 负责段落、图表和坐标</span>
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={serviceArea === "search"}
+              aria-controls="literature-search-panel"
+              ref={(element) => { serviceTabRefs.current[2] = element; }}
+              className={serviceArea === "search" ? "is-selected" : ""}
+              onClick={() => setServiceArea("search")}
+              onKeyDown={(event) => moveSelection(event, 2, "area")}
+            >
+              <strong>文献检索</strong><span>查找相似论文的公开元数据</span>
+            </button>
           </div>
           {serviceArea === "model" ? (
             <div id="model-service-panel" className="settings-service-panel" role="tabpanel" aria-label="模型服务配置">
@@ -307,7 +320,7 @@ export function ServiceSettingsDialog({ onClose, onSaved, required = false, init
                 </>
               ) : null}
             </div>
-          ) : (
+          ) : serviceArea === "parser" ? (
             <div id="paper-parser-panel" className="settings-service-panel" role="tabpanel" aria-label="论文解析服务配置">
               <div className="settings-panel-heading">
                 <div><h3>MinerU 论文解析</h3><span>独立于模型服务，用于准备可定位的论文阅读面</span></div>
@@ -327,6 +340,24 @@ export function ServiceSettingsDialog({ onClose, onSaved, required = false, init
                 <a href="https://mineru.net/apiManage/docs" target="_blank" rel="noreferrer">查看官方 API 文档 <ExternalLink size={13} /></a>
               </div>
               <button type="button" className="secondary-button compact" disabled={busy || (!current.mineru.configured && !keys.mineru.trim()) || clearKeys.mineru} onClick={() => testConnection("mineru")}>检查 MinerU 配置</button>
+            </div>
+          ) : (
+            <div id="literature-search-panel" className="settings-service-panel" role="tabpanel" aria-label="文献检索服务配置">
+              <div className="settings-panel-heading">
+                <div><h3>Semantic Scholar 文献检索</h3><span>为「相似论文」提供公开元数据候选</span></div>
+                <span className="settings-panel-status">{current.semanticScholar.configured ? "已配置" : "公共池"}</span>
+              </div>
+              <p className="settings-description">无需付费，留空即可使用公开共享额度池，高峰期可能被限流。填写免费申请的 API Key 可使用专属免费额度。该服务只读取公开论文元数据，不下载全文。</p>
+              {keyField("semanticScholar", "Semantic Scholar API Key")}
+              <div className="mineru-guide">
+                <strong>如何获取免费 API Key</strong>
+                <ol>
+                  <li>打开 Semantic Scholar 官网并注册或登录账号。</li>
+                  <li>在 API 页面提交用途说明，申请免费的 API Key。</li>
+                  <li>回到这里粘贴并点击“保存配置”；留空表示继续使用公共池。</li>
+                </ol>
+                <a href="https://www.semanticscholar.org/product/api" target="_blank" rel="noreferrer">申请免费 API Key <ExternalLink size={13} /></a>
+              </div>
             </div>
           )}
           </> : null}

@@ -7,6 +7,7 @@ const DEFAULT = {
   aliyun: { apiKey: "", model: "qwen-plus", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
   deepseek: { apiKey: "", model: "deepseek-flash", baseUrl: "https://api.deepseek.com" },
   mineru: { apiKey: "", endpoint: "https://mineru.net" },
+  semanticScholar: { apiKey: "" },
 };
 
 function normalize(value) {
@@ -18,6 +19,7 @@ function normalize(value) {
     aliyun: { ...DEFAULT.aliyun, ...source.aliyun },
     deepseek: { ...DEFAULT.deepseek, ...source.deepseek },
     mineru: { ...DEFAULT.mineru, ...source.mineru },
+    semanticScholar: { ...DEFAULT.semanticScholar, ...source.semanticScholar },
   };
 }
 
@@ -37,6 +39,7 @@ function summary(value) {
     aliyun: { configured: Boolean(settings.aliyun.apiKey), model: settings.aliyun.model, baseUrl: DEFAULT.aliyun.baseUrl },
     deepseek: { configured: Boolean(settings.deepseek.apiKey), model: settings.deepseek.model, baseUrl: DEFAULT.deepseek.baseUrl },
     mineru: { configured: Boolean(settings.mineru.apiKey), endpoint: DEFAULT.mineru.endpoint },
+    semanticScholar: { configured: Boolean(settings.semanticScholar.apiKey), endpoint: "https://api.semanticscholar.org" },
   };
 }
 
@@ -47,7 +50,7 @@ function update(current, input) {
   const settings = normalize(current);
   settings.revision = randomUUID();
   settings.aiProvider = input.aiProvider;
-  for (const name of ["aliyun", "deepseek", "mineru"]) {
+  for (const name of ["aliyun", "deepseek", "mineru", "semanticScholar"]) {
     const edit = input[name];
     if (!edit || typeof edit !== "object") continue;
     if (edit.clearApiKey === true) settings[name].apiKey = "";
@@ -55,12 +58,11 @@ function update(current, input) {
       if (edit.apiKey.length > 4096) throw new Error("密钥长度异常");
       settings[name].apiKey = edit.apiKey.trim();
     }
-    if (name !== "mineru" && typeof edit.model === "string") {
-      const model = edit.model.trim();
-      settings[name].model = validateModel(model);
+    if (name === "aliyun" || name === "deepseek") {
+      if (typeof edit.model === "string") settings[name].model = validateModel(edit.model.trim());
+      settings[name].baseUrl = DEFAULT[name].baseUrl;
     }
     if (name === "mineru") settings[name].endpoint = DEFAULT.mineru.endpoint;
-    else settings[name].baseUrl = DEFAULT[name].baseUrl;
   }
   return settings;
 }

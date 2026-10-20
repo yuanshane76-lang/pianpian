@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld("zhiyan", {
       "zhiyan:literature:finish-import",
       "zhiyan:mineru:start",
       "zhiyan:mineru:status",
+      "zhiyan:radar:related",
       "zhiyan:agent:start",
       "zhiyan:agent:skills",
       "zhiyan:agent:conversations:list",

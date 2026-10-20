@@ -1,6 +1,6 @@
 import { Check, ChevronDown, FolderPlus, Pencil, Save, X } from "lucide-react";
 import { useRef, useState } from "react";
-import type { LibraryGroup, PaperMetadataPatch, PaperRecord } from "../../domain/library";
+import { isValidDoi, normalizeDoi, type LibraryGroup, type PaperMetadataPatch, type PaperRecord } from "../../domain/library";
 
 interface PaperEditDialogProps {
   paper: PaperRecord;
@@ -18,6 +18,7 @@ export function PaperEditDialog({ paper, groups, onClose, onCreateGroup, onSave 
   const [title, setTitle] = useState(paper.title);
   const [authors, setAuthors] = useState(paper.authors.join(", "));
   const [year, setYear] = useState(paper.year ? String(paper.year) : "");
+  const [doi, setDoi] = useState(paper.doi ?? "");
   const [groupId, setGroupId] = useState(paper.groupId);
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
@@ -37,11 +38,17 @@ export function PaperEditDialog({ paper, groups, onClose, onCreateGroup, onSave 
       setError("年份请填写 0 到 3000 之间的整数。");
       return;
     }
+    const normalizedDoi = normalizeDoi(doi);
+    if (normalizedDoi && !isValidDoi(normalizedDoi)) {
+      setError("DOI 格式不正确，例如 10.1234/example。");
+      return;
+    }
     onSave({
       title: normalizedTitle,
       authors: splitValues(authors),
       year: normalizedYear,
       groupId,
+      doi: normalizedDoi,
     });
     onClose();
   }
@@ -100,6 +107,7 @@ export function PaperEditDialog({ paper, groups, onClose, onCreateGroup, onSave 
               {groupError ? <p id="paper-group-error" className="settings-error" role="alert">{groupError}</p> : null}
             </div>
           </div>
+          <label className="settings-field" htmlFor="paper-doi">DOI <span>可选，用于查找相似论文</span><input id="paper-doi" placeholder="例如 10.1234/example" value={doi} onChange={(event) => { setDoi(event.target.value); setError(""); }} /></label>
           {error ? <p className="settings-error" role="alert">{error}</p> : null}
         </div>
         <footer className="settings-footer">
