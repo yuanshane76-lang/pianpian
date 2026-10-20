@@ -1,7 +1,8 @@
 import type { DocumentBlock } from "./documentBlocks";
 
 export const DEFAULT_GROUP_ID = "group-inbox";
-export const DEFAULT_GROUP_NAME = "待整理";
+export const DEFAULT_GROUP_NAME = "默认分组";
+export const LEGACY_DEFAULT_GROUP_NAME = "待整理";
 
 export interface LibraryGroup {
   id: string;
@@ -46,7 +47,7 @@ export function normalizeGroupName(value: string): string {
 }
 
 export function groupIdForName(name: string): string {
-  return name === DEFAULT_GROUP_NAME ? DEFAULT_GROUP_ID : `group-${name}`;
+  return name === DEFAULT_GROUP_NAME || name === LEGACY_DEFAULT_GROUP_NAME ? DEFAULT_GROUP_ID : `group-${name}`;
 }
 
 export function createLibraryGroup(
@@ -54,12 +55,26 @@ export function createLibraryGroup(
   name: string,
   createdAt = new Date().toISOString(),
 ): { group: LibraryGroup; groups: LibraryGroup[] } {
-  const normalizedName = normalizeGroupName(name);
+  const requestedName = normalizeGroupName(name);
+  const normalizedName = requestedName === LEGACY_DEFAULT_GROUP_NAME ? DEFAULT_GROUP_NAME : requestedName;
   if (!normalizedName) throw new Error("分组名称不能为空");
   const existing = groups.find((group) => group.name === normalizedName);
   if (existing) return { group: existing, groups };
   const group = { id: groupIdForName(normalizedName), name: normalizedName, createdAt };
   return { group, groups: [...groups, group] };
+}
+
+export function deleteLibraryGroup(
+  groups: LibraryGroup[],
+  papers: PaperRecord[],
+  groupId: string,
+): { groups: LibraryGroup[]; papers: PaperRecord[] } {
+  if (groupId === DEFAULT_GROUP_ID) throw new Error("默认分组不能删除");
+  if (!groups.some((group) => group.id === groupId)) throw new Error("分组不存在");
+  return {
+    groups: groups.filter((group) => group.id !== groupId),
+    papers: papers.map((paper) => paper.groupId === groupId ? { ...paper, groupId: DEFAULT_GROUP_ID } : paper),
+  };
 }
 
 export function updatePaperMetadata(

@@ -18,6 +18,8 @@ import {
 } from "../domain/analysis";
 import {
   createLibraryGroup,
+  deleteLibraryGroup,
+  DEFAULT_GROUP_ID,
   filterPapers,
   removePaper,
   sortPapers,
@@ -28,7 +30,7 @@ import {
 } from "../domain/library";
 import type { AiRequest } from "../services/ai";
 import { loadAnalysisCache, saveAnalysisCache } from "../services/analysisCache";
-import { loadGroups, loadPapers, preparePdfFile, saveGroups, savePapers } from "../services/library";
+import { loadGroups, loadPapers, preparePdfFile, saveGroups, saveLibraryGroupsAndPapers, savePapers } from "../services/library";
 import { deleteOriginalPdf } from "../services/originalPdf";
 import { getAnalysisAvailability, getTranslationTarget, isVisualBlock } from "../domain/readingFlow";
 import { canOpenPaper, hasCompletePageBounds, type PaperPipelineState } from "../domain/pipeline";
@@ -51,7 +53,7 @@ import { UpdateCenter } from "../features/settings/UpdateCenter";
 type AppView = "library" | "reader" | "research";
 const WORKSPACE_CONTEXT: PaperRecord = {
   id: "research-workspace", title: "研究工作区", authors: [], year: null, sourcePath: "",
-  importedAt: "", groupId: "group-inbox", favorite: false, blocks: 0, blockData: [],
+  importedAt: "", groupId: DEFAULT_GROUP_ID, favorite: false, blocks: 0, blockData: [],
 };
 const PARAGRAPH_OPERATIONS: ParagraphOperation[] = ["translate", "explain", "insight", "vocabulary"];
 const PARAGRAPH_LABELS: Record<ParagraphOperation, string> = {
@@ -771,6 +773,17 @@ export default function App() {
     return result.group;
   }
 
+  async function handleDeleteGroup(groupId: string): Promise<void> {
+    const result = deleteLibraryGroup(groups, papersRef.current, groupId);
+    if (!saveLibraryGroupsAndPapers(result.groups, result.papers)) {
+      throw new Error("分组删除失败，请检查本机存储空间后重试。");
+    }
+    papersRef.current = result.papers;
+    setPapers(result.papers);
+    setGroups(result.groups);
+    setFilter((current) => current === `group:${groupId}` ? `group:${DEFAULT_GROUP_ID}` : current);
+  }
+
   async function handleDeletePaper(paperId: string): Promise<void> {
     const paper = papersRef.current.find((item) => item.id === paperId);
     if (!paper) return;
@@ -1278,6 +1291,7 @@ export default function App() {
         onToggleFavorite={handleToggleFavorite}
         onUpdateMetadata={handleUpdateMetadata}
         onCreateGroup={handleCreateGroup}
+        onDeleteGroup={handleDeleteGroup}
         onDelete={handleDeletePaper}
         onOpenSettings={() => setSettingsOpen(true)}
         pipelineStates={pipelineStates}

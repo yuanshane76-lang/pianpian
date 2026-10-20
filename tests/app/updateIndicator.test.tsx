@@ -23,6 +23,7 @@ describe("library update indicator", () => {
       groups={[]}
       onFilterChange={() => {}}
       onCreateGroup={() => {}}
+      onDeleteGroup={() => {}}
       onOpenSettings={() => {}}
     />));
 

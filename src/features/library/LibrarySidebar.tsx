@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Clock3, FolderKanban, Heart, LibraryBig, Plus, RefreshCw, Settings2 } from "lucide-react";
+import { Clock3, FolderKanban, Heart, LibraryBig, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import { brand, Pianpian } from "../../brand/Pianpian";
 import { ThemeToggle } from "../settings/ThemeToggle";
-import type { LibraryGroup } from "../../domain/library";
+import { DEFAULT_GROUP_ID, type LibraryGroup } from "../../domain/library";
 import { getDesktopBridge } from "../../platform/electron";
 
 interface LibrarySidebarProps {
@@ -10,10 +10,11 @@ interface LibrarySidebarProps {
   groups: LibraryGroup[];
   onFilterChange: (filter: string) => void;
   onCreateGroup: () => void;
+  onDeleteGroup: (group: LibraryGroup) => void;
   onOpenSettings: () => void;
 }
 
-export function LibrarySidebar({ activeFilter, groups, onFilterChange, onCreateGroup, onOpenSettings }: LibrarySidebarProps) {
+export function LibrarySidebar({ activeFilter, groups, onFilterChange, onCreateGroup, onDeleteGroup, onOpenSettings }: LibrarySidebarProps) {
   const [updateAvailable, setUpdateAvailable] = useState(false);
   useEffect(() => {
     const bridge = getDesktopBridge();
@@ -69,16 +70,28 @@ export function LibrarySidebar({ activeFilter, groups, onFilterChange, onCreateG
         <div className="group-list">
           {groups.length ? (
             groups.map((group) => (
-              <button
-                className={`group-link ${activeFilter === `group:${group.id}` ? "is-active" : ""}`}
-                key={group.id}
-                aria-label={`分组：${group.name}`}
-                onClick={() => onFilterChange(`group:${group.id}`)}
-                type="button"
-              >
-                <span className="group-dot" />
-                <span>{group.name}</span>
-              </button>
+              <div className="group-list-item" key={group.id}>
+                <button
+                  className={`group-link ${activeFilter === `group:${group.id}` ? "is-active" : ""}`}
+                  aria-label={`分组：${group.name}`}
+                  onClick={() => onFilterChange(`group:${group.id}`)}
+                  type="button"
+                >
+                  <span className="group-dot" />
+                  <span>{group.name}</span>
+                </button>
+                {group.id !== DEFAULT_GROUP_ID ? (
+                  <button
+                    className="icon-button group-delete-button"
+                    type="button"
+                    aria-label={`删除分组：${group.name}`}
+                    title={`删除分组“${group.name}”`}
+                    onClick={() => onDeleteGroup(group)}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                ) : null}
+              </div>
             ))
           ) : (
             <span className="empty-group-list">暂无分组</span>

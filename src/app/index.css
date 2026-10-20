@@ -270,6 +270,13 @@ textarea:focus-visible {
   gap: 5px;
 }
 
+.group-list-item {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 2px;
+}
+
 .library-sidebar > .brand-lockup,
 .sidebar-nav,
 .sidebar-footer {
@@ -329,7 +336,30 @@ textarea:focus-visible {
 
 .group-link {
   min-height: 34px;
+  min-width: 0;
+  flex: 1;
   font-size: 13px;
+}
+
+.group-link > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-delete-button {
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  color: var(--muted);
+  opacity: 0.68;
+}
+
+.group-delete-button:hover,
+.group-delete-button:focus-visible {
+  color: var(--danger-ink-soft);
+  background: var(--danger-bg-soft);
+  opacity: 1;
 }
 
 .empty-group-list {

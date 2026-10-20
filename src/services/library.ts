@@ -3,6 +3,7 @@ import {
   DEFAULT_GROUP_ID,
   DEFAULT_GROUP_NAME,
   groupIdForName,
+  LEGACY_DEFAULT_GROUP_NAME,
   normalizeGroupName,
   sortPapers,
   type LibraryGroup,
@@ -77,8 +78,13 @@ function normalizeGroups(groups: LibraryGroup[], legacyNames: string[] = []): Li
     seen.add(name);
     normalized.push({ id: group.id || groupIdForName(name), name, createdAt: group.createdAt || "" });
   };
-  add({ id: DEFAULT_GROUP_ID, name: DEFAULT_GROUP_NAME, createdAt: "" });
-  for (const group of groups) add(group);
+  const storedDefault = groups.find((group) => group.id === DEFAULT_GROUP_ID)
+    ?? groups.find((group) => group.name === DEFAULT_GROUP_NAME || group.name === LEGACY_DEFAULT_GROUP_NAME);
+  add({ id: DEFAULT_GROUP_ID, name: DEFAULT_GROUP_NAME, createdAt: storedDefault?.createdAt || "" });
+  for (const group of groups) {
+    if (group.id === DEFAULT_GROUP_ID || group.name === DEFAULT_GROUP_NAME || group.name === LEGACY_DEFAULT_GROUP_NAME) continue;
+    add(group);
+  }
   for (const name of legacyNames) add({ id: groupIdForName(name), name, createdAt: "" });
   return normalized;
 }
@@ -100,10 +106,46 @@ export function saveGroups(groups: LibraryGroup[]): boolean {
   const storage = getStorage();
   if (!storage) return false;
   try {
-    storage.setItem(GROUPS_KEY, JSON.stringify(normalizeGroups(groups)));
+    const papers = parseStoredPapers(storage.getItem(PAPERS_KEY));
+    const normalized = normalizeGroups(groups, getLegacyGroupNames(papers));
+    if (storage.getItem(GROUPS_KEY) !== JSON.stringify(normalized)) {
+      storage.setItem(GROUPS_KEY, JSON.stringify(normalized));
+    }
     return true;
   } catch (error) {
     console.warn("无法持久化分组，当前会话仍可继续使用。", error);
+    return false;
+  }
+}
+
+export function saveLibraryGroupsAndPapers(groups: LibraryGroup[], papers: PaperRecord[]): boolean {
+  const storage = getStorage();
+  if (!storage) return false;
+  let previousGroups: string | null = null;
+  let previousPapers: string | null = null;
+  let hasSnapshots = false;
+  try {
+    previousGroups = storage.getItem(GROUPS_KEY);
+    previousPapers = storage.getItem(PAPERS_KEY);
+    hasSnapshots = true;
+    storage.setItem(PAPERS_KEY, JSON.stringify(sortPapers(dedupePapers(papers))));
+    const normalizedGroups = normalizeGroups(groups);
+    if (previousGroups !== JSON.stringify(normalizedGroups)) {
+      storage.setItem(GROUPS_KEY, JSON.stringify(normalizedGroups));
+    }
+    return true;
+  } catch (error) {
+    if (hasSnapshots) {
+      try {
+        if (previousPapers === null) storage.removeItem(PAPERS_KEY);
+        else storage.setItem(PAPERS_KEY, previousPapers);
+        if (previousGroups === null) storage.removeItem(GROUPS_KEY);
+        else storage.setItem(GROUPS_KEY, previousGroups);
+      } catch {
+        // Best-effort rollback preserves the original records if either write fails.
+      }
+    }
+    console.warn("无法同时持久化分组和论文归属，未应用删除操作。", error);
     return false;
   }
 }

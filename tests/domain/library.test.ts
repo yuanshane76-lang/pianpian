@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   createLibraryGroup,
+  deleteLibraryGroup,
+  DEFAULT_GROUP_ID,
+  DEFAULT_GROUP_NAME,
   filterPapers,
+  groupIdForName,
   type PaperRecord,
 } from "../../src/domain/library";
 
@@ -51,6 +55,11 @@ describe("paper library filtering", () => {
 });
 
 describe("paper groups", () => {
+  it("uses 默认分组 as the default group name", () => {
+    expect(DEFAULT_GROUP_NAME).toBe("默认分组");
+    expect(groupIdForName("待整理")).toBe(DEFAULT_GROUP_ID);
+  });
+
   it("creates a normalized group and reuses an existing name", () => {
     const first = createLibraryGroup([], "  实验分析  ", "2026-10-16T00:00:00.000Z");
     expect(first.group).toMatchObject({
@@ -67,4 +76,41 @@ describe("paper groups", () => {
   it("rejects an empty group name", () => {
     expect(() => createLibraryGroup([], " \n ")).toThrow("分组名称不能为空");
   });
+
+  it("moves papers to the default group when deleting a custom group", () => {
+    const groups = [
+      { id: DEFAULT_GROUP_ID, name: DEFAULT_GROUP_NAME, createdAt: "" },
+      { id: "group-method", name: "研究方法", createdAt: "2026-10-16" },
+    ];
+    const papers = [
+      { ...papersFixture("paper-a"), groupId: "group-method" },
+      { ...papersFixture("paper-b"), groupId: DEFAULT_GROUP_ID },
+    ];
+
+    const result = deleteLibraryGroup(groups, papers, "group-method");
+
+    expect(result.groups).toEqual([groups[0]]);
+    expect(result.papers.map((paper) => [paper.id, paper.groupId])).toEqual([
+      ["paper-a", DEFAULT_GROUP_ID],
+      ["paper-b", DEFAULT_GROUP_ID],
+    ]);
+  });
+
+  it("does not allow the default group to be deleted", () => {
+    expect(() => deleteLibraryGroup([], [], DEFAULT_GROUP_ID)).toThrow("默认分组不能删除");
+  });
 });
+
+function papersFixture(id: string): PaperRecord {
+  return {
+    id,
+    title: id,
+    authors: [],
+    year: null,
+    sourcePath: `local://${id}`,
+    importedAt: "2026-09-29T08:00:00.000Z",
+    groupId: DEFAULT_GROUP_ID,
+    favorite: false,
+    blocks: 0,
+  };
+}

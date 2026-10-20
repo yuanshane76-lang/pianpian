@@ -94,6 +94,13 @@ if (process.versions.electron) {
       page.setDefaultTimeout(15000);
       page.on("pageerror", (error) => report.errors.push(error.message));
       await page.waitForSelector(".workspace-shell");
+      await page.evaluate(() => window.zhiyan.invoke("zhiyan:settings:save", {
+        aiProvider: "deepseek",
+        deepseek: { apiKey: "synthetic-model" },
+        mineru: { apiKey: "synthetic-parser" },
+      }));
+      await page.reload();
+      await page.waitForSelector(".workspace-shell");
       report.startup = await electron.evaluate(({ BrowserWindow, screen }) => ({
         bounds: BrowserWindow.getAllWindows()[0].getBounds(),
         workArea: screen.getDisplayMatching(BrowserWindow.getAllWindows()[0].getBounds()).workArea,
@@ -127,8 +134,21 @@ if (process.versions.electron) {
       await assertIndependentScroll(".detail-content");
       await seed(fixtures(40, true));
       await assertIndependentScroll(".paper-list");
-      await assertIndependentScroll(".tag-list");
-      await assertControls("04-many-papers-and-tags");
+      await assertIndependentScroll(".group-list");
+      await assertControls("04-many-papers-and-groups");
+      await page.getByRole("button", { name: "删除分组：研究标签 1", exact: true }).click();
+      await page.getByRole("dialog", { name: "删除分组" }).waitFor();
+      await page.getByRole("button", { name: "取消删除分组", exact: true }).click();
+      await page.getByRole("button", { name: "删除分组：研究标签 1", exact: true }).click();
+      await page.getByRole("button", { name: "确认删除分组", exact: true }).click();
+      await page.getByRole("button", { name: "分组：默认分组", exact: true }).click();
+      await page.locator(".paper-detail-panel").getByRole("heading", { name: "FINDEEPRESEARCH: Evaluating Deep Research Agents in Rigorous Financial Analysis", exact: true }).waitFor();
+      assert.equal(await page.getByRole("button", { name: "删除分组：研究标签 1", exact: true }).count(), 0);
+      const movedPaperGroup = await page.evaluate(() => {
+        const papers = JSON.parse(localStorage.getItem("zhiyan-workbench.papers.v1") || "[]");
+        return papers.find((paper) => paper.id === "viewport-reference-0")?.groupId;
+      });
+      assert.equal(movedPaperGroup, "group-inbox");
       await page.getByRole("button", { name: "服务配置", exact: true }).click();
       await page.getByRole("button", { name: "关闭配置", exact: true }).click();
 
