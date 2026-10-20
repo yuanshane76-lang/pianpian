@@ -1,4 +1,4 @@
-import { act } from "react";
+import { act, StrictMode, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ResearchAssistant } from "../../src/features/reader/ResearchAssistant";
@@ -12,7 +12,7 @@ const paper = { id: "p1", title: "Paper", authors: [], year: 2024, sourcePath: "
     { id: "b1", pageNumber: 1, order: 0, kind: "paragraph" as const, text: "Evidence." },
   ] };
 
-async function mount(available = true, currentPaper = paper, skills = false, draftAppend?: { id: number; text: string }) {
+async function mount(available = true, currentPaper = paper, skills = false, draftAppend?: { id: number; text: string }, strict = false) {
   const invoke = vi.fn(async (channel: string, input?: any): Promise<any> => {
     if (channel === "zhiyan:agent:start") return { sessionId: "s1" };
     if (channel === "zhiyan:agent:skills") return skills ? [{ name: "reading", title: "论文精读", prompt: "请精读当前论文" }] : [];
@@ -24,13 +24,14 @@ async function mount(available = true, currentPaper = paper, skills = false, dra
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
+  const render = (node: ReactNode) => strict ? <StrictMode>{node}</StrictMode> : node;
   const onAddPaper = vi.fn(async () => ({ persisted: true as const, id: "added", duplicate: false, kind: "metadata" as const }));
   const onJump = vi.fn();
-  await act(async () => root.render(<ResearchAssistant paper={currentPaper} library={[currentPaper]} onAddPaper={onAddPaper} onJump={onJump} available={available} onOpenSettings={vi.fn()} draftAppend={draftAppend} />));
+  await act(async () => root.render(render(<ResearchAssistant paper={currentPaper} library={[currentPaper]} onAddPaper={onAddPaper} onJump={onJump} available={available} onOpenSettings={vi.fn()} draftAppend={draftAppend} />)));
   return { invoke, onAddPaper, onJump, setActive: async (active: boolean) => {
-    await act(async () => root.render(<ResearchAssistant paper={currentPaper} library={[currentPaper]} onAddPaper={onAddPaper} onJump={onJump} available={available} active={active} onOpenSettings={vi.fn()} draftAppend={draftAppend} />));
+    await act(async () => root.render(render(<ResearchAssistant paper={currentPaper} library={[currentPaper]} onAddPaper={onAddPaper} onJump={onJump} available={available} active={active} onOpenSettings={vi.fn()} draftAppend={draftAppend} />)));
   }, rerender: async (id: string) => {
-    await act(async () => root.render(<ResearchAssistant paper={{ ...currentPaper, id }} library={[currentPaper]} onAddPaper={onAddPaper} onJump={onJump} available={available} onOpenSettings={vi.fn()} draftAppend={draftAppend} />));
+    await act(async () => root.render(render(<ResearchAssistant paper={{ ...currentPaper, id }} library={[currentPaper]} onAddPaper={onAddPaper} onJump={onJump} available={available} onOpenSettings={vi.fn()} draftAppend={draftAppend} />)));
   } };
 }
 
@@ -45,6 +46,12 @@ describe("research citation drafting", () => {
   it("keeps an initial citation when the conversation panel first mounts", async () => {
     const append = "《Paper》第 1 页\n> Evidence.";
     await mount(true, paper, false, { id: 1, text: append });
+    expect(container.querySelector<HTMLTextAreaElement>("textarea")?.value).toContain(append);
+  });
+
+  it("keeps an initial citation when Strict Mode replays mount effects", async () => {
+    const append = "《Paper》第 1 页\n> Evidence.";
+    await mount(true, paper, false, { id: 1, text: append }, true);
     expect(container.querySelector<HTMLTextAreaElement>("textarea")?.value).toContain(append);
   });
 

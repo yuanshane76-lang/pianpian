@@ -267,7 +267,7 @@ export function ResearchAssistant({ paper, library, scope = "paper", onAddPaper,
     setTimeline([]);
     setBusy(false);
     setReady(false);
-    setQuestion("");
+    if (!draftAppend) setQuestion("");
     setError(null);
     setSavedNotice(null);
     setApprovalByToolId({});
