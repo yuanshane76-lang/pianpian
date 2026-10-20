@@ -78,7 +78,7 @@ if (process.versions.electron) {
       await page.waitForSelector(".workspace-shell");
       await page.evaluate(() => window.zhiyan.invoke("zhiyan:settings:save", { aiProvider: "deepseek", deepseek: { apiKey: "synthetic-model" }, mineru: { apiKey: "synthetic-parser" } }));
       const fixture = await electron.evaluate(() => globalThis.seedUpdateFixture());
-      const groups = [{ id: "group-inbox", name: "待整理", createdAt: "" }];
+      const groups = [{ id: "group-inbox", name: "默认分组", createdAt: "" }];
       const paper = {
         id: "update-e2e-paper", title: "更新验收合成论文", authors: ["测试作者"], year: 2026,
         sourcePath: `local://${fixture.id}/original.pdf`, importedAt: new Date().toISOString(), groupId: "group-inbox",

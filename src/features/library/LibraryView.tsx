@@ -1,7 +1,7 @@
 import { AlertTriangle, ArrowUpRight, BookMarked, FilePlus2, FolderOpen, Pencil, Sparkles, Trash2 } from "lucide-react";
 import { Pianpian } from "../../brand/Pianpian";
 import { useState } from "react";
-import type { LibraryGroup, PaperMetadataPatch, PaperRecord } from "../../domain/library";
+import { DEFAULT_GROUP_NAME, type LibraryGroup, type PaperMetadataPatch, type PaperRecord } from "../../domain/library";
 import { canOpenPaper, getLibraryPreparation, getPaperPipelineState, type PaperPipelineState } from "../../domain/pipeline";
 import { PaperPreparation } from "./PaperPreparation";
 import { LibrarySidebar } from "./LibrarySidebar";
@@ -29,6 +29,7 @@ interface LibraryViewProps {
   onToggleFavorite: (paperId: string) => void;
   onUpdateMetadata: (paperId: string, patch: PaperMetadataPatch) => void;
   onCreateGroup: (name: string) => LibraryGroup;
+  onDeleteGroup: (groupId: string) => Promise<void>;
   onDelete: (paperId: string) => Promise<void>;
   onOpenSettings: () => void;
   pipelineStates: Record<string, PaperPipelineState>;
@@ -53,6 +54,7 @@ export function LibraryView({
   onToggleFavorite,
   onUpdateMetadata,
   onCreateGroup,
+  onDeleteGroup,
   onDelete,
   onOpenSettings,
   pipelineStates,
@@ -63,6 +65,9 @@ export function LibraryView({
 }: LibraryViewProps) {
   const [editing, setEditing] = useState(false);
   const [creatingGroup, setCreatingGroup] = useState(false);
+  const [groupToDelete, setGroupToDelete] = useState<LibraryGroup | null>(null);
+  const [groupDeleteError, setGroupDeleteError] = useState("");
+  const [deletingGroup, setDeletingGroup] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -81,6 +86,20 @@ export function LibraryView({
     }
   }
 
+  async function confirmDeleteGroup() {
+    if (!groupToDelete) return;
+    setDeletingGroup(true);
+    setGroupDeleteError("");
+    try {
+      await onDeleteGroup(groupToDelete.id);
+      setGroupToDelete(null);
+    } catch (error) {
+      setGroupDeleteError(error instanceof Error ? error.message : "删除分组失败，请稍后重试。");
+    } finally {
+      setDeletingGroup(false);
+    }
+  }
+
   const selectedPipeline = selectedPaper
     ? getPaperPipelineState(selectedPaper, pipelineStates[selectedPaper.id])
     : null;
@@ -95,7 +114,7 @@ export function LibraryView({
     <>
       <div className="workspace-shell">
         <div className="library-global-tools">{onOpenResearch ? <button type="button" className="wordbook-button" aria-label="问问篇篇" onClick={onOpenResearch}><Pianpian /><span>问问篇篇</span></button> : null}<button type="button" className="wordbook-button" aria-label="打开单词表" title="单词表" onClick={onOpenWordbook}><BookMarked size={17} /><span>单词表</span><small>{wordbookCount ?? 0}</small></button></div>
-        <LibrarySidebar activeFilter={filter} groups={groups} onFilterChange={onFilterChange} onCreateGroup={() => setCreatingGroup(true)} onOpenSettings={onOpenSettings} />
+        <LibrarySidebar activeFilter={filter} groups={groups} onFilterChange={onFilterChange} onCreateGroup={() => setCreatingGroup(true)} onDeleteGroup={(group) => { setGroupDeleteError(""); setGroupToDelete(group); }} onOpenSettings={onOpenSettings} />
         <PaperList
           papers={papers}
           selectedId={selectedId}
@@ -114,7 +133,7 @@ export function LibraryView({
           {selectedPaper ? (
             <>
               <div className="detail-topbar">
-                <span className="detail-path">文献库 / {groups.find((group) => group.id === selectedPaper.groupId)?.name ?? "待整理"}</span>
+                <span className="detail-path">文献库 / {groups.find((group) => group.id === selectedPaper.groupId)?.name ?? DEFAULT_GROUP_NAME}</span>
               </div>
               <div className="detail-content">
                 <div className="paper-cover-mark" aria-hidden="true">
@@ -140,7 +159,7 @@ export function LibraryView({
                   </div>
                 </div>
                 <div className="group-row">
-                  <span className="group-chip">{groups.find((group) => group.id === selectedPaper.groupId)?.name ?? "待整理"}</span>
+                  <span className="group-chip">{groups.find((group) => group.id === selectedPaper.groupId)?.name ?? DEFAULT_GROUP_NAME}</span>
                 </div>
                 {selectedPaper.recordType === "reference" ? <div className="reference-detail-note"><strong>已收藏文献信息，全文待导入</strong><p>{selectedPaper.abstract || "这条记录来自公开学术检索。导入原始 PDF 并完成解析后即可阅读。"}</p>{selectedPaper.doi ? <span>DOI：{selectedPaper.doi}</span> : null}</div> : !selectedReady && <PaperPreparation paper={selectedPaper} pipeline={selectedPipeline!}
                   configured={mineruConfigured} onStart={() => onStartMineru(selectedPaper.id)} />}
@@ -218,6 +237,23 @@ export function LibraryView({
           setCreatingGroup(false);
         }}
       /> : null}
+      {groupToDelete ? (
+        <div className="settings-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !deletingGroup) setGroupToDelete(null); }}>
+          <section className="settings-dialog delete-dialog" role="dialog" aria-modal="true" aria-label="删除分组">
+            <div className="delete-dialog-icon"><AlertTriangle size={22} /></div>
+            <h2>删除分组“{groupToDelete.name}”？</h2>
+            <p>组内论文会移到“{DEFAULT_GROUP_NAME}”。不会删除论文、原始 PDF 或解析资料。</p>
+            {groupDeleteError ? <p className="settings-error" role="alert">{groupDeleteError}</p> : null}
+            <div className="detail-actions">
+              <button className="secondary-button" type="button" disabled={deletingGroup} aria-label="取消删除分组" onClick={() => setGroupToDelete(null)}>取消</button>
+              <button className="danger-button" type="button" disabled={deletingGroup} aria-label="确认删除分组" onClick={() => void confirmDeleteGroup()}>
+                <Trash2 size={15} />
+                {deletingGroup ? "正在删除…" : "确认删除"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
       {deleteConfirmOpen && selectedPaper ? (
         <div className="settings-overlay">
           <section className="settings-dialog delete-dialog" role="dialog" aria-modal="true" aria-label="删除文献">
