@@ -18,13 +18,15 @@
 
 Pianpian is a desktop paper reader for Chinese-speaking readers of English research. The **original PDF is the reading surface**: layout, figures, and equations stay intact, with reading assistance alongside each paragraph. Originals, reading progress, vocabulary, and analysis caches are persisted locally.
 
-Current version: `0.4.2` · Primary distribution target: `Windows x64` · Built with `Electron / React / TypeScript`
+Current version: `0.4.3` · Primary distribution target: `Windows x64` · Built with `Electron / React / TypeScript`
 
 > These language options translate the repository documentation. The application interface and reading assistance currently focus on Chinese.
 
 ## Recent updates
 
 - **Find and import papers in chat:** The research assistant searches arXiv and Crossref. After confirmation, an arXiv result downloads the official PDF to the local library and starts MinerU parsing.
+- **More ways to discover research:** DeepSeek can use its native web search and page-fetch tools. The reader also offers a Semantic Scholar related-paper radar.
+- **More reading assistance:** Switch on human-language mode for future paragraph requests, interpret equations, and render Markdown and mathematical expressions in answers.
 - **Meet Pianpian:** The product and reading companion share one name, with a folded-paper character generated using gpt-image-2. Ask Pianpian from the library, chat beside a paper, or request vocabulary for the current paragraph.
 - **More room for reading:** Conversation history, new chat, and reading workflows share a compact toolbar with floating pickers. Create and select a paper group inline in the metadata editor.
 - **Smoother long-paper startup:** PDF pages load on demand. Research sessions start when first opened, and Pi runs in a worker thread.
@@ -40,6 +42,8 @@ Double-click a paragraph to start translation, explanation, summary with context
 
 ![Original PDF, aligned paragraph selection, and the Chinese research assistant](docs/assets/reader.png)
 
+![Human-language mode in the paragraph reader](docs/screenshots/human-mode.png)
+
 <table>
   <tr>
     <td width="50%">
@@ -53,17 +57,21 @@ Double-click a paragraph to start translation, explanation, summary with context
   </tr>
 </table>
 
-<sub>The reader, library, and wordbook images above illustrate features before the rebrand. The conversation images below show Pianpian on October 16, 2026. All use synthetic papers and simulated responses, with no user papers or credentials. A fresh installation starts with an empty library. See <a href="docs/assets/README.md">asset provenance</a>.</sub>
+<sub>The library, reader, wordbook, human-language mode, Markdown/math, and light/dark research-assistant screenshots were refreshed on October 21, 2026. The workspace screenshot was regenerated with the same isolated test and was pixel-identical. All images use synthetic examples, with no user papers, real credentials, or live-service output. A fresh installation starts with an empty library. See <a href="docs/assets/README.md">asset provenance</a>.</sub>
 
 ## Features
 
 | Reading task | Current capability |
 | --- | --- |
 | Keep the original layout | Continuous scrolling, pages, zoom, and outline navigation; aligned paragraph, figure, and equation regions, including paragraphs spanning pages. Long papers keep their full scroll layout while PDF pages near the viewport load on demand. |
+| Prepare a paper for reading | MinerU extracts paragraphs, figures, tables, equations, and their coordinates. The reader unlocks after preparation; the library shows progress and allows failed tasks to be retried. |
 | Understand a paragraph or sentence | Chinese translation, explanation, summary, and contextual role; original-text selection, streaming results, and local caching. |
-| Interpret figures and equations | Double-click a figure to start interpretation with its image and context; answers stream directly as Markdown, with math rendering in translations. |
+| Interpret figures and equations | Request separate figure, table, or equation interpretation using the image or formula and nearby context; answers stream as Markdown, with rendered mathematical expressions. |
+| Adjust explanation style | Human-language mode changes the style of future paragraph requests; selecting a sentence limits processing to the selected original text. |
 | Learn academic language | Double-click a paragraph to generate AI-selected vocabulary, or generate it manually. No initial term cards appear before generation. Only terms grounded in that paragraph are displayed; the wordbook keeps meanings, source sentences, and links. |
-| Research around a paper | Pi-powered conversations across multiple turns; read the current paper, click answer references to navigate to source blocks, search the local library and Crossref, expand compact tool rows, and confirm adding paper metadata to the library. |
+| Find papers and web sources | Search the local library, arXiv, and Crossref; DeepSeek sessions also provide native web search and page fetching. The reader's Semantic Scholar radar finds related-paper metadata. Coverage and availability depend on each source. |
+| Download and add papers | After user confirmation, download and validate the official arXiv PDF, then save it locally. MinerU parsing starts if configured; otherwise it waits for setup. Crossref and Semantic Scholar candidates add metadata only, not a PDF or full text. |
+| Research around a paper | Pi-powered multi-turn conversations; read the current paper, click answer references to navigate to source blocks, inspect tool status, and keep library-wide and paper-specific histories separate. |
 | Prepare reading notes | Generate Chinese Markdown drafts, preview them, and choose an export location; three bundled workflows cover close reading, literature search and screening, and literature comparison with notes. |
 | Manage a personal library | Import, search, favorites, groups, metadata editing, deletion, and saved reading positions. |
 | Adjust the reading environment | Switch between light and dark interfaces in the library sidebar or reader toolbar; keep the preference after restart while original PDF pages, figures, and equation images retain their appearance. |
@@ -80,6 +88,8 @@ Click a source reference in an answer to load its PDF page and locate the paragr
 
 ![Pianpian in dark mode with tool progress and source navigation](docs/screenshots/research-reader-dark.png)
 
+![Markdown explanation with rendered mathematical expressions](docs/screenshots/markdown-math-rendering.png)
+
 <sub>The reference preview uses a synthetic paper and simulated streaming responses in an isolated desktop profile. It illustrates the interface and contains no user papers, credentials, or live-service output. See <a href="docs/assets/README.md">asset provenance</a>.</sub>
 
 A three-turn workflow can start with:
@@ -88,7 +98,7 @@ A three-turn workflow can start with:
 2. “Find two related papers and list their titles, years, and DOIs.”
 3. “Use the paper and search results to draft Chinese reading notes.”
 
-Literature search currently uses **Crossref's public scholarly metadata**, with coverage determined by that source. Adding a candidate saves metadata; reading its full text still requires importing its PDF and completing MinerU parsing. Documents export as Markdown. Library-wide and paper-specific conversations are stored locally and can be restored, searched, renamed, or deleted. Model context length is limited for long papers.
+The literature-search tool queries **arXiv and Crossref**. With DeepSeek, the research assistant can additionally use native `search_web` and `fetch_web_page` tools; the reader's related-paper radar uses Semantic Scholar metadata. These are separate sources, not exhaustive coverage, and web search results do not guarantee downloadable full text. Adding a candidate requires user confirmation: arXiv candidates download and validate an official PDF, while Crossref and Semantic Scholar candidates save metadata only. Documents export as Markdown. Library-wide and paper-specific conversations are stored locally and can be restored, searched, renamed, or deleted. Model context length is limited for long papers.
 
 ## Reading workflow
 
@@ -114,7 +124,7 @@ npm ci
 npm run desktop:dev
 ```
 
-Open **服务配置** (Service settings) and configure the two independent services: **Paper parsing** uses your own **MinerU Token**; **Model service** lets you choose **DeepSeek's official service** or **Alibaba Cloud Bailian**, then enter that provider's API key and model. Research conversations use the same model configuration. See the [service setup guide (Chinese)](docs/服务密钥配置.md).
+Open **服务配置** (Service settings) and configure the two independent services: **Paper parsing** uses your own **MinerU Token**; **Model service** lets you choose **DeepSeek's official service** or **Alibaba Cloud Bailian**, then enter that provider's API key and model. Research conversations use the same model configuration. Configure Semantic Scholar separately if you want to use its related-paper radar. See the [service setup guide (Chinese)](docs/服务密钥配置.md).
 
 For a web preview, use `npm run dev` and visit `http://127.0.0.1:4173/`. The preview also persists imported PDFs in browser storage; the desktop app stores originals as files in its user-data directory. System credential storage and real service requests require the desktop application.
 
@@ -127,8 +137,8 @@ npm run make:win
 This runs the quality checks and builds a Windows x64 installer and ZIP:
 
 ```text
-out/installer/Pianpian-Setup-0.4.2-x64.exe
-out/installer/Pianpian-0.4.2-x64.zip
+out/installer/Pianpian-Setup-0.4.3-x64.exe
+out/installer/Pianpian-0.4.3-x64.zip
 ```
 
 The installer supports in-app updates. Extract the **entire ZIP directory** and launch `Pianpian.exe` for a portable setup; Node.js is not needed on the recipient's machine. Windows may show a security prompt because the installer has no commercial code-signing certificate. Users configure their own service credentials.
@@ -142,8 +152,9 @@ Local-first means originals and reading data are persisted on your machine. Pars
 | Original PDFs, parsed results, and figure assets | Stored in Electron's user-data directory. With MinerU configured, imported PDFs are automatically sent to MinerU for parsing. |
 | Library index, reading position, wordbook, and analysis cache | Stored locally. Caches are identified by content signatures and service configuration. |
 | Translation, explanation, vocabulary, figure interpretation, and Q&A | On user action, the necessary passages, context, images, or paper text are sent to the selected model provider. |
-| Agent literature searches and note drafts | Search queries are sent to Crossref; the current paper and local paper metadata are supplied to the model as required by the research task. Library additions require confirmation, and drafts are saved after the user chooses a location. |
-| Service credentials | Supplied by each user and encrypted in the Electron main process using system secure storage. Saved keys are not returned to the interface in plaintext. |
+| Research assistant and public search | Literature queries go to arXiv and Crossref; DeepSeek native web search and page fetching are handled by DeepSeek; the related-paper radar requests public metadata from Semantic Scholar. Paper content and local metadata are sent to the selected model only as needed for the task. |
+| Downloads and note export | Official arXiv PDFs are downloaded only after confirmation; Crossref and Semantic Scholar candidates save metadata only. Markdown drafts are saved after the user reviews them and chooses a path. |
+| Service credentials | Model, MinerU, and optional Semantic Scholar keys are supplied by each user and encrypted in the Electron main process using system secure storage. Saved keys are not returned to the interface in plaintext. |
 | Repository and distribution | No bundled default papers, user libraries, parsed caches, or demo credentials. |
 
 Deleting a paper removes its original, parsed assets, and analysis caches. Explicitly collected wordbook terms keep their source sentences; unavailable sources no longer offer navigation.
