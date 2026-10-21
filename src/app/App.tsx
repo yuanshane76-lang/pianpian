@@ -9,6 +9,13 @@ import {
   type DocumentBlock,
 } from "../domain/documentBlocks";
 import {
+  buildOutlineCacheIdentity,
+  parseOutlineMap,
+  type OutlineMap,
+  type OutlineNode,
+} from "../domain/outlineMap";
+import { OutlineDrawer } from "../features/reader/OutlineDrawer";
+import {
   buildAnalysisCacheKey,
   buildParagraphCacheIdentity,
   getCachedAnalysis,
@@ -128,6 +135,10 @@ export default function App() {
   const [actionError, setActionError] = useState<string | null>(null);
   const activeAnalysisAbortRef = useRef(new Set<AbortController>());
   const [pipelineStates, setPipelineStates] = useState<Record<string, PaperPipelineState>>({});
+  const [outlineMap, setOutlineMap] = useState<OutlineMap | null>(null);
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  const [outlineError, setOutlineError] = useState<string | null>(null);
+  const [outlineSelectedId, setOutlineSelectedId] = useState<string | null>(null);
   const serviceSettingsRef = useRef(serviceSettings);
   serviceSettingsRef.current = serviceSettings;
 
@@ -292,6 +303,13 @@ export default function App() {
 
   useEffect(() => {
     selectedPaperIdRef.current = selectedPaperId;
+  }, [selectedPaperId]);
+
+  useEffect(() => {
+    setOutlineMap(null);
+    setOutlineOpen(false);
+    setOutlineError(null);
+    setOutlineSelectedId(null);
   }, [selectedPaperId]);
 
   useEffect(() => {
@@ -1229,6 +1247,85 @@ export default function App() {
     }
   }
 
+  // 文章架构：有缓存直接复用，否则调用一次模型并按文档签名缓存原始 JSON。
+  async function handleBuildOutline(force = false) {
+    if (!selectedPaper) return;
+    if (!force && outlineMap) {
+      setOutlineOpen((open) => !open);
+      return;
+    }
+    if (!availability.available) { setSettingsOpen(true); return; }
+    if (isBusy) return;
+    const paper = selectedPaper;
+    const identity = serviceIdentity;
+    const documentSignature = getDocumentSourceSignature(paper.blockData ?? []);
+    const cacheIdentity = buildOutlineCacheIdentity({
+      paperId: paper.id,
+      serviceIdentity: identity,
+      documentSignature,
+    });
+    if (!force) {
+      const cached = getCachedAnalysis(analysisCache, cacheIdentity.key);
+      if (cached) {
+        try {
+          setOutlineMap(parseOutlineMap(cached.value, paper.blockData ?? []));
+          setOutlineError(null);
+          setOutlineOpen(true);
+          return;
+        } catch {
+          // The stored tree no longer matches this document; regenerate below.
+        }
+      }
+    }
+    const requestId = analysisRequestIdRef.current;
+    setOutlineOpen(true);
+    setOutlineError(null);
+    setIsBusy(true);
+    setPendingAction("outline");
+    setActionError(null);
+    try {
+      const value = await requestAnalysis({ operation: "outline", paper }, () => undefined);
+      if (analysisRequestIdRef.current !== requestId) return;
+      const parsed = parseOutlineMap(value, paper.blockData ?? []);
+      setOutlineMap(parsed);
+      setOutlineSelectedId(null);
+      setAnalysisCache((current) => {
+        const next = new Map(current);
+        setCachedAnalysis(next, {
+          key: cacheIdentity.key,
+          paperId: paper.id,
+          scopeId: cacheIdentity.scopeId,
+          operation: "outline",
+          sourceSignature: cacheIdentity.sourceSignature,
+          value,
+          createdAt: new Date().toISOString(),
+        });
+        return next;
+      });
+    } catch (error) {
+      const failure = error as { name?: unknown; message?: unknown } | null;
+      if (analysisRequestIdRef.current !== requestId || failure?.name === "AbortError") return;
+      setOutlineError(typeof failure?.message === "string" ? failure.message : "文章架构生成失败，请重试");
+    } finally {
+      if (analysisRequestIdRef.current === requestId) {
+        setIsBusy(false);
+        setPendingAction(null);
+      }
+    }
+  }
+
+  function handleOutlineSelect(node: OutlineNode) {
+    if (!selectedPaper) return;
+    setOutlineSelectedId(node.id);
+    const anchor = node.anchors[0];
+    if (!anchor) return;
+    setSourceNavigation({
+      paperId: selectedPaper.id,
+      blockId: anchor.blockId,
+      requestId: ++sourceNavigationSequence.current,
+    });
+  }
+
   const storageWarning = storageError ? (
     <div className="storage-warning" role="alert">
       <AlertTriangle size={18} aria-hidden="true" />
@@ -1307,6 +1404,16 @@ export default function App() {
           translation={currentParagraphAnalysis?.outputs.translate ?? translations[paragraphResultKey(selectedPaper.id, targetSignature)] ?? null}
           answer={answer}
           isBusy={isBusy}
+          onBuildOutline={() => void handleBuildOutline()}
+          outlinePanel={outlineOpen ? <OutlineDrawer
+            map={outlineMap}
+            status={pendingAction === "outline" ? "loading" : outlineError ? "error" : outlineMap ? "ready" : "loading"}
+            error={outlineError}
+            selectedId={outlineSelectedId}
+            onSelect={handleOutlineSelect}
+            onClose={() => setOutlineOpen(false)}
+            onRegenerate={() => void handleBuildOutline(true)}
+          /> : undefined}
           onBack={() => { invalidateAnalysisRequests(); setView("library"); }}
           onSelectBlock={(block) => {
             if (block && !selectionText && selectedBlockRef.current &&
