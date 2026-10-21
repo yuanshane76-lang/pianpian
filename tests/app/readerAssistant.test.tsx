@@ -101,7 +101,7 @@ describe("reader assistant layout", () => {
       selectionText: "Retrieval augments the language model.",
       researchPanel: <div>聊聊内容</div>,
     });
-    const toggle = container.querySelector<HTMLInputElement>('[role="switch"][aria-label="祖母模式"]')!;
+    const toggle = container.querySelector<HTMLInputElement>('[role="switch"][aria-label="人话模式"]')!;
     expect(toggle.checked).toBe(false);
     await act(async () => toggle.click());
     expect(props.onParagraphReadingModeChange).toHaveBeenCalledWith("grandma");

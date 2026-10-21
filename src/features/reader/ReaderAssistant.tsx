@@ -236,8 +236,8 @@ export function ReaderAssistant({
             <h2>{equation ? "公式理解" : visual ? selectedBlock?.kind === "table" ? "表格理解" : "图表理解" : selectionText ? "选中句子" : "段落理解"}</h2>
             <div className="paragraph-context-actions">
               {!visual ? <label className="grandma-mode-toggle" title="只影响接下来生成的段落内容">
-                <span>祖母模式</span>
-                <input type="checkbox" role="switch" aria-label="祖母模式" checked={paragraphReadingMode === "grandma"} onChange={(event) => onParagraphReadingModeChange(event.target.checked ? "grandma" : "standard")} />
+                <span>人话模式</span>
+                <input type="checkbox" role="switch" aria-label="人话模式" checked={paragraphReadingMode === "grandma"} onChange={(event) => onParagraphReadingModeChange(event.target.checked ? "grandma" : "standard")} />
               </label> : null}
               <span className="context-count">{selectedBlock ? `第 ${selectedBlock.pageNumber} 页` : "未选择"}</span>
             </div>

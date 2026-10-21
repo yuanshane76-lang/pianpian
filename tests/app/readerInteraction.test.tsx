@@ -297,7 +297,7 @@ describe("paragraph translation interaction", () => {
   it("sends grandma mode to later paragraph analysis requests and separates its cache", async () => {
     const { container, root, stream } = await mount(async () => "通俗译文");
     await act(async () => (container.querySelector(".pdf-block-hit-area") as HTMLElement).click());
-    const toggle = container.querySelector<HTMLInputElement>('[role="switch"][aria-label="祖母模式"]')!;
+    const toggle = container.querySelector<HTMLInputElement>('[role="switch"][aria-label="人话模式"]')!;
     await act(async () => toggle.click());
     await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="translate"]')!.click());
     expect(stream.mock.calls[0][1]).toMatchObject({ operation: "translate", readingMode: "grandma" });
@@ -310,7 +310,7 @@ describe("paragraph translation interaction", () => {
     await act(async () => (container.querySelector(".pdf-block-hit-area") as HTMLElement).click());
     await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="translate"]')!.click());
     expect(stream).toHaveBeenCalledOnce();
-    await act(async () => container.querySelector<HTMLInputElement>('[role="switch"][aria-label="祖母模式"]')!.click());
+    await act(async () => container.querySelector<HTMLInputElement>('[role="switch"][aria-label="人话模式"]')!.click());
     result = "祖母译文";
     await act(async () => container.querySelector<HTMLButtonElement>('[data-operation="translate"]')!.click());
     expect(stream).toHaveBeenCalledTimes(2);
