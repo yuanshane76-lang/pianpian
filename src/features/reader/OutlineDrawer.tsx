@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { AlertTriangle, FoldHorizontal, LoaderCircle, Network, RefreshCw, UnfoldVertical, X } from "lucide-react";
 import { branchIdsWithChildren, type OutlineMap, type OutlineNode } from "../../domain/outlineMap";
 import { OutlineTree } from "./OutlineTree";
@@ -20,29 +20,28 @@ interface Props {
 export function OutlineDrawer({
   map, status, error, progress, fitSignal, selectedId, onSelect, onRetrySection, onClose, onRegenerate,
 }: Props) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const rootNodeKey = map ? map.nodes.map((node) => node.id).join(",") : "";
-  const collapsible = map ? branchIdsWithChildren(map.nodes) : [];
+  const collapsible = useMemo(() => (map ? branchIdsWithChildren(map.nodes) : []), [map]);
+  // 默认收起要在首帧同步生效（不经过 effect）：否则打开面板的第一次视口适配发生在
+  // “全展开”状态上，算出极小缩放后才收起，图会缩成一团。
+  const [collapseState, setCollapseState] = useState<{ key: string; ids: Set<string> }>({ key: "", ids: new Set() });
+  const collapsed = collapseState.key === rootNodeKey ? collapseState.ids : new Set(collapsible);
 
-  // 新论文/顶层结构变化时回到默认视图：只展开骨架（论证主线、各部分），下层全部收起。
-  useEffect(() => {
-    setCollapsed(new Set(collapsible));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rootNodeKey]);
+  function updateCollapsed(ids: Set<string>) {
+    setCollapseState({ key: rootNodeKey, ids });
+  }
+
+  function toggle(id: string) {
+    const next = new Set(collapsed);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    updateCollapsed(next);
+  }
 
   const unlocatable = map ? map.stats.total - map.stats.locatable : 0;
   const coveragePercent = map && map.stats.contentBlocks > 0
     ? Math.round((map.stats.coveredBlocks / map.stats.contentBlocks) * 100)
     : null;
   const generating = progress !== null;
-
-  function toggle(id: string) {
-    setCollapsed((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }
 
   return <aside className="outline-drawer" aria-label="文章架构">
     <header className="outline-drawer-head">
@@ -68,10 +67,10 @@ export function OutlineDrawer({
       {generating ? <span className="outline-drawer-progress">
         <LoaderCircle className="spin" size={11} /> 正在提炼 {progress.done}/{progress.total}
       </span> : collapsible.length ? <span className="outline-drawer-fold">
-        <button className="text-button" type="button" onClick={() => setCollapsed(new Set())}>
+        <button className="text-button" type="button" onClick={() => updateCollapsed(new Set())}>
           <UnfoldVertical size={12} />展开全部
         </button>
-        <button className="text-button" type="button" onClick={() => setCollapsed(new Set(collapsible))}>
+        <button className="text-button" type="button" onClick={() => updateCollapsed(new Set(collapsible))}>
           <FoldHorizontal size={12} />收起全部
         </button>
       </span> : null}
