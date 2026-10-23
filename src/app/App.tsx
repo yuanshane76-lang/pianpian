@@ -60,6 +60,9 @@ import { loadChartImage } from "../services/chartImage";
 import { extractAcademicVocabulary, type AcademicTerm } from "../domain/vocabulary";
 import { academicTermKey, addWordbookTerm, resolveWordbookSourceBlock, type WordbookSource, type WordbookEntry } from "../domain/wordbook";
 import { loadWordbook, saveWordbook } from "../services/wordbook";
+import { loadLibraryWiki, saveLibraryWiki } from "../services/libraryWiki";
+import { ingestPaperWikiPages, LIBRARY_PAGE_KINDS, type LibraryWikiPage } from "../domain/libraryWiki";
+import { LibraryWikiView } from "../features/wiki/LibraryWikiView";
 import { WordbookDialog } from "../features/reader/WordbookDialog";
 import { LibraryView } from "../features/library/LibraryView";
 import { ReaderView } from "../features/reader/ReaderView";
@@ -71,7 +74,7 @@ import { addLiteraturePaper, upgradeLiteraturePaperWithPdf, type LiteraturePaper
 import type { ResearchAgentImportReceipt, ResearchAgentPaperSummary } from "../services/researchAgentProtocol";
 import { UpdateCenter } from "../features/settings/UpdateCenter";
 
-type AppView = "library" | "reader" | "research";
+type AppView = "library" | "reader" | "research" | "wiki";
 const WORKSPACE_CONTEXT: PaperRecord = {
   id: "research-workspace", title: "研究工作区", authors: [], year: null, sourcePath: "",
   importedAt: "", groupId: DEFAULT_GROUP_ID, favorite: false, blocks: 0, blockData: [],
@@ -162,6 +165,8 @@ export default function App() {
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [outlineError, setOutlineError] = useState<string | null>(null);
   const [outlineSelectedId, setOutlineSelectedId] = useState<string | null>(null);
+  // 论文库级知识库：论文 wiki 的概念/方法支撑点自动汇聚（阶段一纯本地），持久化在本地存储。
+  const [libraryWiki, setLibraryWiki] = useState(() => loadLibraryWiki());
   // 异步批量生成跨越多次渲染，读取一律走 ref，避免闭包拿到旧状态。
   const wikiPartTreesRef = useRef(wikiPartTrees);
   const activeWikiParts = useRef(new Set<string>());
@@ -300,6 +305,11 @@ export default function App() {
   useEffect(() => {
     saveAnalysisCache(analysisCache);
   }, [analysisCache]);
+
+  useEffect(() => {
+    if (libraryWiki.error) return; // 读取失败时不回写，避免覆盖原有知识库
+    if (!saveLibraryWiki(libraryWiki.pages)) setStorageError(true);
+  }, [libraryWiki]);
 
   useEffect(() => {
     const bridge = getDesktopBridge();
@@ -1420,6 +1430,23 @@ export default function App() {
     }
   }
 
+  // 论文 wiki 中的概念/方法支撑点自动并入论文库级知识库（阶段一纯本地判重合并，零模型调用）。
+  function ingestLibraryWikiFromTree(paper: NonNullable<typeof selectedPaper>, tree: WikiPartTree) {
+    const points = tree.insights
+      .flatMap((insight) => insight.points)
+      .filter((point) => LIBRARY_PAGE_KINDS.includes(point.kind) && point.title && point.anchors.length);
+    if (!points.length) return;
+    setLibraryWiki((current) => current.error ? current : {
+      ...current,
+      pages: ingestPaperWikiPages(current.pages, {
+        paperId: paper.id,
+        paperTitle: paper.title,
+        contentSignature: getDocumentSourceSignature(paper.blockData ?? []),
+        points,
+      }).pages,
+    });
+  }
+
   async function ensurePartTree(part: WikiPart, force: boolean, requestId: number) {
     if (!part.blockIds.length) return;
     if (activeWikiParts.current.has(part.id)) return;
@@ -1453,6 +1480,7 @@ export default function App() {
       if (analysisRequestIdRef.current !== requestId || selectedPaperIdRef.current !== paper.id) return;
       const parsed = parsePartTree(value, part, blocks);
       if (selectedPaperIdRef.current !== paper.id) return;
+      ingestLibraryWikiFromTree(paper, parsed.tree);
       wikiPartTreesRef.current = { ...wikiPartTreesRef.current, [part.id]: parsed.tree };
       setWikiPartTrees(wikiPartTreesRef.current);
       setWikiPartStates((current) => {
@@ -1552,6 +1580,26 @@ export default function App() {
       <header className="research-workspace-header"><button type="button" className="back-button" onClick={() => setView("library")}><ArrowLeft size={17} />返回文献库</button><div><Pianpian /><strong>和篇篇聊聊</strong></div><button type="button" className="icon-button" aria-label="服务配置" onClick={() => setSettingsOpen(true)}><Settings2 size={17} /></button></header>
       <div className="research-workspace-body"><aside className="research-workspace-context"><Pianpian variant="reading" /><span className="eyebrow">你的论文阅读伙伴</span><h1>每篇论文，<br />都有个伴。</h1><p>把问题告诉篇篇，一起翻翻文献库、对照原文，再把收获整理成笔记。不受首页选中论文影响。</p><div className="research-context-stat"><strong>{papers.length}</strong><span>本地文献</span><strong>{parsedCount}</strong><span>已就绪论文</span></div><div className="research-workspace-tip"><strong>证据范围</strong><p>已解析论文可读取正文与定位引用。<br />未解析条目仅提供元数据，不作为全文证据。<br />全库与单篇对话分别保存。</p></div></aside><div className="research-workspace-chat"><ResearchAssistant scope="library" paper={WORKSPACE_CONTEXT} library={papers} onAddPaper={handleAddLiterature} available={availability.available} configurationRevision={serviceSettings.revision} onOpenSettings={() => setSettingsOpen(true)} onJump={() => {}} onJumpPaper={(paperId, blockId) => { const target = papers.find((item) => item.id === paperId); if (!target || !canOpenPaper(target, pipelineStates[paperId])) return; setSelectedPaperId(paperId); setSourceNavigation({ paperId, blockId, requestId: ++sourceNavigationSequence.current }); setView("reader"); }} /></div></div>
     </main></>;
+  }
+
+  if (view === "wiki") {
+    return <>{storageWarning}{settingsDialog}{wordbookDialog}{updateCenter}
+      <LibraryWikiView
+        pages={libraryWiki.pages}
+        canJump={(paperId) => {
+          const target = papers.find((item) => item.id === paperId);
+          return Boolean(target && canOpenPaper(target, pipelineStates[paperId]));
+        }}
+        onJump={(paperId, blockId) => {
+          const target = papers.find((item) => item.id === paperId);
+          if (!target || !canOpenPaper(target, pipelineStates[paperId])) return;
+          setSelectedPaperId(paperId);
+          setSourceNavigation({ paperId, blockId, requestId: ++sourceNavigationSequence.current });
+          setView("reader");
+        }}
+        onBack={() => setView("library")}
+      />
+    </>;
   }
 
   if (view === "reader" && selectedPaper && canOpenPaper(selectedPaper, pipelineStates[selectedPaper.id])) {
@@ -1657,6 +1705,7 @@ export default function App() {
       {updateCenter}
       <LibraryView
         onOpenResearch={() => setView("research")}
+        onOpenWiki={() => setView("wiki")} wikiPageCount={libraryWiki.pages.length}
         papers={visiblePapers}
         onOpenWordbook={() => setWordbookOpen(true)}
         wordbookCount={wordbook.entries.length}

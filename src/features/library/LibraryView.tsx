@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowUpRight, BookMarked, FilePlus2, FolderOpen, Pencil, Sparkles, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, BookMarked, FilePlus2, FolderOpen, Pencil, Sparkles, Trash2, Waypoints } from "lucide-react";
 import { Pianpian } from "../../brand/Pianpian";
 import { useState } from "react";
 import { DEFAULT_GROUP_NAME, type LibraryGroup, type PaperMetadataPatch, type PaperRecord } from "../../domain/library";
@@ -11,6 +11,8 @@ import { GroupCreateDialog } from "./GroupCreateDialog";
 
 interface LibraryViewProps {
   onOpenResearch?: () => void;
+  onOpenWiki?: () => void;
+  wikiPageCount?: number;
   onOpenWordbook?: () => void;
   wordbookCount?: number;
   papers: PaperRecord[];
@@ -62,6 +64,7 @@ export function LibraryView({
   importing,
   onOpenWordbook, wordbookCount,
   onOpenResearch,
+  onOpenWiki, wikiPageCount,
 }: LibraryViewProps) {
   const [editing, setEditing] = useState(false);
   const [creatingGroup, setCreatingGroup] = useState(false);
@@ -113,7 +116,7 @@ export function LibraryView({
   return (
     <>
       <div className="workspace-shell">
-        <div className="library-global-tools">{onOpenResearch ? <button type="button" className="wordbook-button" aria-label="问问篇篇" onClick={onOpenResearch}><Pianpian /><span>问问篇篇</span></button> : null}<button type="button" className="wordbook-button" aria-label="打开单词表" title="单词表" onClick={onOpenWordbook}><BookMarked size={17} /><span>单词表</span><small>{wordbookCount ?? 0}</small></button></div>
+        <div className="library-global-tools">{onOpenResearch ? <button type="button" className="wordbook-button" aria-label="问问篇篇" onClick={onOpenResearch}><Pianpian /><span>问问篇篇</span></button> : null}{onOpenWiki ? <button type="button" className="wordbook-button" aria-label="打开论文知识库" title="跨论文的概念与方法汇聚" onClick={onOpenWiki}><Waypoints size={17} /><span>知识库</span><small>{wikiPageCount ?? 0}</small></button> : null}<button type="button" className="wordbook-button" aria-label="打开单词表" title="单词表" onClick={onOpenWordbook}><BookMarked size={17} /><span>单词表</span><small>{wordbookCount ?? 0}</small></button></div>
         <LibrarySidebar activeFilter={filter} groups={groups} onFilterChange={onFilterChange} onCreateGroup={() => setCreatingGroup(true)} onDeleteGroup={(group) => { setGroupDeleteError(""); setGroupToDelete(group); }} onOpenSettings={onOpenSettings} />
         <PaperList
           papers={papers}
