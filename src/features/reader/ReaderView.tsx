@@ -62,6 +62,9 @@ interface ReaderViewProps {
   vocabulary: import("../../domain/vocabulary").AcademicTerm[];
   paragraphReadingMode?: "standard" | "grandma";
   onParagraphReadingModeChange?: (mode: "standard" | "grandma") => void;
+  /** 文章架构模式：右列整体替换为架构面板，段落助手卸载。 */
+  outlineActive?: boolean;
+  onOutlineClose?: () => void;
 }
 
 function getDefaultReaderPanelWidths() {
@@ -69,18 +72,30 @@ function getDefaultReaderPanelWidths() {
   return compactDesktop ? { outline: 145, assistant: 320 } : { outline: 175, assistant: 380 };
 }
 
-const panelLimits = { outline: { min: 140, max: 360 }, assistant: { min: 280, max: 560 } };
+const panelLimits = {
+  outline: { min: 140, max: 360 },
+  assistant: { min: 280, max: 560 },
+  wiki: { min: 360, max: 720 },
+};
 const documentMinimum = 320;
 
-function fitPanelWidths(widths: { outline: number; assistant: number }, layoutWidth: number, leftOpen: boolean, rightOpen: boolean) {
+type PanelSide = "outline" | "assistant" | "wiki";
+
+function fitPanelWidths(
+  widths: { outline: number; right: number },
+  rightLimits: { min: number; max: number },
+  layoutWidth: number,
+  leftOpen: boolean,
+  rightOpen: boolean,
+) {
   if (layoutWidth <= 840) return widths;
   const outline = leftOpen ? widths.outline : 0;
-  const assistant = rightOpen ? widths.assistant : 0;
-  const overflow = Math.max(0, outline + assistant + documentMinimum - layoutWidth);
-  const assistantReduction = rightOpen ? Math.min(overflow, assistant - panelLimits.assistant.min) : 0;
+  const right = rightOpen ? widths.right : 0;
+  const overflow = Math.max(0, outline + right + documentMinimum - layoutWidth);
+  const rightReduction = rightOpen ? Math.min(overflow, right - rightLimits.min) : 0;
   return {
-    outline: leftOpen ? Math.max(panelLimits.outline.min, outline - (overflow - assistantReduction)) : widths.outline,
-    assistant: rightOpen ? assistant - assistantReduction : widths.assistant,
+    outline: leftOpen ? Math.max(panelLimits.outline.min, outline - (overflow - rightReduction)) : widths.outline,
+    right: rightOpen ? right - rightReduction : widths.right,
   };
 }
 
@@ -93,9 +108,20 @@ export function ReaderView(props: ReaderViewProps) {
   const [rightOpen, setRightOpen] = useState(true);
   const [preferredOutlineWidth, setOutlineWidth] = useState(defaultPanelWidths.outline);
   const [preferredAssistantWidth, setAssistantWidth] = useState(defaultPanelWidths.assistant);
+  const [preferredWikiWidth, setWikiWidth] = useState(520);
   const [layoutWidth, setLayoutWidth] = useState(window.innerWidth);
-  const { outline: outlineWidth, assistant: assistantWidth } = fitPanelWidths(
-    { outline: preferredOutlineWidth, assistant: preferredAssistantWidth }, layoutWidth, leftOpen, rightOpen,
+  const outlineActive = props.outlineActive === true;
+  const rightSide: Exclude<PanelSide, "outline"> = outlineActive ? "wiki" : "assistant";
+  const rightLimits = panelLimits[rightSide];
+  const { outline: outlineWidth, right: rightWidth } = fitPanelWidths(
+    {
+      outline: preferredOutlineWidth,
+      right: rightSide === "wiki" ? preferredWikiWidth : preferredAssistantWidth,
+    },
+    rightLimits,
+    layoutWidth,
+    leftOpen,
+    rightOpen,
   );
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -112,10 +138,10 @@ export function ReaderView(props: ReaderViewProps) {
   const [draftAppend, setDraftAppend] = useState<{ id: number; text: string }>();
   const draftSequence = useRef(0);
   const outline = useMemo(() => getDocumentOutline(blocks), [blocks]);
-  const resizeRef = useRef<{ side: "outline" | "assistant"; startX: number; startWidth: number; pointerId: number }>();
-  const widthsRef = useRef(defaultPanelWidths);
+  const resizeRef = useRef<{ side: PanelSide; startX: number; startWidth: number; pointerId: number }>();
+  const widthsRef = useRef<{ outline: number; right: number }>({ outline: defaultPanelWidths.outline, right: defaultPanelWidths.assistant });
   const openRef = useRef({ left: true, right: true });
-  widthsRef.current = { outline: outlineWidth, assistant: assistantWidth };
+  widthsRef.current = { outline: outlineWidth, right: rightWidth };
   openRef.current = { left: leftOpen, right: rightOpen };
   const visibleBlocks = useMemo(() => {
     const query = searchQuery.trim().toLocaleLowerCase();
@@ -229,39 +255,44 @@ export function ReaderView(props: ReaderViewProps) {
     setRightOpen(true);
   }
 
-  function clampWidth(side: "outline" | "assistant", value: number) {
+  function applyRightWidth(side: Exclude<PanelSide, "outline">, value: number) {
+    if (side === "wiki") setWikiWidth(value);
+    else setAssistantWidth(value);
+  }
+
+  function clampWidth(side: PanelSide, value: number) {
     const { min, max } = panelLimits[side];
     const layoutWidth = readerLayoutRef.current?.getBoundingClientRect().width || window.innerWidth;
     const otherWidth = side === "outline"
-      ? (openRef.current.right ? widthsRef.current.assistant : 0)
+      ? (openRef.current.right ? widthsRef.current.right : 0)
       : (openRef.current.left ? widthsRef.current.outline : 0);
     const available = layoutWidth - otherWidth - documentMinimum;
     return Math.round(Math.min(max, Math.max(min, Math.min(value, available))));
   }
 
-  function resizeBy(side: "outline" | "assistant", delta: number) {
+  function resizeBy(side: PanelSide, delta: number) {
     if (side === "outline") setOutlineWidth(clampWidth(side, outlineWidth + delta));
-    else setAssistantWidth(clampWidth(side, assistantWidth - delta));
+    else applyRightWidth(side, clampWidth(side, rightWidth - delta));
   }
 
-  function handleResizeKeyDown(side: "outline" | "assistant", event: KeyboardEvent<HTMLDivElement>) {
+  function handleResizeKeyDown(side: PanelSide, event: KeyboardEvent<HTMLDivElement>) {
     const step = event.shiftKey ? 48 : 16;
     if (event.key === "ArrowLeft") { event.preventDefault(); resizeBy(side, -step); }
     else if (event.key === "ArrowRight") { event.preventDefault(); resizeBy(side, step); }
     else if (event.key === "Home" || event.key === "End") {
       event.preventDefault();
       const value = clampWidth(side, panelLimits[side][event.key === "Home" ? "min" : "max"]);
-      if (side === "outline") setOutlineWidth(value); else setAssistantWidth(value);
+      if (side === "outline") setOutlineWidth(value); else applyRightWidth(side, value);
     }
   }
 
-  function startResize(side: "outline" | "assistant", event: ReactPointerEvent<HTMLDivElement>) {
+  function startResize(side: PanelSide, event: ReactPointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
     event.preventDefault();
     resizeRef.current = {
       side,
       startX: event.clientX,
-      startWidth: side === "outline" ? outlineWidth : assistantWidth,
+      startWidth: side === "outline" ? outlineWidth : rightWidth,
       pointerId: event.pointerId,
     };
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -275,7 +306,7 @@ export function ReaderView(props: ReaderViewProps) {
       const delta = event.clientX - resize.startX;
       const value = resize.side === "outline" ? resize.startWidth + delta : resize.startWidth - delta;
       if (resize.side === "outline") setOutlineWidth(clampWidth(resize.side, value));
-      else setAssistantWidth(clampWidth(resize.side, value));
+      else applyRightWidth(resize.side, clampWidth(resize.side, value));
     }
     function stop() {
       if (!resizeRef.current) return;
@@ -296,9 +327,14 @@ export function ReaderView(props: ReaderViewProps) {
     };
   }, []);
 
+  // 段落/图表/公式分析需要右侧助手面板：架构模式下自动退回，用户无需先找关闭按钮。
+  function exitOutlineMode() {
+    if (props.outlineActive) props.onOutlineClose?.();
+  }
+
   const layoutStyle = {
     "--reader-outline-width": `${outlineWidth}px`,
-    "--reader-assistant-width": `${assistantWidth}px`,
+    "--reader-assistant-width": `${rightWidth}px`,
   } as CSSProperties;
 
   return (
@@ -310,7 +346,7 @@ export function ReaderView(props: ReaderViewProps) {
           <button type="button" className="wordbook-button" aria-label="打开单词表" title="单词表" onClick={props.onOpenWordbook}><BookMarked size={17} /><span>单词表</span><small>{props.wordbookCount ?? 0}</small></button>
           <button className="icon-button" aria-label={leftOpen ? "收起目录" : "展开目录"} onClick={toggleOutline}><PanelLeftClose size={17} /></button>
           <button ref={assistantToggleRef} className="icon-button" aria-label={rightOpen ? "收起助手" : "展开助手"} onClick={toggleAssistant}><PanelRightClose size={17} /></button>
-          <button className="icon-button" aria-label="生成文章架构" title="生成文章架构" disabled={props.pendingAction === "wiki-thread"} onClick={props.onBuildOutline}>{props.pendingAction === "wiki-thread" ? <LoaderCircle className="spin" size={17} /> : <Network size={17} />}</button>
+          <button className={`icon-button ${outlineActive ? "is-active" : ""}`} aria-pressed={outlineActive} aria-label={outlineActive ? "关闭文章架构" : "生成文章架构"} title={outlineActive ? "关闭文章架构，回到段落理解" : "生成文章架构"} disabled={props.pendingAction === "wiki-thread" && !outlineActive} onClick={props.onBuildOutline}>{props.pendingAction === "wiki-thread" && !outlineActive ? <LoaderCircle className="spin" size={17} /> : <Network size={17} />}</button>
           <ThemeToggle variant="icon" />
           <button className="icon-button" aria-label="服务配置" onClick={onOpenSettings}><Settings2 size={17} /></button>
           <button className="icon-button" aria-label="搜索正文" aria-pressed={searchOpen} onClick={() => setSearchOpen(!searchOpen)}><Search size={17} /></button>
@@ -322,7 +358,7 @@ export function ReaderView(props: ReaderViewProps) {
         <button className="icon-button" aria-label="关闭定位提示" type="button" onClick={() => setToastPaperId(null)}><X size={16} /></button>
       </div> : null}
       {searchOpen ? <div className="reader-searchbar"><Search size={16} /><input autoFocus aria-label="搜索正文内容" onChange={(event) => setSearchQuery(event.target.value)} placeholder="搜索正文内容" type="search" value={searchQuery} /><span>{visibleBlocks.length} 个匹配段落</span></div> : null}
-      <div ref={readerLayoutRef} className={`reader-layout ${!leftOpen ? "left-collapsed" : ""} ${!rightOpen ? "right-collapsed" : ""}`} style={layoutStyle}>
+      <div ref={readerLayoutRef} className={`reader-layout ${!leftOpen ? "left-collapsed" : ""} ${!rightOpen ? "right-collapsed" : ""} ${outlineActive ? "outline-mode" : ""}`} style={layoutStyle}>
         {leftOpen ? <aside className="reader-outline">
           <div className="outline-label">论文目录</div>
           {outline.length ? <nav className="outline-sections" aria-label="论文目录">
@@ -334,6 +370,7 @@ export function ReaderView(props: ReaderViewProps) {
           <PdfPreview paperId={paper.id} originalId={paper.originalId} page={page} onPage={original} navigationTarget={navigationTarget}
             onAnalyzeParagraph={(block, pageNumber = block.pageNumber, regionId) => {
               setPage(pageNumber);
+              exitOutlineMode();
               setRightOpen(true);
               props.onPosition({ mode: "pdf", page: pageNumber, blockId: block.id, ...(regionId ? { regionId } : {}) });
               if (props.aiAvailable) props.onAnalyzeParagraph(block);
@@ -342,6 +379,7 @@ export function ReaderView(props: ReaderViewProps) {
             onAnalyzeChart={(block, pageNumber = block.pageNumber, regionId) => {
               setChartAnalysisRequestId((current) => (current ?? 0) + 1);
               setPage(pageNumber);
+              exitOutlineMode();
               setRightOpen(true);
               props.onPosition({ mode: "pdf", page: pageNumber, blockId: block.id, ...(regionId ? { regionId } : {}) });
               if (props.aiAvailable) props.onAnalyzeChart?.(block);
@@ -350,20 +388,22 @@ export function ReaderView(props: ReaderViewProps) {
             onAnalyzeEquation={(block, pageNumber = block.pageNumber, regionId) => {
               setEquationAnalysisRequestId((current) => (current ?? 0) + 1);
               setPage(pageNumber);
+              exitOutlineMode();
               setRightOpen(true);
               props.onPosition({ mode: "pdf", page: pageNumber, blockId: block.id, ...(regionId ? { regionId } : {}) });
               if (props.aiAvailable) props.onAnalyzeEquation?.(block);
               else { select(block, pageNumber, regionId); onOpenSettings(); }
             }}
              onAddToConversation={props.researchPanel ? (block, pageNumber = block.pageNumber, regionId) => {
-               select(block, pageNumber, regionId);
-               addToConversation(block, selectedBlock?.id === block.id ? props.selectionText || block.text : block.text);
-             } : undefined}
+              select(block, pageNumber, regionId);
+              exitOutlineMode();
+              addToConversation(block, selectedBlock?.id === block.id ? props.selectionText || block.text : block.text);
+            } : undefined}
             onVisiblePage={(visiblePage) => { setPage(visiblePage); props.onPosition({ mode: "pdf", page: visiblePage }); }}
             onReimport={props.onReimport} blocks={visibleBlocks} activeBlockId={selectedBlock?.id ?? null} onSelect={select} onSelectText={(block, text, pageNumber, regionId) => { select(block, pageNumber, regionId); props.onSelectText(block, text); }} focusTarget={focusTarget} onVisibleBlock={(block, pageNumber = block.pageNumber, regionId) => props.onPosition({ mode: "pdf", page: pageNumber, blockId: block.id, ...(regionId ? { regionId } : {}) })} />
         </main>
-        {rightOpen ? <div className="reader-resizer reader-resizer-right" role="separator" aria-label="调整篇篇侧栏宽度" title="拖动调整篇篇侧栏宽度" aria-orientation="vertical" aria-valuemin={panelLimits.assistant.min} aria-valuemax={clampWidth("assistant", panelLimits.assistant.max)} aria-valuenow={assistantWidth} tabIndex={0} onKeyDown={(event) => handleResizeKeyDown("assistant", event)} onPointerDown={(event) => startResize("assistant", event)} /> : null}
-        {rightOpen ? <ReaderAssistant chartAnalysisRequestId={chartAnalysisRequestId} equationAnalysisRequestId={equationAnalysisRequestId}
+        {rightOpen ? <div className="reader-resizer reader-resizer-right" role="separator" aria-label={outlineActive ? "调整架构面板宽度" : "调整篇篇侧栏宽度"} title={outlineActive ? "拖动调整架构面板宽度" : "拖动调整篇篇侧栏宽度"} aria-orientation="vertical" aria-valuemin={rightLimits.min} aria-valuemax={clampWidth(rightSide, rightLimits.max)} aria-valuenow={rightWidth} tabIndex={0} onKeyDown={(event) => handleResizeKeyDown(rightSide, event)} onPointerDown={(event) => startResize(rightSide, event)} /> : null}
+        {rightOpen && !outlineActive ? <ReaderAssistant chartAnalysisRequestId={chartAnalysisRequestId} equationAnalysisRequestId={equationAnalysisRequestId}
           researchPanel={props.researchPanel} radarPanel={<PaperRadar paper={paper} library={props.library} />} draftAppend={draftAppend}
           paragraphReadingMode={props.paragraphReadingMode ?? "standard"}
           onParagraphReadingModeChange={props.onParagraphReadingModeChange ?? (() => undefined)}
@@ -381,7 +421,7 @@ export function ReaderView(props: ReaderViewProps) {
           onInsight={props.aiAvailable ? props.onInsight : onOpenSettings} guide={props.guide}
           onGuide={props.aiAvailable ? props.onGuide : onOpenSettings} vocabulary={props.vocabulary}
           onJump={(id) => { const block = blocks.find((item) => item.id === id); if (block) navigate(block); }} /> : null}
-        {props.outlinePanel}
+        {rightOpen && outlineActive ? props.outlinePanel : null}
       </div>
     </div>
   );

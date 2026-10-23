@@ -1301,6 +1301,8 @@ export default function App() {
   async function handleBuildOutline(force = false) {
     if (!selectedPaper) return;
     if (!force && paperWiki) {
+      // 打开架构模式 = 右列从段落助手切到架构面板；取消进行中的段落分析（不动正在生成的架构任务）。
+      if (!wikiGeneratingRef.current) invalidateAnalysisRequests();
       setOutlineOpen((open) => !open);
       return;
     }
@@ -1582,7 +1584,9 @@ export default function App() {
           translation={currentParagraphAnalysis?.outputs.translate ?? translations[paragraphResultKey(selectedPaper.id, targetSignature)] ?? null}
           answer={answer}
           isBusy={isBusy}
-          onBuildOutline={() => void handleBuildOutline()}
+          onBuildOutline={() => { if (outlineOpen) setOutlineOpen(false); else void handleBuildOutline(); }}
+          outlineActive={outlineOpen}
+          onOutlineClose={() => setOutlineOpen(false)}
           outlinePanel={outlineOpen ? <OutlineDrawer
             map={outlineMap}
             status={!outlineMap && outlineError ? "error" : "ready"}

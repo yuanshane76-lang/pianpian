@@ -2646,6 +2646,9 @@ html[data-theme="dark"] .reader-assistant {
 
 /* 文章架构抽屉：覆盖右侧，左侧 PDF 保持可见，点节点时能看到原文闪烁。 */
 .outline-drawer { position: absolute; top: 0; right: 0; bottom: 0; z-index: 20; display: flex; flex-direction: column; width: min(760px, calc(100% - 320px)); background: var(--surface); border-left: 1px solid var(--line); box-shadow: -18px 0 48px rgba(0, 0, 0, 0.18); }
+/* 桌面端架构模式：右列静态占位，与正文并列；宽度由右列网格变量控制。 */
+.reader-layout.outline-mode .outline-drawer { position: static; width: auto; height: auto; min-height: 0; box-shadow: none; z-index: auto; }
+.reader-toolbar .icon-button[aria-pressed="true"] { background: var(--teal-soft); color: var(--teal-dark); }
 .outline-drawer-head { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; gap: 12px; min-height: 56px; padding: 0 16px; border-bottom: 1px solid var(--line); }
 .outline-drawer-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .outline-drawer-title strong { font-size: 13px; }
@@ -2684,5 +2687,8 @@ html[data-theme="dark"] .reader-assistant {
 .outline-node-enter text { fill: var(--teal-dark); font-size: 12px; text-anchor: middle; pointer-events: none; }
 .outline-tree-empty { fill: var(--muted); font-size: 12px; }
 @media (max-width: 840px) {
-  .outline-drawer { width: 100%; }
+  /* 窄屏回退：并列放不下，架构面板覆盖正文。 */
+  .reader-layout.outline-mode { grid-template-columns: var(--reader-outline-width) minmax(320px, 1fr); }
+  .reader-layout.outline-mode.left-collapsed { grid-template-columns: minmax(320px, 1fr); }
+  .reader-layout.outline-mode .outline-drawer { position: absolute; width: min(560px, 92%); box-shadow: -18px 0 48px rgba(0, 0, 0, 0.18); z-index: 20; }
 }
