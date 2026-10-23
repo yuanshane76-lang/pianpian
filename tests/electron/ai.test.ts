@@ -269,7 +269,7 @@ describe("paper wiki requests", () => {
     ],
   };
 
-  it("builds the thread prompt from the local skeleton and opening text only", async () => {
+  it("builds the assembly prompt from part overview and opening text only", async () => {
     const richPaper = {
       title: "A Structured Paper",
       blockData: [
@@ -284,9 +284,10 @@ describe("paper wiki requests", () => {
       await callModel(settings, {
         operation: "wiki-thread",
         paper: richPaper,
-        wikiSkeleton: [
-          { id: "p001-b001", title: "Introduction", level: 1, firstBlockIds: ["p001-b002"] },
-          { id: "p002-b001", title: "Method", level: 2 },
+        wikiParts: [
+          { id: "part-pre", title: "开篇" },
+          { id: "p001-b001", title: "Introduction", headings: ["Background"], firstBlockIds: ["p001-b002"] },
+          { id: "p002-b001", title: "Method" },
         ],
       }, fetchImpl);
       const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
@@ -294,59 +295,59 @@ describe("paper wiki requests", () => {
       const user = body.messages[1].content;
       expect(system).toContain("anchorBlockIds");
       expect(system).toContain("论证主线");
-      expect(user).toContain("[章节 p001-b001] Introduction");
-      expect(user).toContain("  [章节 p002-b001] Method");
+      expect(system).toContain("语义标题");
+      expect(user).toContain("[部分 p001-b001] Introduction（含：Background）");
+      expect(user).toContain("id 必须原样引用");
       expect(user).toContain("[p001-b002 | 第1页] We study the problem of X.");
-      expect(user).toContain("[章节 p001-b001 开头 | p001-b002]");
-      expect(user).not.toContain("Limitations remain in noisy settings."); // 开篇之外的长尾正文不进主线上下文
+      expect(user).toContain("[部分 p001-b001 开头 | p001-b002]");
+      expect(user).not.toContain("Limitations remain in noisy settings."); // 开篇之外的长尾正文不进装配上下文
       expect(body.max_tokens).toBe(2500);
       if (provider === "deepseek") expect(body.thinking).toEqual({ type: "disabled" });
       else expect(body.enable_thinking).toBe(false);
     }
   });
 
-  it("restricts section context to the passed section blocks", async () => {
+  it("restricts part context to the passed part blocks", async () => {
     const settings = { ...DEFAULT, aiProvider: "deepseek", deepseek: { ...DEFAULT.deepseek, apiKey: "unit-test-secret" } };
     const fetchImpl = vi.fn().mockResolvedValue(sseResponse('{"choices":[{"delta":{"content":"{}"}}]}'));
     await callModel(settings, {
-      operation: "wiki-section",
-      paper: { title: "Section Paper", blockData: paper.blockData.slice(0, 2) },
-      wikiSection: { id: "p001-b001", title: "Introduction", path: "Introduction", siblingTitles: ["Method"] },
+      operation: "wiki-part",
+      paper: { title: "Part Paper", blockData: paper.blockData.slice(0, 2) },
+      wikiPart: { id: "p001-b001", title: "Introduction" },
     }, fetchImpl);
     const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
     const system = body.messages[0].content;
     const user = body.messages[1].content;
-    expect(system).toContain("知识条目");
-    expect(system).toContain("只能从本章节输入的方括号 ID");
-    expect(user).toContain("当前章节：Introduction");
-    expect(user).toContain("同级章节：Method");
+    expect(system).toContain("两级要点树");
+    expect(system).toContain("只能从本部分输入的方括号 ID");
+    expect(user).toContain("当前部分：Introduction（id: p001-b001）");
     expect(user).toContain("[p001-b002 | 第1页 | paragraph]");
     expect(user).not.toContain("Our method uses Y.");
     expect(body.max_tokens).toBe(3000);
     expect(body.thinking).toEqual({ type: "disabled" });
   });
 
-  it("refuses wiki requests without blocks or a valid section", async () => {
+  it("refuses wiki requests without blocks or a valid part", async () => {
     const settings = { ...DEFAULT, aiProvider: "deepseek", deepseek: { ...DEFAULT.deepseek, apiKey: "unit-test-secret" } };
     const fetchImpl = vi.fn();
     await expect(callModel(settings, { operation: "wiki-thread", paper: { title: "Empty", blockData: [] } }, fetchImpl))
       .rejects.toThrow(/没有可分析的正文块/);
-    await expect(callModel(settings, { operation: "wiki-section", paper, wikiSection: { title: "", id: "", path: "", siblingTitles: [] } }, fetchImpl))
-      .rejects.toThrow(/有效的章节/);
+    await expect(callModel(settings, { operation: "wiki-part", paper, wikiPart: { id: "", title: "" } }, fetchImpl))
+      .rejects.toThrow(/有效的部分/);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("truncates long section blocks but keeps heading text", async () => {
+  it("truncates long part blocks but keeps heading text", async () => {
     const settings = { ...DEFAULT, aiProvider: "deepseek", deepseek: { ...DEFAULT.deepseek, apiKey: "unit-test-secret" } };
     const fetchImpl = vi.fn().mockResolvedValue(sseResponse('{"choices":[{"delta":{"content":"{}"}}]}'));
     const longText = "A".repeat(2000);
     await callModel(settings, {
-      operation: "wiki-section",
+      operation: "wiki-part",
       paper: { title: "Long", blockData: [
         { id: "p001-b001", pageNumber: 1, kind: "heading", headingLevel: 2, text: "Short heading" },
         { id: "p001-b002", pageNumber: 1, kind: "paragraph", text: longText },
       ] },
-      wikiSection: { id: "p001-b001", title: "Short heading", path: "Short heading", siblingTitles: [] },
+      wikiPart: { id: "p001-b001", title: "Short heading" },
     }, fetchImpl);
     const user = JSON.parse(fetchImpl.mock.calls[0][1].body).messages[1].content;
     expect(user).toContain("Short heading");

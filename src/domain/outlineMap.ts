@@ -1,4 +1,4 @@
-import { flattenSections, THREAD_ENTRY_SECTION_ID, type WikiAnchor, type WikiEntry, type WikiSection } from "./paperWiki";
+import { THREAD_ENTRY_SECTION_ID, type WikiAnchor, type WikiEntry, type WikiPart, type WikiPartTree, type WikiPoint, type WikiRename } from "./paperWiki";
 
 export type OutlineNodeKind = "section" | "problem" | "method" | "finding" | "limitation" | "background" | "concept";
 
@@ -8,15 +8,16 @@ export interface OutlineNode {
   id: string;
   title: string;
   summary?: string;
-  kind: OutlineNodeKind;
+  /** 支撑点才携带条目类型；结构与要点节点不显示类型标签。 */
+  kind?: OutlineNodeKind;
   anchors: OutlineAnchor[];
   /** False when the node has no valid block anchor; the node stays readable but cannot jump. */
   locatable: boolean;
-  /** 结构节点（主线/章节分支、章节骨架），不是模型条目，不参与“未定位”提示。 */
+  /** 结构/要点节点：不是带锚点的支撑点，不参与“未定位”提示。 */
   structural?: boolean;
-  /** 所属章节；章节节点指向自己，条目节点指向来源章节。 */
+  /** 所属部分 id；部分节点指向自己，其余节点指向来源部分。 */
   sectionId?: string;
-  /** 章节条目生成中/失败的状态，仅章节节点携带；一次性全量生成下没有“待生成”。 */
+  /** 部分要点生成中/失败的状态，仅部分节点携带。 */
   sectionState?: "loading" | "error";
   sectionError?: string;
   children: OutlineNode[];
@@ -42,49 +43,61 @@ export interface OutlineMap {
 export interface OutlineProjectionInput {
   paperTitle: string;
   threadTitle?: string;
-  sections: WikiSection[];
-  threadEntries: WikiEntry[];
-  sectionEntries: Record<string, WikiEntry[]>;
-  sectionStates: Record<string, { state: "loading" | "error"; error?: string }>;
+  parts: WikiPart[];
+  renames: Record<string, WikiRename>;
+  thread: WikiEntry[];
+  partTrees: Record<string, WikiPartTree>;
+  partStates: Record<string, { state: "loading" | "error"; error?: string }>;
   coverage: { covered: number; total: number };
   droppedAnchors: number;
   mergedDuplicates: number;
 }
 
-function entryNode(entry: WikiEntry): OutlineNode {
+function pointNode(point: WikiPoint, partId: string): OutlineNode {
   return {
-    id: entry.id,
-    title: entry.title,
-    ...(entry.statement ? { summary: entry.statement } : {}),
-    kind: entry.kind,
-    anchors: entry.anchors,
-    locatable: entry.locatable,
-    sectionId: entry.sectionId === THREAD_ENTRY_SECTION_ID ? undefined : entry.sectionId,
+    id: point.id,
+    title: point.title,
+    ...(point.statement ? { summary: point.statement } : {}),
+    kind: point.kind,
+    anchors: point.anchors,
+    locatable: point.locatable,
+    sectionId: partId,
     children: [],
   };
 }
 
-function sectionNode(section: WikiSection, input: OutlineProjectionInput): OutlineNode {
-  const entries = input.sectionEntries[section.id] ?? [];
-  const state = input.sectionStates[section.id];
-  const children = [
-    ...section.children.map((child) => sectionNode(child, input)),
-    ...entries.map(entryNode),
-  ];
+function insightNode(insight: { id: string; title: string; statement?: string; points: WikiPoint[] }, partId: string): OutlineNode {
   return {
-    id: section.id,
-    title: section.title,
-    kind: "section",
-    anchors: section.headingBlockId
-      ? [{ blockId: section.headingBlockId, pageNumber: section.pageNumber ?? 1, quote: section.title }]
-      : [],
-    locatable: Boolean(section.headingBlockId),
+    id: insight.id,
+    title: insight.title,
+    ...(insight.statement ? { summary: insight.statement } : {}),
+    anchors: [],
+    locatable: false,
     structural: true,
-    sectionId: section.id,
-    ...(entries.length ? {} : state?.state === "error"
+    sectionId: partId,
+    children: insight.points.map((point) => pointNode(point, partId)),
+  };
+}
+
+function partNode(part: WikiPart, input: OutlineProjectionInput): OutlineNode {
+  const rename = input.renames[part.id];
+  const tree = input.partTrees[part.id];
+  const state = input.partStates[part.id];
+  return {
+    id: part.id,
+    title: rename?.title || part.title,
+    ...(rename?.summary ? { summary: rename.summary } : {}),
+    kind: "section",
+    anchors: part.headingBlockId
+      ? [{ blockId: part.headingBlockId, pageNumber: part.pageNumber ?? 1, quote: part.title }]
+      : [],
+    locatable: Boolean(part.headingBlockId),
+    structural: true,
+    sectionId: part.id,
+    ...(tree ? {} : state?.state === "error"
       ? { sectionState: "error" as const, sectionError: state.error }
       : { sectionState: "loading" as const }),
-    children,
+    children: tree ? tree.insights.map((insight) => insightNode(insight, part.id)) : [],
   };
 }
 
@@ -111,9 +124,20 @@ export function findOutlineNode(nodes: OutlineNode[], id: string | null): Outlin
   return null;
 }
 
+/** 有子节点的第二层节点 id（收起支撑点时用）。 */
+export function secondLevelIdsWithChildren(nodes: OutlineNode[]): string[] {
+  const ids: string[] = [];
+  for (const node of nodes) {
+    for (const child of node.children) {
+      if (child.children.length) ids.push(child.id);
+    }
+  }
+  return ids;
+}
+
 /**
- * 投影：把本地骨架 + 模型条目组装成思维导图树。视图无关，领域层不依赖渲染。
- * 顶层 = 论证主线分支 + 各一级章节；全量生成期间章节保持“生成中”直至条目就位。
+ * 投影：把本地大块划分 + 模型要点树组装成思维导图。
+ * 顶层 = 论证主线分支 + 各部分（语义标题）；要点挂部分之下，支撑点挂要点之下。
  */
 export function projectOutlineMap(input: OutlineProjectionInput): OutlineMap {
   const threadBranch: OutlineNode = {
@@ -123,14 +147,23 @@ export function projectOutlineMap(input: OutlineProjectionInput): OutlineMap {
     anchors: [],
     locatable: false,
     structural: true,
-    children: input.threadEntries.map(entryNode),
+    sectionId: THREAD_ENTRY_SECTION_ID,
+    children: input.thread.map((entry) => ({
+      id: entry.id,
+      title: entry.title,
+      ...(entry.statement ? { summary: entry.statement } : {}),
+      kind: entry.kind,
+      anchors: entry.anchors,
+      locatable: entry.locatable,
+      sectionId: THREAD_ENTRY_SECTION_ID,
+      children: [],
+    })),
   };
   const nodes = [
-    ...(input.threadEntries.length ? [threadBranch] : []),
-    ...input.sections.map((section) => sectionNode(section, input)),
+    ...(input.thread.length ? [threadBranch] : []),
+    ...input.parts.map((part) => partNode(part, input)),
   ];
   const counts = countNodes(nodes);
-  const flat = flattenSections(input.sections);
   return {
     title: input.threadTitle?.trim() || input.paperTitle || "文章架构",
     nodes,
@@ -139,8 +172,8 @@ export function projectOutlineMap(input: OutlineProjectionInput): OutlineMap {
       locatable: counts.locatable,
       droppedAnchors: input.droppedAnchors,
       mergedDuplicates: input.mergedDuplicates,
-      sectionsGenerated: flat.filter((section) => Boolean(input.sectionEntries[section.id]?.length)).length,
-      sectionsTotal: flat.length,
+      sectionsGenerated: input.parts.filter((part) => Boolean(input.partTrees[part.id])).length,
+      sectionsTotal: input.parts.length,
       coveredBlocks: input.coverage.covered,
       contentBlocks: input.coverage.total,
     },

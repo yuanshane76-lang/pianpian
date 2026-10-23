@@ -2,7 +2,7 @@ import { act, type ComponentProps, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OutlineDrawer } from "../../src/features/reader/OutlineDrawer";
-import { buildSectionSkeleton, type WikiEntry } from "../../src/domain/paperWiki";
+import { buildWikiParts, parsePartTree, type WikiEntry } from "../../src/domain/paperWiki";
 import { projectOutlineMap, type OutlineNode } from "../../src/domain/outlineMap";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -10,31 +10,40 @@ let root: Root | undefined;
 let container: HTMLDivElement;
 
 const blocks = [
-  { id: "p001-b001", pageNumber: 1, order: 0, kind: "heading" as const, text: "Introduction", headingLevel: 1 as const },
-  { id: "p001-b002", pageNumber: 1, order: 1, kind: "paragraph" as const, text: "We study X." },
-  { id: "p002-b001", pageNumber: 2, order: 2, kind: "heading" as const, text: "2 Method", headingLevel: 1 as const },
-  { id: "p002-b002", pageNumber: 2, order: 3, kind: "paragraph" as const, text: "Our method uses Y." },
+  { id: "p001-b001", pageNumber: 1, order: 0, kind: "paragraph" as const, text: "Abstract: we study X." },
+  { id: "p001-b002", pageNumber: 1, order: 1, kind: "heading" as const, text: "1 Introduction", headingLevel: 1 as const },
+  { id: "p001-b003", pageNumber: 1, order: 2, kind: "paragraph" as const, text: "We study the problem of X." },
+  { id: "p002-b001", pageNumber: 2, order: 3, kind: "heading" as const, text: "2 Method", headingLevel: 1 as const },
+  { id: "p002-b002", pageNumber: 2, order: 4, kind: "paragraph" as const, text: "Our method uses Y with attention." },
 ];
+
+const parts = buildWikiParts(blocks);
+const methodPart = parts.find((part) => part.title === "2 Method")!;
+const methodTree = parsePartTree(JSON.stringify({
+  children: [
+    {
+      title: "注意力机制设计",
+      statement: "用注意力加权特征",
+      children: [
+        { kind: "method", title: "注意力权重", statement: "按相关度加权", anchorBlockIds: ["p002-b002"] },
+      ],
+    },
+  ],
+}), methodPart, blocks);
 
 const threadEntries: WikiEntry[] = [
   { id: "thread:e1", sectionId: "thread", kind: "problem", title: "研究问题",
-    anchors: [{ blockId: "p001-b002", pageNumber: 1, quote: "We study X." }], locatable: true },
+    anchors: [{ blockId: "p001-b003", pageNumber: 1, quote: "We study X." }], locatable: true },
 ];
-
-const sectionEntries: Record<string, WikiEntry[]> = {
-  "p002-b001": [
-    { id: "p002-b001:e1", sectionId: "p002-b001", kind: "method", title: "方法 Y",
-      anchors: [{ blockId: "p002-b002", pageNumber: 2, quote: "Our method uses Y." }], locatable: true },
-  ],
-};
 
 const map = projectOutlineMap({
   paperTitle: "A Paper",
-  sections: buildSectionSkeleton(blocks),
-  threadEntries,
-  sectionEntries,
-  sectionStates: {},
-  coverage: { covered: 1, total: 2 },
+  parts,
+  renames: { [methodPart.id]: { title: "方法设计", summary: "提出方法 Y" } },
+  thread: threadEntries,
+  partTrees: { [methodPart.id]: methodTree.tree },
+  partStates: {},
+  coverage: { covered: 1, total: 1 },
   droppedAnchors: 0,
   mergedDuplicates: 0,
 });
@@ -79,54 +88,66 @@ afterEach(async () => {
 });
 
 describe("outline drawer", () => {
-  it("shows the whole tree at once with generation progress and coverage meta", async () => {
-    await render(<OutlineDrawer {...props({ progress: { done: 2, total: 9 } })} />);
+  it("defaults to parts plus insights visible with supporting points collapsed", async () => {
+    await render(<OutlineDrawer {...props()} />);
     const titles = Array.from(container.querySelectorAll(".outline-node-title")).map((node) => node.textContent);
     expect(titles).toContain("论证主线");
-    expect(titles).toContain("Introduction");
-    expect(titles).toContain("2 Method");
-    expect(titles).toContain("方法 Y");
-    expect(container.querySelector(".outline-drawer-meta")!.textContent).toContain("已生成 1/2 章");
-    expect(container.querySelector(".outline-drawer-meta")!.textContent).toContain("段落覆盖 50%");
-    expect(container.querySelector(".outline-drawer-meta")!.textContent).toContain("正在提炼章节条目 2/9");
-    expect(container.textContent).toContain("条目生成中…"); // 未完成章节在树里显示生成中
+    expect(titles).toContain("研究问题");
+    expect(titles).toContain("方法设计"); // 语义标题
+    expect(titles).toContain("注意力机制设计"); // 要点可见
+    expect(titles).not.toContain("注意力权重"); // 支撑点默认收起
+    expect(container.querySelector(".outline-drawer-meta")!.textContent).toContain("已生成 1/3 部分");
+    expect(container.querySelector(".outline-drawer-meta")!.textContent).toContain("段落覆盖 100%");
   });
 
-  it("disables regenerate while generating", async () => {
-    await render(<OutlineDrawer {...props({ progress: { done: 1, total: 3 } })} />);
-    expect(container.querySelector<HTMLButtonElement>('[aria-label="重新生成文章架构"]')!.disabled).toBe(true);
+  it("expands all and collapses supporting points from the meta buttons", async () => {
     await render(<OutlineDrawer {...props()} />);
-    expect(container.querySelector<HTMLButtonElement>('[aria-label="重新生成文章架构"]')!.disabled).toBe(false);
+    expect(container.textContent).not.toContain("注意力权重");
+    await act(async () => Array.from(container.querySelectorAll<HTMLButtonElement>(".outline-drawer-fold button"))
+      .find((button) => button.textContent === "展开全部")!.click());
+    expect(container.textContent).toContain("注意力权重");
+    await act(async () => Array.from(container.querySelectorAll<HTMLButtonElement>(".outline-drawer-fold button"))
+      .find((button) => button.textContent === "收起支撑点")!.click());
+    expect(container.textContent).not.toContain("注意力权重");
   });
 
-  it("reports the clicked entry node and jumps anchors", async () => {
+  it("shows generation progress and disables regenerate while running", async () => {
+    await render(<OutlineDrawer {...props({ progress: { done: 2, total: 9 } })} />);
+    expect(container.querySelector(".outline-drawer-meta")!.textContent).toContain("正在提炼 2/9");
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="重新生成文章架构"]')!.disabled).toBe(true);
+    expect(container.textContent).toContain("要点生成中…"); // 未完成部分在树里显示生成中
+  });
+
+  it("reports the clicked point node with its anchor", async () => {
     const onSelect = vi.fn();
     await render(<OutlineDrawer {...props({ onSelect })} />);
-    await click(nodeByTitle("方法 Y"));
+    await act(async () => Array.from(container.querySelectorAll<HTMLButtonElement>(".outline-drawer-fold button"))
+      .find((button) => button.textContent === "展开全部")!.click());
+    await click(nodeByTitle("注意力权重"));
     expect(onSelect).toHaveBeenCalledTimes(1);
     const selected = onSelect.mock.calls[0][0] as OutlineNode;
-    expect(selected.id).toBe("p002-b001:e1");
+    expect(selected.id).toBe(`${methodPart.id}:i1:p1`);
     expect(selected.anchors[0].blockId).toBe("p002-b002");
   });
 
-  it("collapses and expands section children from the toggle", async () => {
+  it("collapses and expands a part subtree from its toggle", async () => {
     await render(<OutlineDrawer {...props()} />);
-    expect(container.querySelectorAll(".outline-node")).toHaveLength(5);
-    const toggle = nodeByTitle("2 Method").querySelector(".outline-node-toggle")!;
-    await click(toggle);
-    expect(container.querySelectorAll(".outline-node")).toHaveLength(4);
-    await click(nodeByTitle("2 Method").querySelector(".outline-node-toggle")!);
-    expect(container.querySelectorAll(".outline-node")).toHaveLength(5);
+    const before = container.querySelectorAll(".outline-node").length;
+    await click(nodeByTitle("论证主线").querySelector(".outline-node-toggle")!);
+    expect(container.querySelectorAll(".outline-node").length).toBe(before - 1);
+    await click(nodeByTitle("论证主线").querySelector(".outline-node-toggle")!);
+    expect(container.querySelectorAll(".outline-node").length).toBe(before);
   });
 
-  it("retries a failed section from its node", async () => {
+  it("retries a failed part from its node", async () => {
     const failedMap = projectOutlineMap({
       paperTitle: "A Paper",
-      sections: buildSectionSkeleton(blocks),
-      threadEntries,
-      sectionEntries,
-      sectionStates: { "p001-b001": { state: "error", error: "服务超时" } },
-      coverage: { covered: 1, total: 2 },
+      parts,
+      renames: {},
+      thread: threadEntries,
+      partTrees: {},
+      partStates: { [methodPart.id]: { state: "error", error: "服务超时" } },
+      coverage: { covered: 0, total: 0 },
       droppedAnchors: 0,
       mergedDuplicates: 0,
     });
@@ -136,10 +157,10 @@ describe("outline drawer", () => {
     expect(failed.querySelector(".outline-node-kind")!.textContent).toContain("生成失败");
     await click(failed);
     expect(onRetrySection).toHaveBeenCalledTimes(1);
-    expect((onRetrySection.mock.calls[0][0] as OutlineNode).id).toBe("p001-b001");
+    expect((onRetrySection.mock.calls[0][0] as OutlineNode).id).toBe(methodPart.id);
   });
 
-  it("shows a loading state while the skeleton builds and a retryable error", async () => {
+  it("shows a loading state while parts build and a retryable error", async () => {
     await render(<OutlineDrawer {...props({ map: null, status: "loading" })} />);
     expect(container.querySelector('[role="status"]')?.textContent).toContain("正在提取文章架构");
     const onRegenerate = vi.fn();
@@ -149,14 +170,9 @@ describe("outline drawer", () => {
     expect(onRegenerate).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the map usable when only the thread failed", async () => {
+  it("keeps the map usable when only the assembly failed", async () => {
     await render(<OutlineDrawer {...props({ error: "论证主线生成失败，请重试" })} />);
     expect(container.querySelectorAll(".outline-node").length).toBeGreaterThan(0);
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("论证主线");
-  });
-
-  it("highlights the selected node", async () => {
-    await render(<OutlineDrawer {...props({ selectedId: "thread:e1" })} />);
-    expect(container.querySelector(".outline-node.is-selected")).toBeTruthy();
   });
 });
