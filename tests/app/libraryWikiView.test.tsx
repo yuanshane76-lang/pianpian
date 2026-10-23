@@ -39,6 +39,20 @@ function props(overrides: Partial<ComponentProps<typeof LibraryWikiView>> = {}) 
   };
 }
 
+async function switchToList() {
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-pressed]')!.click());
+}
+
+function click(node: Element) {
+  return act(async () => node.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+}
+
+function setNativeInput(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+  setter.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 afterEach(async () => {
   if (root) await act(async () => root!.unmount());
   root = undefined;
@@ -47,19 +61,40 @@ afterEach(async () => {
 });
 
 describe("library wiki view", () => {
-  it("lists pages sorted by paper count and shows cross-paper detail", async () => {
+  it("opens on the star map by default with the selected star's detail card", async () => {
     await render(<LibraryWikiView {...props()} />);
+    expect(container.querySelector(".wiki-graph")).toBeTruthy();
+    expect(container.querySelectorAll(".wiki-star")).toHaveLength(2);
+    expect(container.querySelector(".wiki-starmap-detail")!.textContent).toContain("注意力机制");
+    expect(container.querySelector(".wiki-starmap-hint")).toBeFalsy(); // 有选中详情时不再显示提示
+  });
+
+  it("switches to the list view and shows cross-paper detail", async () => {
+    await render(<LibraryWikiView {...props()} />);
+    await switchToList();
+    expect(container.querySelector(".wiki-graph")).toBeFalsy();
     expect(container.querySelectorAll(".library-wiki-item")).toHaveLength(2);
     expect(container.querySelector(".library-wiki-detail")!.textContent).toContain("注意力机制");
     expect(container.querySelector(".library-wiki-detail")!.textContent).toContain("出现于 1 篇论文");
     expect(container.querySelector(".library-wiki-header-meta")!.textContent).toContain("2 个页面");
   });
 
+  it("searches from the star map and selects a hit", async () => {
+    await render(<LibraryWikiView {...props()} />);
+    const input = container.querySelector<HTMLInputElement>(".wiki-starmap-search input")!;
+    await act(async () => setNativeInput(input, "检索"));
+    const hit = container.querySelector<HTMLButtonElement>(".wiki-starmap-hits button")!;
+    expect(hit.textContent).toContain("检索增强生成");
+    await act(async () => hit.click());
+    expect(container.querySelector(".wiki-starmap-detail")!.textContent).toContain("RAG 论文");
+  });
+
   it("jumps to the source block from a citation when the paper is available", async () => {
     const onJump = vi.fn();
     await render(<LibraryWikiView {...props({ onJump, canJump: () => true })} />);
-    const items = Array.from(container.querySelectorAll<HTMLButtonElement>(".library-wiki-item"));
-    await act(async () => items.find((item) => item.textContent!.includes("检索增强生成"))!.click());
+    const input = container.querySelector<HTMLInputElement>(".wiki-starmap-search input")!;
+    await act(async () => setNativeInput(input, "检索"));
+    await act(async () => container.querySelector<HTMLButtonElement>(".wiki-starmap-hits button")!.click());
     const citation = container.querySelector<HTMLButtonElement>(".library-wiki-citation")!;
     expect(citation.textContent).toContain("第 7 页");
     await act(async () => citation.click());
@@ -68,17 +103,16 @@ describe("library wiki view", () => {
 
   it("marks citations of removed papers as unavailable", async () => {
     await render(<LibraryWikiView {...props()} />);
-    const items = Array.from(container.querySelectorAll<HTMLButtonElement>(".library-wiki-item"));
-    await act(async () => items.find((item) => item.textContent!.includes("检索增强生成"))!.click());
-    const occurrence = container.querySelector(".library-wiki-occurrence.is-unavailable");
-    expect(occurrence).toBeTruthy();
+    const input = container.querySelector<HTMLInputElement>(".wiki-starmap-search input")!;
+    await act(async () => setNativeInput(input, "检索"));
+    await act(async () => container.querySelector<HTMLButtonElement>(".wiki-starmap-hits button")!.click());
+    expect(container.querySelector(".library-wiki-occurrence.is-unavailable")).toBeTruthy();
     expect(container.querySelector(".library-wiki-citation.is-disabled")!.textContent).toContain("第 7 页");
   });
 
-  it("navigates between pages via backlinks", async () => {
+  it("navigates between pages via backlinks in the detail card", async () => {
     await render(<LibraryWikiView {...props()} />);
-    const items = Array.from(container.querySelectorAll<HTMLButtonElement>(".library-wiki-item"));
-    await act(async () => items.find((item) => item.textContent!.includes("注意力机制"))!.click());
+    expect(container.querySelector(".wiki-starmap-detail")!.textContent).toContain("注意力机制");
     const backlinkBox = Array.from(container.querySelectorAll(".library-wiki-linkbox"))
       .find((box) => box.textContent!.includes("反向链接"));
     expect(backlinkBox).toBeTruthy();
@@ -86,18 +120,11 @@ describe("library wiki view", () => {
     expect(container.querySelector(".library-wiki-detail h2")!.textContent).toBe("检索增强生成");
   });
 
-  it("searches pages and toggles the graph view", async () => {
+  it("closes the detail card back to the starmap hint", async () => {
     await render(<LibraryWikiView {...props()} />);
-    const input = container.querySelector<HTMLInputElement>(".library-wiki-search input")!;
-    const setInputValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-    await act(async () => {
-      setInputValue.call(input, "检索");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    expect(container.querySelectorAll(".library-wiki-item")).toHaveLength(1);
-    const graphToggle = container.querySelector<HTMLButtonElement>('[aria-pressed]')!;
-    await act(async () => graphToggle.click());
-    expect(container.querySelector(".wiki-graph")).toBeTruthy();
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="关闭详情"]')!.click());
+    expect(container.querySelector(".wiki-starmap-detail")).toBeFalsy();
+    expect(container.querySelector(".wiki-starmap-hint")!.textContent).toContain("点击星星");
   });
 
   it("shows extraction progress and a retry affordance for failed papers", async () => {
@@ -113,6 +140,7 @@ describe("library wiki view", () => {
 
   it("shows an onboarding hint for an empty wiki", async () => {
     await render(<LibraryWikiView {...props({ pages: [] })} />);
-    expect(container.querySelector(".library-wiki-empty")!.textContent).toContain("自动汇入");
+    await switchToList();
+    expect(container.querySelector(".library-wiki-empty")!.textContent).toContain("逐篇提取");
   });
 });
