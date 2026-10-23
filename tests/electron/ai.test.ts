@@ -327,6 +327,22 @@ describe("paper wiki requests", () => {
     expect(body.thinking).toEqual({ type: "disabled" });
   });
 
+  it("extracts library knowledge entries from the whole paper", async () => {
+    const settings = { ...DEFAULT, aiProvider: "deepseek", deepseek: { ...DEFAULT.deepseek, apiKey: "unit-test-secret" } };
+    const fetchImpl = vi.fn().mockResolvedValue(sseResponse('{"choices":[{"delta":{"content":"{}"}}]}'));
+    await callModel(settings, { operation: "wiki-knowledge", paper }, fetchImpl);
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const system = body.messages[0].content;
+    const user = body.messages[1].content;
+    expect(system).toContain("知识库助手");
+    expect(system).toContain("concept|method");
+    expect(system).toContain("单篇特有的实验数值结论、局限、背景不提取");
+    expect(user).toContain("[p001-b002 | 第1页 | paragraph]");
+    expect(user).toContain("Our method uses Y.");
+    expect(body.max_tokens).toBe(2000);
+    expect(body.thinking).toEqual({ type: "disabled" });
+  });
+
   it("refuses wiki requests without blocks or a valid part", async () => {
     const settings = { ...DEFAULT, aiProvider: "deepseek", deepseek: { ...DEFAULT.deepseek, apiKey: "unit-test-secret" } };
     const fetchImpl = vi.fn();

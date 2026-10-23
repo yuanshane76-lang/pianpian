@@ -1,13 +1,4 @@
-import { getDocumentSourceSignature, type DocumentBlock } from "./documentBlocks";
-import {
-  buildWikiPartCacheIdentity,
-  buildWikiParts,
-  getWikiPartSignature,
-  isNearDuplicateTitle,
-  parsePartTree,
-  type WikiAnchor,
-  type WikiEntryKind,
-} from "./paperWiki";
+import { isNearDuplicateTitle, type WikiAnchor, type WikiEntryKind } from "./paperWiki";
 
 /**
  * 论文库级知识库（化用 Obsidian）：概念/方法页跨论文聚合，每条论述带原文块锚点。
@@ -220,45 +211,6 @@ export function buildLibraryWikiIndex(pages: LibraryWikiPage[]): LibraryWikiInde
     0,
   );
   return { pages: sorted, links, backlinks, totalCitations };
-}
-
-/**
- * 回填：从各论文已缓存的部分要点树里收集入库原料，零模型调用。
- * 只读缓存命中且能通过本地解析的部分；从未生成过架构的论文自然跳过。
- */
-export function collectBackfillSources(
-  papers: Array<{ id: string; title: string; blockData?: DocumentBlock[] }>,
-  cache: Map<string, { value: string }>,
-  serviceIdentity: string,
-): LibraryWikiIngestSource[] {
-  const sources: LibraryWikiIngestSource[] = [];
-  for (const paper of papers) {
-    const blocks = paper.blockData ?? [];
-    if (!blocks.length) continue;
-    const parts = buildWikiParts(blocks);
-    const contentSignature = getDocumentSourceSignature(blocks);
-    for (const part of parts) {
-      if (!part.blockIds.length) continue;
-      const identity = buildWikiPartCacheIdentity({
-        paperId: paper.id,
-        serviceIdentity,
-        partId: part.id,
-        partSignature: getWikiPartSignature(part, blocks),
-      });
-      const cached = cache.get(identity.key);
-      if (!cached) continue;
-      try {
-        const points = parsePartTree(cached.value, part, blocks).tree.insights
-          .flatMap((insight) => insight.points);
-        if (points.length) {
-          sources.push({ paperId: paper.id, paperTitle: paper.title, contentSignature, points });
-        }
-      } catch {
-        // 缓存与当前文档不匹配，跳过该部分。
-      }
-    }
-  }
-  return sources;
 }
 
 /** 供持久化校验的宽松解析：结构不符的页面丢弃，不让单条脏数据拖垮整个知识库。 */

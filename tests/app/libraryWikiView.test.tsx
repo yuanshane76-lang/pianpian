@@ -29,6 +29,9 @@ async function render(element: ReactElement) {
 function props(overrides: Partial<ComponentProps<typeof LibraryWikiView>> = {}) {
   return {
     pages,
+    progress: null,
+    failures: null,
+    onRetryFailed: vi.fn(),
     canJump: (paperId: string) => paperId === "p1",
     onJump: vi.fn(),
     onBack: vi.fn(),
@@ -95,6 +98,17 @@ describe("library wiki view", () => {
     const graphToggle = container.querySelector<HTMLButtonElement>('[aria-pressed]')!;
     await act(async () => graphToggle.click());
     expect(container.querySelector(".wiki-graph")).toBeTruthy();
+  });
+
+  it("shows extraction progress and a retry affordance for failed papers", async () => {
+    const onRetryFailed = vi.fn();
+    await render(<LibraryWikiView {...props({ progress: { done: 2, total: 5 } })} />);
+    expect(container.querySelector(".library-wiki-progress")!.textContent).toContain("正在提取 2/5");
+    await render(<LibraryWikiView {...props({ failures: { p2: "服务超时" }, onRetryFailed })} />);
+    const retry = container.querySelector<HTMLButtonElement>(".library-wiki-header-meta .text-button")!;
+    expect(retry.textContent).toContain("1 篇提取失败");
+    await act(async () => retry.click());
+    expect(onRetryFailed).toHaveBeenCalledTimes(1);
   });
 
   it("shows an onboarding hint for an empty wiki", async () => {

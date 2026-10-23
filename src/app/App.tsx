@@ -15,9 +15,11 @@ import {
 import {
   buildWikiPartCacheIdentity,
   buildWikiParts,
+  buildWikiKnowledgeCacheIdentity,
   buildWikiThreadCacheIdentity,
   computeWikiCoverage,
   getWikiPartSignature,
+  parseKnowledgeEntries,
   parsePartTree,
   parseWikiThread,
   type WikiEntry,
@@ -61,7 +63,7 @@ import { extractAcademicVocabulary, type AcademicTerm } from "../domain/vocabula
 import { academicTermKey, addWordbookTerm, resolveWordbookSourceBlock, type WordbookSource, type WordbookEntry } from "../domain/wordbook";
 import { loadWordbook, saveWordbook } from "../services/wordbook";
 import { loadLibraryWiki, saveLibraryWiki } from "../services/libraryWiki";
-import { collectBackfillSources, ingestPaperWikiPages, LIBRARY_PAGE_KINDS, type LibraryWikiPage } from "../domain/libraryWiki";
+import { ingestPaperWikiPages } from "../domain/libraryWiki";
 import { LibraryWikiView } from "../features/wiki/LibraryWikiView";
 import { WordbookDialog } from "../features/reader/WordbookDialog";
 import { LibraryView } from "../features/library/LibraryView";
@@ -311,20 +313,13 @@ export default function App() {
     if (!saveLibraryWiki(libraryWiki.pages)) setStorageError(true);
   }, [libraryWiki]);
 
-  // 打开知识库时从各论文已缓存的部分要点树自动回填（零模型调用），每个会话一次。
-  const wikiBackfilledRef = useRef(false);
+  // 打开知识库时按论文列表逐篇提取知识（缓存命中零调用），每个会话一次。
+  const wikiEnsuredRef = useRef(false);
   useEffect(() => {
-    if (view !== "wiki" || wikiBackfilledRef.current) return;
-    wikiBackfilledRef.current = true;
-    setLibraryWiki((current) => {
-      if (current.error) return current;
-      let pages = current.pages;
-      for (const source of collectBackfillSources(papersRef.current, analysisCache, serviceIdentityRef.current)) {
-        pages = ingestPaperWikiPages(pages, source).pages;
-      }
-      return { ...current, pages };
-    });
-  }, [view, analysisCache]);
+    if (view !== "wiki" || wikiEnsuredRef.current) return;
+    wikiEnsuredRef.current = true;
+    void ensureLibraryWikiKnowledge();
+  }, [view]);
 
   useEffect(() => {
     const bridge = getDesktopBridge();
@@ -1445,21 +1440,107 @@ export default function App() {
     }
   }
 
-  // 论文 wiki 中的概念/方法支撑点自动并入论文库级知识库（阶段一纯本地判重合并，零模型调用）。
-  function ingestLibraryWikiFromTree(paper: NonNullable<typeof selectedPaper>, tree: WikiPartTree) {
-    const points = tree.insights
-      .flatMap((insight) => insight.points)
-      .filter((point) => LIBRARY_PAGE_KINDS.includes(point.kind) && point.title && point.anchors.length);
-    if (!points.length) return;
-    setLibraryWiki((current) => current.error ? current : {
-      ...current,
-      pages: ingestPaperWikiPages(current.pages, {
-        paperId: paper.id,
-        paperTitle: paper.title,
-        contentSignature: getDocumentSourceSignature(paper.blockData ?? []),
-        points,
-      }).pages,
+  // 论文库级知识库与单篇思维导图解耦：数据源是论文列表本身。
+  // 打开知识库时逐篇提取（wiki-knowledge，自有缓存协议），本地判重合并入库。
+  const [wikiKnowledgeProgress, setWikiKnowledgeProgress] = useState<{ done: number; total: number } | null>(null);
+  const [wikiKnowledgeFailures, setWikiKnowledgeFailures] = useState<Record<string, string>>({});
+  const activeKnowledgePapers = useRef(new Set<string>());
+  const knowledgeGeneratingRef = useRef(false);
+
+  async function ensurePaperKnowledge(paper: { id: string; title: string; blockData?: DocumentBlock[] }, force: boolean, requestId: number) {
+    const blocks = paper.blockData ?? [];
+    if (!blocks.length || activeKnowledgePapers.current.has(paper.id)) return;
+    activeKnowledgePapers.current.add(paper.id);
+    setWikiKnowledgeFailures((current) => {
+      if (!current[paper.id]) return current;
+      const next = { ...current };
+      delete next[paper.id];
+      return next;
     });
+    try {
+      const documentSignature = getDocumentSourceSignature(blocks);
+      const cacheIdentity = buildWikiKnowledgeCacheIdentity({
+        paperId: paper.id,
+        serviceIdentity: serviceIdentityRef.current,
+        documentSignature,
+      });
+      let value: string | null = null;
+      if (!force) {
+        const cached = getCachedAnalysis(analysisCache, cacheIdentity.key);
+        if (cached) value = cached.value;
+      }
+      const fromCache = value !== null;
+      if (value === null) {
+        value = await requestAnalysis({ operation: "wiki-knowledge", paper: paper as PaperRecord }, () => undefined, { concurrent: true });
+      }
+      if (analysisRequestIdRef.current !== requestId) return;
+      const parsed = parseKnowledgeEntries(value, blocks);
+      setLibraryWiki((current) => current.error ? current : {
+        ...current,
+        pages: ingestPaperWikiPages(current.pages, {
+          paperId: paper.id,
+          paperTitle: paper.title,
+          contentSignature: documentSignature,
+          points: parsed.entries,
+        }).pages,
+      });
+      if (!fromCache) {
+        setAnalysisCache((current) => {
+          const next = new Map(current);
+          setCachedAnalysis(next, {
+            key: cacheIdentity.key,
+            paperId: paper.id,
+            scopeId: cacheIdentity.scopeId,
+            operation: "wiki-knowledge",
+            sourceSignature: cacheIdentity.sourceSignature,
+            value,
+            createdAt: new Date().toISOString(),
+          });
+          return next;
+        });
+      }
+    } catch (error) {
+      const failure = error as { name?: unknown; message?: unknown } | null;
+      if (analysisRequestIdRef.current === requestId && failure?.name !== "AbortError") {
+        setWikiKnowledgeFailures((current) => ({
+          ...current,
+          [paper.id]: typeof failure?.message === "string" ? failure.message : "知识提取失败，请重试",
+        }));
+      }
+    } finally {
+      activeKnowledgePapers.current.delete(paper.id);
+    }
+  }
+
+  async function ensureLibraryWikiKnowledge(force = false) {
+    if (knowledgeGeneratingRef.current) return;
+    const papersWithBlocks = papersRef.current
+      .filter((paper) => (paper.blockData ?? []).length)
+      .filter((paper) => force || !getCachedAnalysis(
+        analysisCache,
+        buildWikiKnowledgeCacheIdentity({
+          paperId: paper.id,
+          serviceIdentity: serviceIdentityRef.current,
+          documentSignature: getDocumentSourceSignature(paper.blockData ?? []),
+        }).key,
+      ));
+    if (!papersWithBlocks.length) return;
+    if (!getAnalysisAvailability(serviceSettingsRef.current).available) return; // 未配置模型时只用已有缓存
+    const requestId = analysisRequestIdRef.current;
+    knowledgeGeneratingRef.current = true;
+    setWikiKnowledgeProgress({ done: 0, total: papersWithBlocks.length });
+    let done = 0;
+    const queue = [...papersWithBlocks];
+    await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => {
+      while (queue.length && analysisRequestIdRef.current === requestId) {
+        const paper = queue.shift()!;
+        try { await ensurePaperKnowledge(paper, force, requestId); } catch { /* 失败已记录 */ }
+        done += 1;
+        if (analysisRequestIdRef.current === requestId) setWikiKnowledgeProgress({ done, total: papersWithBlocks.length });
+      }
+    }));
+    knowledgeGeneratingRef.current = false;
+    if (analysisRequestIdRef.current === requestId) setWikiKnowledgeProgress(null);
   }
 
   async function ensurePartTree(part: WikiPart, force: boolean, requestId: number) {
@@ -1495,7 +1576,6 @@ export default function App() {
       if (analysisRequestIdRef.current !== requestId || selectedPaperIdRef.current !== paper.id) return;
       const parsed = parsePartTree(value, part, blocks);
       if (selectedPaperIdRef.current !== paper.id) return;
-      ingestLibraryWikiFromTree(paper, parsed.tree);
       wikiPartTreesRef.current = { ...wikiPartTreesRef.current, [part.id]: parsed.tree };
       setWikiPartTrees(wikiPartTreesRef.current);
       setWikiPartStates((current) => {
@@ -1601,6 +1681,9 @@ export default function App() {
     return <>{storageWarning}{settingsDialog}{wordbookDialog}{updateCenter}
       <LibraryWikiView
         pages={libraryWiki.pages}
+        progress={wikiKnowledgeProgress}
+        failures={Object.keys(wikiKnowledgeFailures).length ? wikiKnowledgeFailures : null}
+        onRetryFailed={() => void ensureLibraryWikiKnowledge(true)}
         canJump={(paperId) => {
           const target = papers.find((item) => item.id === paperId);
           return Boolean(target && canOpenPaper(target, pipelineStates[paperId]));

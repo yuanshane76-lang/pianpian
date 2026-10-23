@@ -1,4 +1,4 @@
-import { BookOpenText, ChevronLeft, Search, Share2, Waypoints } from "lucide-react";
+import { BookOpenText, ChevronLeft, LoaderCircle, RefreshCw, Search, Share2, Waypoints } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
   buildLibraryWikiIndex,
@@ -10,13 +10,18 @@ const KIND_LABEL: Record<string, string> = { concept: "概念", method: "方法"
 
 interface Props {
   pages: LibraryWikiPage[];
+  /** 逐篇知识提取进度；null 表示不在提取中。 */
+  progress: { done: number; total: number } | null;
+  /** 提取失败的论文（论文 id → 错误信息）。 */
+  failures: Record<string, string> | null;
+  onRetryFailed: () => void;
   /** 判断某篇论文当前能否打开阅读（用于原文跳转可用性）。 */
   canJump: (paperId: string) => boolean;
   onJump: (paperId: string, blockId: string) => void;
   onBack: () => void;
 }
 
-export function LibraryWikiView({ pages, canJump, onJump, onBack }: Props) {
+export function LibraryWikiView({ pages, progress, failures, onRetryFailed, canJump, onJump, onBack }: Props) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(pages[0]?.id ?? null);
   const [showGraph, setShowGraph] = useState(false);
@@ -38,6 +43,12 @@ export function LibraryWikiView({ pages, canJump, onJump, onBack }: Props) {
       <div className="library-wiki-header-meta">
         <span>{index.pages.length} 个页面</span>
         <span>{index.totalCitations} 条原文锚点</span>
+        {progress ? <span className="library-wiki-progress">
+          <LoaderCircle className="spin" size={11} /> 正在提取 {progress.done}/{progress.total}
+        </span> : null}
+        {failures && !progress ? <button className="text-button" type="button" onClick={onRetryFailed}>
+          <RefreshCw size={12} />{Object.keys(failures).length} 篇提取失败 · 重试
+        </button> : null}
       </div>
       <button type="button" className={`text-button ${showGraph ? "is-active" : ""}`} aria-pressed={showGraph}
         onClick={() => setShowGraph((current) => !current)}>

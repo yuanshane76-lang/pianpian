@@ -2549,7 +2549,8 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
 .library-wiki { height: 100vh; display: flex; flex-direction: column; background: var(--canvas); }
 .library-wiki-header { display: flex; align-items: center; gap: 14px; flex-shrink: 0; min-height: 56px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .library-wiki-title { display: flex; align-items: center; gap: 7px; color: var(--teal-dark); }
-.library-wiki-header-meta { display: flex; gap: 12px; margin-left: auto; color: var(--muted); font-size: 12px; }
+.library-wiki-header-meta { display: flex; align-items: center; gap: 12px; margin-left: auto; color: var(--muted); font-size: 12px; }
+.library-wiki-progress { display: inline-flex; align-items: center; gap: 5px; color: var(--teal-dark); }
 .library-wiki-header .text-button.is-active { color: var(--teal-dark); font-weight: 600; }
 .library-wiki-body { display: grid; grid-template-columns: 300px minmax(0, 1fr); flex: 1; min-height: 0; }
 .library-wiki-list { display: flex; flex-direction: column; gap: 4px; min-height: 0; padding: 12px; border-right: 1px solid var(--line); background: var(--surface); overflow-y: auto; }

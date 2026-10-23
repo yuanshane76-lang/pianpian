@@ -500,6 +500,78 @@ export function computeWikiCoverage(
   return { covered, total };
 }
 
+/** 论文库级知识库的自有协议：独立于单篇思维导图（paper-wiki-v2）演进。 */
+export const LIBRARY_WIKI_PROTOCOL_VERSION = "library-wiki-v1";
+export const KNOWLEDGE_MAX_ENTRIES = 12;
+
+export interface KnowledgeEntry {
+  id: string;
+  kind: "concept" | "method";
+  title: string;
+  statement?: string;
+  anchors: WikiAnchor[];
+  locatable: boolean;
+}
+
+/**
+ * 按论文提取知识条目（论文库级 wiki 的数据源）：只接受 concept/method，
+ * 锚点允许指向全文任意块。与思维导图的要点树互不依赖。
+ */
+export function parseKnowledgeEntries(text: string, blocks: DocumentBlock[]): { entries: KnowledgeEntry[]; stats: WikiEntryParseStats } {
+  const container = parseJsonObject(text);
+  const rawEntries = Array.isArray(container.entries) ? container.entries : [];
+  const blockMap = new Map(blocks.map((block) => [block.id, block]));
+  const allowed = new Set(blockMap.keys());
+  const stats: WikiEntryParseStats = { total: 0, locatable: 0, droppedAnchors: 0, mergedDuplicates: 0 };
+  const entries: KnowledgeEntry[] = [];
+  for (const item of rawEntries) {
+    if (entries.length >= KNOWLEDGE_MAX_ENTRIES) break;
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const source = item as Record<string, unknown>;
+    const title = clean(source.title, 40);
+    if (!title) continue;
+    // 只收知识条目域：concept/method；finding/limitation 等单篇论证直接丢弃。
+    if (source.kind !== "concept" && source.kind !== "method") continue;
+    const anchors: WikiAnchor[] = [];
+    const seen = new Set<string>();
+    for (const candidate of readAnchorIds(source)) {
+      const anchor = resolveAnchor(candidate, seen, allowed, blockMap, stats);
+      if (anchor) anchors.push(anchor);
+      if (anchors.length >= 2) break;
+    }
+    const kind: "concept" | "method" = source.kind;
+    const statement = clean(source.statement, 120);
+    entries.push({
+      id: `k:e${entries.length + 1}`,
+      kind,
+      title,
+      ...(statement ? { statement } : {}),
+      anchors,
+      locatable: anchors.length > 0,
+    });
+  }
+  const deduped = mergeDuplicateEntries(entries);
+  if (!deduped.entries.length) throw new Error("模型没有返回知识条目，请重试");
+  if (!deduped.entries.some((entry) => entry.locatable)) throw new Error("模型没有给出可用的原文锚点，请重试");
+  stats.total = deduped.entries.length;
+  stats.locatable = deduped.entries.filter((entry) => entry.locatable).length;
+  stats.mergedDuplicates = deduped.merged;
+  return { entries: deduped.entries, stats };
+}
+
+export function buildWikiKnowledgeCacheIdentity(options: {
+  paperId: string;
+  serviceIdentity: string;
+  documentSignature: string;
+}): { key: string; scopeId: string; sourceSignature: string } {
+  const sourceSignature = `${options.serviceIdentity}:${options.documentSignature}:${LIBRARY_WIKI_PROTOCOL_VERSION}:knowledge`;
+  return {
+    key: buildAnalysisCacheKey(options.paperId, "paper", "wiki-knowledge", sourceSignature),
+    scopeId: "paper",
+    sourceSignature,
+  };
+}
+
 export function buildWikiThreadCacheIdentity(options: {
   paperId: string;
   serviceIdentity: string;

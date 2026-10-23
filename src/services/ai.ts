@@ -9,7 +9,7 @@ export interface WikiPartContext {
 }
 
 export interface AiRequest {
-  operation: "translate" | "qa" | "explain" | "insight" | "guide" | "chart" | "equation" | "vocabulary" | "wiki-thread" | "wiki-part";
+  operation: "translate" | "qa" | "explain" | "insight" | "guide" | "chart" | "equation" | "vocabulary" | "wiki-thread" | "wiki-part" | "wiki-knowledge";
   paper: PaperRecord;
   block?: DocumentBlock;
   question?: string;

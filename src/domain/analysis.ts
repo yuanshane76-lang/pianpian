@@ -1,6 +1,6 @@
 import { getDocumentBlockSignature, getDocumentContentSignature, type DocumentBlock } from "./documentBlocks";
 
-export type AnalysisOperation = "translate" | "explain" | "qa" | "insight" | "guide" | "chart" | "equation" | "vocabulary" | "wiki-thread" | "wiki-part";
+export type AnalysisOperation = "translate" | "explain" | "qa" | "insight" | "guide" | "chart" | "equation" | "vocabulary" | "wiki-thread" | "wiki-part" | "wiki-knowledge";
 export type ParagraphOperation = "translate" | "explain" | "insight" | "vocabulary";
 export type ParagraphReadingMode = "standard" | "grandma";
 

@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { DocumentBlock } from "../../src/domain/documentBlocks";
 import {
-  buildWikiPartCacheIdentity,
-  buildWikiParts,
-  getWikiPartSignature,
+  buildWikiKnowledgeCacheIdentity,
+  parseKnowledgeEntries,
 } from "../../src/domain/paperWiki";
 import {
   buildLibraryWikiIndex,
-  collectBackfillSources,
   ingestPaperWikiPages,
   libraryWikiPageId,
   parseLibraryWikiPages,
@@ -113,44 +111,45 @@ describe("library wiki links (Obsidian-style)", () => {
   });
 });
 
-describe("library wiki backfill from caches", () => {
+describe("per-paper knowledge extraction", () => {
   const blocks: DocumentBlock[] = [
     { id: "h1", pageNumber: 1, order: 0, kind: "heading", text: "1 Method", headingLevel: 1 },
-    { id: "b1", pageNumber: 1, order: 1, kind: "paragraph", text: "We use attention." },
+    { id: "b1", pageNumber: 1, order: 1, kind: "paragraph", text: "We use attention for X." },
+    { id: "b2", pageNumber: 2, order: 2, kind: "paragraph", text: "The dataset is Z." },
   ];
-  const partTreeJson = JSON.stringify({
-    children: [{ title: "要点", children: [
-      { kind: "concept", title: "注意力机制", statement: "按相关度加权", anchorBlockIds: ["b1"] },
-    ] }],
-  });
 
-  it("collects ingest sources from cached part trees without model calls", () => {
-    const parts = buildWikiParts(blocks);
-    const identity = buildWikiPartCacheIdentity({
-      paperId: "p1", serviceIdentity: "rev:a:m", partId: parts[0].id,
-      partSignature: getWikiPartSignature(parts[0], blocks),
-    });
-    const cache = new Map([[identity.key, { value: partTreeJson }]]);
-    const sources = collectBackfillSources([{ id: "p1", title: "论文一", blockData: blocks }], cache, "rev:a:m");
-    expect(sources).toHaveLength(1);
-    expect(sources[0]).toMatchObject({ paperId: "p1", paperTitle: "论文一" });
-    expect(sources[0].points[0]).toMatchObject({ kind: "concept", title: "注意力机制" });
-    // 直接可入库
-    const pages = ingestPaperWikiPages([], sources[0]).pages;
-    expect(pages[0].occurrences.p1.citations[0]).toMatchObject({ blockId: "b1" });
-  });
-
-  it("skips papers without matching caches and tolerates stale entries", () => {
-    const sources = collectBackfillSources(
-      [
-        { id: "p1", title: "有缓存", blockData: blocks },
-        { id: "p2", title: "无缓存", blockData: blocks },
+  it("parses concept/method entries with paper-wide anchors and feeds the library wiki", () => {
+    const parsed = parseKnowledgeEntries(JSON.stringify({
+      entries: [
+        { kind: "method", title: "注意力机制", statement: "按相关度加权特征", anchorBlockIds: ["b1"] },
+        { kind: "concept", title: "数据集 Z", anchorBlockIds: ["b2"] },
+        { kind: "finding", title: "提升 3%", anchorBlockIds: ["b1"] },
+        { kind: "concept", title: "幻觉条目", anchorBlockIds: ["p999-b999"] },
       ],
-      new Map(), // 空缓存
-      "rev:a:m",
-    );
-    expect(sources).toHaveLength(0);
-    const stale = new Map([["unrelated-key", { value: "not json {" }]]);
-    expect(collectBackfillSources([{ id: "p1", title: "坏缓存", blockData: blocks }], stale, "rev:a:m")).toHaveLength(0);
+    }), blocks);
+    // finding 不属于知识条目域，解析即丢弃；越界锚点被丢弃但条目保留
+    expect(parsed.entries.map((entry) => entry.title)).toEqual(["注意力机制", "数据集 Z", "幻觉条目"]);
+    expect(parsed.entries[0]).toMatchObject({ kind: "method", locatable: true });
+    expect(parsed.entries[2].locatable).toBe(false);
+    expect(parsed.stats.droppedAnchors).toBe(1);
+    const pages = ingestPaperWikiPages([], {
+      paperId: "p1", paperTitle: "论文一", contentSignature: "s1",
+      points: parsed.entries.map((entry) => ({ ...entry, sectionId: undefined })),
+    }).pages;
+    expect(pages.map((page) => page.title)).toEqual(["注意力机制", "数据集 Z"]);
+  });
+
+  it("rejects empty or fully unlocatable knowledge output", () => {
+    expect(() => parseKnowledgeEntries('{"entries":[]}', blocks)).toThrow(/没有返回知识条目/);
+    expect(() => parseKnowledgeEntries('{"entries":[{"kind":"concept","title":"x","anchorBlockIds":["nope"]}]}', blocks))
+      .toThrow(/没有给出可用的原文锚点/);
+  });
+
+  it("binds the knowledge cache to its own protocol independent of the mindmap", () => {
+    const identity = buildWikiKnowledgeCacheIdentity({ paperId: "p1", serviceIdentity: "rev:a:m", documentSignature: "doc-a" });
+    expect(identity.key).toContain("wiki-knowledge");
+    expect(identity.key).toContain("library-wiki-v1");
+    const changed = buildWikiKnowledgeCacheIdentity({ paperId: "p1", serviceIdentity: "rev:a:m", documentSignature: "doc-b" });
+    expect(identity.key).not.toBe(changed.key);
   });
 });
