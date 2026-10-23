@@ -9,9 +9,7 @@ import {
   type DocumentBlock,
 } from "../domain/documentBlocks";
 import {
-  buildOutlineFocusPath,
   projectOutlineMap,
-  type OutlineFocusCrumb,
   type OutlineNode,
 } from "../domain/outlineMap";
 import {
@@ -155,10 +153,16 @@ export default function App() {
   const [wikiSectionStates, setWikiSectionStates] = useState<Record<string, { state: "loading" | "error"; error?: string }>>({});
   const [wikiSectionStats, setWikiSectionStats] = useState<Record<string, WikiEntryParseStats>>({});
   const [wikiThreadStats, setWikiThreadStats] = useState<WikiEntryParseStats | null>(null);
-  const [outlineFocusId, setOutlineFocusId] = useState<string | null>(null);
+  const [wikiProgress, setWikiProgress] = useState<{ done: number; total: number } | null>(null);
+  const [outlineFitSignal, setOutlineFitSignal] = useState(0);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [outlineError, setOutlineError] = useState<string | null>(null);
   const [outlineSelectedId, setOutlineSelectedId] = useState<string | null>(null);
+  // 异步批量生成跨越多次渲染，读取一律走 ref，避免闭包拿到旧状态。
+  const paperWikiRef = useRef(paperWiki);
+  const wikiSectionEntriesRef = useRef(wikiSectionEntries);
+  const activeWikiSections = useRef(new Set<string>());
+  const wikiGeneratingRef = useRef(false);
   const serviceSettingsRef = useRef(serviceSettings);
   serviceSettingsRef.current = serviceSettings;
 
@@ -326,12 +330,16 @@ export default function App() {
   }, [selectedPaperId]);
 
   useEffect(() => {
+    paperWikiRef.current = null;
+    wikiSectionEntriesRef.current = {};
+    activeWikiSections.current.clear();
+    wikiGeneratingRef.current = false;
     setPaperWiki(null);
     setWikiSectionEntries({});
     setWikiSectionStates({});
     setWikiSectionStats({});
     setWikiThreadStats(null);
-    setOutlineFocusId(null);
+    setWikiProgress(null);
     setOutlineOpen(false);
     setOutlineError(null);
     setOutlineSelectedId(null);
@@ -372,13 +380,6 @@ export default function App() {
         + Object.values(wikiSectionStats).reduce((sum, stats) => sum + stats.mergedDuplicates, 0),
     });
   }, [paperWiki, selectedPaper, wikiSectionEntries, wikiSectionStates, wikiThreadStats, wikiSectionStats]);
-  const outlineFocusPath = useMemo<OutlineFocusCrumb[]>(
-    () => buildOutlineFocusPath(paperWiki?.sections ?? [], outlineFocusId),
-    [paperWiki, outlineFocusId],
-  );
-  const outlineFocusedTitle = outlineFocusId && outlineFocusPath.length > 1
-    ? outlineFocusPath[outlineFocusPath.length - 1].title
-    : null;
   const visiblePapers = useMemo(() => {
     const groupNames = new Map(groups.map((group) => [group.id, group.name]));
     let filtered = filterPapers(papers, query, groupNames);
@@ -1295,7 +1296,7 @@ export default function App() {
     }
   }
 
-  // 文章架构 = 本地标题骨架（真值）+ 论证主线（一次小调用）+ 章节条目（进入章节时懒生成、按章缓存）。
+  // 文章架构 = 本地标题骨架（真值）+ 论证主线 + 全部章节条目，一次性限流并发生成（无懒加载）。
   async function handleBuildOutline(force = false) {
     if (!selectedPaper) return;
     if (!force && paperWiki) {
@@ -1303,64 +1304,124 @@ export default function App() {
       return;
     }
     if (!availability.available) { setSettingsOpen(true); return; }
+    if (wikiGeneratingRef.current) return;
     const paper = selectedPaper;
     const blocks = paper.blockData ?? [];
     const sections = buildSectionSkeleton(blocks);
     setOutlineOpen(true);
     if (!sections.length) {
+      paperWikiRef.current = null;
       setPaperWiki(null);
       setOutlineError("当前论文还没有可分析的正文块");
       return;
     }
-    if (isBusy) return;
 
-    const identity = serviceIdentity;
-    const documentSignature = getDocumentSourceSignature(blocks);
-    const cacheIdentity = buildWikiThreadCacheIdentity({
+    const requestId = analysisRequestIdRef.current;
+    const flat = flattenSections(sections).filter((section) => section.blockIds.length);
+    if (force) {
+      wikiSectionEntriesRef.current = {};
+      setWikiSectionEntries({});
+      setWikiSectionStats({});
+      setWikiThreadStats(null);
+    }
+    // 骨架立即可见：主线与条目并发生成，完成的章节陆续挂上。
+    paperWikiRef.current = { title: paper.title, sections, thread: force ? [] : paperWikiRef.current?.thread ?? [] };
+    setPaperWiki(paperWikiRef.current);
+    setOutlineError(null);
+    setOutlineSelectedId(null);
+
+    const identity = serviceIdentityRef.current;
+    const threadIdentity = buildWikiThreadCacheIdentity({
       paperId: paper.id,
       serviceIdentity: identity,
-      documentSignature,
+      documentSignature: getDocumentSourceSignature(blocks),
     });
+
+    const tasks: Array<() => Promise<void>> = [];
+    let threadFromCache: { title: string; entries: WikiEntry[]; stats: WikiEntryParseStats } | null = null;
     if (!force) {
-      const cached = getCachedAnalysis(analysisCache, cacheIdentity.key);
+      const cached = getCachedAnalysis(analysisCache, threadIdentity.key);
       if (cached) {
         try {
           const parsed = parseThreadEntries(cached.value, blocks);
-          setPaperWiki({ title: parsed.title || paper.title, sections, thread: parsed.entries });
-          setWikiThreadStats(parsed.stats);
-          setOutlineError(null);
-          setOutlineFocusId(null);
-          setOutlineSelectedId(null);
-          return;
+          threadFromCache = { title: parsed.title, entries: parsed.entries, stats: parsed.stats };
         } catch {
-          // 缓存与当前文档不匹配，落到下方重新生成。
+          // 缓存与当前文档不匹配，作为任务重新生成。
         }
       }
     }
+    if (threadFromCache) {
+      setWikiThreadStats(threadFromCache.stats);
+      paperWikiRef.current = { title: threadFromCache.title || paper.title, sections, thread: threadFromCache.entries };
+      setPaperWiki(paperWikiRef.current);
+    } else {
+      tasks.push(() => runWikiThread(paper, sections, threadIdentity, requestId));
+    }
 
-    const requestId = analysisRequestIdRef.current;
-    setOutlineError(null);
-    setOutlineFocusId(null);
-    setOutlineSelectedId(null);
-    setIsBusy(true);
-    setPendingAction("wiki-thread");
-    setActionError(null);
+    const targetSections = flat.filter((section) => force || !wikiSectionEntriesRef.current[section.id]?.length);
+    for (const section of targetSections) {
+      tasks.push(() => ensureSectionEntries(section, sections, force, requestId));
+    }
+    if (!tasks.length) {
+      setWikiSectionStates({});
+      setOutlineFitSignal((signal) => signal + 1);
+      return;
+    }
+    // 排队中的章节先标记为生成中，整棵树一次铺开。
+    setWikiSectionStates(() => {
+      const next: Record<string, { state: "loading" | "error"; error?: string }> = {};
+      for (const section of targetSections) next[section.id] = { state: "loading" };
+      return next;
+    });
+
+    wikiGeneratingRef.current = true;
+    setWikiProgress({ done: 0, total: tasks.length });
+    let done = 0;
+    const queue = [...tasks];
+    await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => {
+      while (queue.length && analysisRequestIdRef.current === requestId && selectedPaperIdRef.current === paper.id) {
+        const task = queue.shift()!;
+        try { await task(); } catch { /* 单任务失败已各自记录状态 */ }
+        done += 1;
+        if (analysisRequestIdRef.current === requestId && selectedPaperIdRef.current === paper.id) {
+          setWikiProgress({ done, total: tasks.length });
+        }
+      }
+    }));
+    wikiGeneratingRef.current = false;
+    if (analysisRequestIdRef.current === requestId && selectedPaperIdRef.current === paper.id) {
+      setWikiProgress(null);
+      setOutlineFitSignal((signal) => signal + 1);
+    }
+  }
+
+  async function runWikiThread(
+    paper: NonNullable<typeof selectedPaper>,
+    sections: WikiSection[],
+    cacheIdentity: ReturnType<typeof buildWikiThreadCacheIdentity>,
+    requestId: number,
+  ) {
+    const blocks = paper.blockData ?? [];
     try {
-      const flat = flattenSections(sections);
       const value = await requestAnalysis({
         operation: "wiki-thread",
         paper,
-        wikiSkeleton: flat.map((section) => ({
+        wikiSkeleton: flattenSections(sections).map((section) => ({
           id: section.id,
           title: section.title,
           level: section.level,
           ...(section.level === 1 && section.blockIds.length ? { firstBlockIds: section.blockIds.slice(0, 1) } : {}),
         })),
-      }, () => undefined);
-      if (analysisRequestIdRef.current !== requestId) return;
+      }, () => undefined, { concurrent: true });
+      if (analysisRequestIdRef.current !== requestId || selectedPaperIdRef.current !== paper.id) return;
       const parsed = parseThreadEntries(value, blocks);
-      setPaperWiki({ title: parsed.title || paper.title, sections, thread: parsed.entries });
       setWikiThreadStats(parsed.stats);
+      paperWikiRef.current = {
+        title: parsed.title || paper.title,
+        sections,
+        thread: parsed.entries,
+      };
+      setPaperWiki(paperWikiRef.current);
       setAnalysisCache((current) => {
         const next = new Map(current);
         setCachedAnalysis(next, {
@@ -1376,47 +1437,39 @@ export default function App() {
       });
     } catch (error) {
       const failure = error as { name?: unknown; message?: unknown } | null;
-      if (analysisRequestIdRef.current !== requestId || failure?.name === "AbortError") return;
-      // 主线失败不拦章节结构：骨架是本地真值，章节照常可进入（借鉴 wiki 项目“链接失败不丢笔记”）。
-      setPaperWiki({ title: paper.title, sections, thread: [] });
-      setWikiThreadStats(null);
+      if (analysisRequestIdRef.current !== requestId || selectedPaperIdRef.current !== paper.id || failure?.name === "AbortError") return;
+      // 主线失败不拦章节结构：骨架是本地真值，条目照常生成（借鉴 wiki 项目“链接失败不丢笔记”）。
       setOutlineError(typeof failure?.message === "string" ? failure.message : "论证主线生成失败，请重试");
-    } finally {
-      if (analysisRequestIdRef.current === requestId) {
-        setIsBusy(false);
-        setPendingAction(null);
-      }
     }
   }
 
-  async function ensureSectionEntries(section: WikiSection, force = false) {
-    if (!selectedPaper || !paperWiki) return;
+  async function ensureSectionEntries(section: WikiSection, sections: WikiSection[], force: boolean, requestId: number) {
     if (!section.blockIds.length) return;
-    if (!force && (wikiSectionEntries[section.id]?.length || wikiSectionStates[section.id]?.state === "loading")) return;
-    if (!availability.available) { setSettingsOpen(true); return; }
-    const paper = selectedPaper;
-    const blocks = paper.blockData ?? [];
-    const sectionSignature = getWikiSectionSignature(section, blocks);
-    const cacheIdentity = buildWikiSectionCacheIdentity({
-      paperId: paper.id,
-      serviceIdentity,
-      sectionId: section.id,
-      sectionSignature,
-    });
-    if (!force) {
-      const cached = getCachedAnalysis(analysisCache, cacheIdentity.key);
-      if (cached) {
-        try {
-          applySectionEntries(section.id, parseSectionEntries(cached.value, section, blocks));
-          return;
-        } catch {
-          // 章节内容已变化，缓存失效，落到下方重新生成。
-        }
-      }
-    }
-    const requestId = analysisRequestIdRef.current;
+    if (activeWikiSections.current.has(section.id)) return;
+    const paper = papersRef.current.find((item) => item.id === selectedPaperIdRef.current);
+    if (!paper) return;
+    if (!force && wikiSectionEntriesRef.current[section.id]?.length) return;
+    activeWikiSections.current.add(section.id);
     setWikiSectionStates((current) => ({ ...current, [section.id]: { state: "loading" } }));
     try {
+      const blocks = paper.blockData ?? [];
+      const cacheIdentity = buildWikiSectionCacheIdentity({
+        paperId: paper.id,
+        serviceIdentity: serviceIdentityRef.current,
+        sectionId: section.id,
+        sectionSignature: getWikiSectionSignature(section, blocks),
+      });
+      if (!force) {
+        const cached = getCachedAnalysis(analysisCache, cacheIdentity.key);
+        if (cached) {
+          try {
+            applySectionEntries(section.id, parseSectionEntries(cached.value, section, blocks), paper.id);
+            return;
+          } catch {
+            // 章节内容已变化，缓存失效，落到下方重新生成。
+          }
+        }
+      }
       const wanted = new Set<string>([section.id, ...section.blockIds]);
       const sectionBlocks = blocks.filter((block) => wanted.has(block.id));
       const value = await requestAnalysis({
@@ -1425,13 +1478,13 @@ export default function App() {
         wikiSection: {
           id: section.id,
           title: section.title,
-          path: getWikiSectionPath(paperWiki.sections, section.id) || section.title,
-          siblingTitles: getWikiSiblingTitles(paperWiki.sections, section.id),
+          path: getWikiSectionPath(sections, section.id) || section.title,
+          siblingTitles: getWikiSiblingTitles(sections, section.id),
         },
       }, () => undefined, { concurrent: true });
-      if (analysisRequestIdRef.current !== requestId) return;
+      if (analysisRequestIdRef.current !== requestId || selectedPaperIdRef.current !== paper.id) return;
       const parsed = parseSectionEntries(value, section, blocks);
-      applySectionEntries(section.id, parsed);
+      applySectionEntries(section.id, parsed, paper.id);
       setAnalysisCache((current) => {
         const next = new Map(current);
         setCachedAnalysis(next, {
@@ -1447,26 +1500,26 @@ export default function App() {
       });
     } catch (error) {
       const failure = error as { name?: unknown; message?: unknown } | null;
-      if (analysisRequestIdRef.current !== requestId || failure?.name === "AbortError") return;
+      if (analysisRequestIdRef.current !== requestId || selectedPaperIdRef.current !== paper.id || failure?.name === "AbortError") return;
       setWikiSectionStates((current) => ({
         ...current,
         [section.id]: { state: "error", error: typeof failure?.message === "string" ? failure.message : "章节条目生成失败，请重试" },
       }));
+    } finally {
+      activeWikiSections.current.delete(section.id);
     }
   }
 
-  function applySectionEntries(sectionId: string, parsed: { entries: WikiEntry[]; stats: WikiEntryParseStats }) {
-    setWikiSectionEntries((current) => ({ ...current, [sectionId]: parsed.entries }));
+  function applySectionEntries(sectionId: string, parsed: { entries: WikiEntry[]; stats: WikiEntryParseStats }, paperId: string) {
+    if (selectedPaperIdRef.current !== paperId) return;
+    wikiSectionEntriesRef.current = { ...wikiSectionEntriesRef.current, [sectionId]: parsed.entries };
+    setWikiSectionEntries(wikiSectionEntriesRef.current);
     setWikiSectionStats((current) => ({ ...current, [sectionId]: parsed.stats }));
     setWikiSectionStates((current) => {
       const next = { ...current };
       delete next[sectionId];
       return next;
     });
-  }
-
-  function findWikiSection(sectionId: string): WikiSection | null {
-    return paperWiki ? flattenSections(paperWiki.sections).find((section) => section.id === sectionId) ?? null : null;
   }
 
   function handleOutlineSelect(node: OutlineNode) {
@@ -1481,25 +1534,11 @@ export default function App() {
     });
   }
 
-  function handleOutlineEnterSection(node: OutlineNode) {
-    const section = node.sectionId ? findWikiSection(node.sectionId) : null;
-    if (!section) return;
-    setOutlineFocusId(section.id);
-    setOutlineSelectedId(null);
-    void ensureSectionEntries(section);
-  }
-
-  function handleOutlineNavigate(crumb: OutlineFocusCrumb) {
-    setOutlineFocusId(crumb.id);
-    setOutlineSelectedId(null);
-    const section = crumb.id ? findWikiSection(crumb.id) : null;
-    if (section) void ensureSectionEntries(section);
-  }
-
-  function handleOutlineRegenerate() {
-    const focused = outlineFocusId ? findWikiSection(outlineFocusId) : null;
-    if (focused) void ensureSectionEntries(focused, true);
-    else void handleBuildOutline(true);
+  function handleOutlineRetrySection(node: OutlineNode) {
+    const wiki = paperWikiRef.current;
+    const section = node.sectionId ? flattenSections(wiki?.sections ?? []).find((item) => item.id === node.sectionId) : null;
+    if (!section || !wiki) return;
+    void ensureSectionEntries(section, wiki.sections, true, analysisRequestIdRef.current);
   }
 
   const storageWarning = storageError ? (
@@ -1583,20 +1622,15 @@ export default function App() {
           onBuildOutline={() => void handleBuildOutline()}
           outlinePanel={outlineOpen ? <OutlineDrawer
             map={outlineMap}
-            status={pendingAction === "wiki-thread" && !outlineMap ? "loading" : !outlineMap && outlineError ? "error" : "ready"}
+            status={!outlineMap && outlineError ? "error" : "ready"}
             error={outlineError}
-            focusPath={outlineFocusPath}
-            focusedTitle={outlineFocusedTitle}
+            progress={wikiProgress}
+            fitSignal={outlineFitSignal}
             selectedId={outlineSelectedId}
             onSelect={handleOutlineSelect}
-            onNavigate={handleOutlineNavigate}
-            onEnterSection={handleOutlineEnterSection}
-            onRetrySection={(node) => {
-              const section = node.sectionId ? findWikiSection(node.sectionId) : null;
-              if (section) void ensureSectionEntries(section, true);
-            }}
+            onRetrySection={handleOutlineRetrySection}
             onClose={() => setOutlineOpen(false)}
-            onRegenerate={handleOutlineRegenerate}
+            onRegenerate={() => void handleBuildOutline(true)}
           /> : undefined}
           onBack={() => { invalidateAnalysisRequests(); setView("library"); }}
           onSelectBlock={(block) => {

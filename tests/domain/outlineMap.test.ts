@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DocumentBlock } from "../../src/domain/documentBlocks";
-import { buildSectionSkeleton, type WikiEntry, type WikiSection } from "../../src/domain/paperWiki";
+import { buildSectionSkeleton, type WikiEntry } from "../../src/domain/paperWiki";
 import {
-  buildOutlineFocusPath,
   findOutlineNode,
   projectOutlineMap,
 } from "../../src/domain/outlineMap";
@@ -66,11 +65,11 @@ describe("outline projection", () => {
     expect(methodSection.anchors[0]).toMatchObject({ blockId: "p002-b001", pageNumber: 2 });
   });
 
-  it("marks sections pending until their entries load, then nests entries under them", () => {
+  it("keeps sections loading until their entries arrive, then nests entries under them", () => {
     const introSection = project().nodes.find((node) => node.id === "p001-b001")!;
-    expect(introSection.sectionState).toBe("pending");
+    expect(introSection.sectionState).toBe("loading");
     const map = project({ sectionEntries: {} });
-    expect(map.nodes.find((node) => node.id === "p002-b001")!.sectionState).toBe("pending");
+    expect(map.nodes.find((node) => node.id === "p002-b001")!.sectionState).toBe("loading");
     expect(map.stats.sectionsGenerated).toBe(0);
     expect(map.stats.sectionsTotal).toBe(2);
 
@@ -80,9 +79,7 @@ describe("outline projection", () => {
     expect(loaded.stats.sectionsGenerated).toBe(1);
   });
 
-  it("propagates loading and error section states", () => {
-    const loading = project({ sectionStates: { "p001-b001": { state: "loading" } } });
-    expect(loading.nodes.find((node) => node.id === "p001-b001")!.sectionState).toBe("loading");
+  it("propagates error section states with their message", () => {
     const failed = project({ sectionStates: { "p001-b001": { state: "error", error: "服务超时" } } });
     const node = failed.nodes.find((item) => item.id === "p001-b001")!;
     expect(node.sectionState).toBe("error");
@@ -104,16 +101,9 @@ describe("outline projection", () => {
     expect(map.stats.contentBlocks).toBe(2);
   });
 
-  it("finds nodes recursively and builds the focus breadcrumb", () => {
+  it("finds nodes recursively", () => {
     const map = project();
     expect(findOutlineNode(map.nodes, "thread:e1")?.title).toBe("研究问题");
     expect(findOutlineNode(map.nodes, "nope")).toBeNull();
-    const sections2: WikiSection[] = buildSectionSkeleton([
-      { id: "h1", pageNumber: 1, order: 0, kind: "heading", text: "3 方法", headingLevel: 1 },
-      { id: "h2", pageNumber: 2, order: 1, kind: "heading", text: "3.1 数据", headingLevel: 2 },
-      { id: "b1", pageNumber: 2, order: 2, kind: "paragraph", text: "Data." },
-    ]);
-    expect(buildOutlineFocusPath(sections2, "h2").map((crumb) => crumb.title)).toEqual(["总览", "3 方法", "3.1 数据"]);
-    expect(buildOutlineFocusPath(sections2, null).map((crumb) => crumb.title)).toEqual(["总览"]);
   });
 });

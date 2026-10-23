@@ -2,14 +2,14 @@ import { hierarchy, tree } from "d3-hierarchy";
 import { select } from "d3-selection";
 import { zoom as createZoom, zoomIdentity } from "d3-zoom";
 import { useEffect, useRef, useState } from "react";
-import { findOutlineNode, type OutlineNode, type OutlineNodeKind } from "../../domain/outlineMap";
+import type { OutlineNode, OutlineNodeKind } from "../../domain/outlineMap";
 
 interface Props {
   nodes: OutlineNode[];
-  focusId: string | null;
   selectedId: string | null;
+  /** 批量生成完成等需要重新适配视口的时机，由上层递增。 */
+  fitSignal: number;
   onSelect: (node: OutlineNode) => void;
-  onEnterSection: (node: OutlineNode) => void;
   onRetrySection: (node: OutlineNode) => void;
 }
 
@@ -55,20 +55,19 @@ function linkPath(source: { x: number; y: number }, target: { x: number; y: numb
   return `M${x1},${y1}C${middle},${y1} ${middle},${y2} ${x2},${y2}`;
 }
 
-export function OutlineTree({ nodes, focusId, selectedId, onSelect, onEnterSection, onRetrySection }: Props) {
+export function OutlineTree({ nodes, selectedId, fitSignal, onSelect, onRetrySection }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const svgRef = useRef<SVGSVGElement>(null);
   const groupRef = useRef<SVGGElement>(null);
+  // 只在顶层结构变化时重置折叠；全量生成期间章节条目陆续就位不打断用户的折叠状态。
+  const rootNodeKey = nodes.map((node) => node.id).join(",");
 
   useEffect(() => {
     setCollapsed(new Set());
-  }, [nodes, focusId]);
-
-  const focused = findOutlineNode(nodes, focusId);
-  const visibleNodes = focusId ? focused?.children ?? [] : nodes;
+  }, [rootNodeKey]);
 
   const layout = (() => {
-    const rootDatum: TreeDatum = { id: "__root__", node: null, children: visibleChildren(visibleNodes, collapsed) };
+    const rootDatum: TreeDatum = { id: "__root__", node: null, children: visibleChildren(nodes, collapsed) };
     const root = hierarchy<TreeDatum>(rootDatum, (datum) => datum.children);
     const engine = tree<TreeDatum>().nodeSize([ROW_GAP, COLUMN_GAP]);
     const laid = engine(root);
@@ -83,7 +82,7 @@ export function OutlineTree({ nodes, focusId, selectedId, onSelect, onEnterSecti
     const group = groupRef.current;
     if (!svg || !group) return;
     const zoom = createZoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.3, 2.2])
+      .scaleExtent([0.05, 2.2])
       .on("zoom", (event) => {
         select(group).attr("transform", event.transform.toString());
       });
@@ -100,14 +99,14 @@ export function OutlineTree({ nodes, focusId, selectedId, onSelect, onEnterSecti
       const maxY = Math.max(...ys) + NODE_WIDTH;
       const contentWidth = maxY - minY + 64;
       const contentHeight = maxX - minX + 64;
-      const scale = Math.max(0.3, Math.min(1, (rect.width - 24) / contentWidth, (rect.height - 24) / contentHeight));
+      const scale = Math.max(0.05, Math.min(1, (rect.width - 24) / contentWidth, (rect.height - 24) / contentHeight));
       const translateX = (rect.width - contentWidth * scale) / 2 - minY * scale + 12;
       const translateY = (rect.height - contentHeight * scale) / 2 - minX * scale + 12;
       selection.call(zoom.transform, zoomIdentity.translate(translateX, translateY).scale(scale));
     }
     return () => { selection.on(".zoom", null); };
-    // Re-fit when the visible tree changes (focus switch or new nodes); collapse keeps the viewport.
-  }, [nodes, focusId, visibleNodes.length]);
+    // 顶层结构变化或全量生成完成时重新适配视口；折叠展开和条目陆续就位保持当前视口。
+  }, [rootNodeKey, fitSignal]);
 
   function toggle(id: string) {
     setCollapsed((current) => {
@@ -127,16 +126,13 @@ export function OutlineTree({ nodes, focusId, selectedId, onSelect, onEnterSecti
       {layout.points.map((point) => {
         const node = point.data.node!;
         const selected = node.id === selectedId;
-        const isSection = Boolean(node.structural && node.sectionId === node.id);
         const hasChildren = node.children.length > 0;
         const isCollapsed = collapsed.has(node.id);
         const stateLabel = node.sectionState === "loading"
           ? "条目生成中…"
           : node.sectionState === "error"
             ? "生成失败 · 点击重试"
-            : node.sectionState === "pending"
-              ? "待生成 · 进入后自动提炼"
-              : KIND_LABEL[node.kind] + (node.structural || node.locatable ? "" : " · 未定位");
+            : KIND_LABEL[node.kind] + (node.structural || node.locatable ? "" : " · 未定位");
         return <g
           key={node.id}
           className={`outline-node ${selected ? "is-selected" : ""} ${node.structural ? "is-structural" : ""} `
@@ -151,15 +147,7 @@ export function OutlineTree({ nodes, focusId, selectedId, onSelect, onEnterSecti
           <rect x={0} y={-NODE_HEIGHT / 2} width={NODE_WIDTH} height={NODE_HEIGHT} rx={8} />
           <text className="outline-node-title" x={12} y={-3}>{truncate(node.title, 20)}</text>
           <text className="outline-node-kind" x={12} y={15}>{stateLabel}</text>
-          {isSection ? <g
-            className="outline-node-enter"
-            onClick={(event) => { event.stopPropagation(); onEnterSection(node); }}
-            role="button"
-            aria-label={`进入 ${node.title}`}
-          >
-            <circle cx={NODE_WIDTH - 18} cy={0} r={9} />
-            <text x={NODE_WIDTH - 18} y={4}>▸</text>
-          </g> : hasChildren ? <g
+          {hasChildren ? <g
             className="outline-node-toggle"
             onClick={(event) => { event.stopPropagation(); toggle(node.id); }}
           >
@@ -169,7 +157,7 @@ export function OutlineTree({ nodes, focusId, selectedId, onSelect, onEnterSecti
         </g>;
       })}
       {!layout.points.length ? <text className="outline-tree-empty" x={24} y={40}>
-        {focusId ? "该章节还没有展开的内容" : "还没有可展示的架构"}
+        还没有可展示的架构
       </text> : null}
     </g>
   </svg>;

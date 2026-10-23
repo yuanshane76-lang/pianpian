@@ -2651,13 +2651,8 @@ html[data-theme="dark"] .reader-assistant {
 .outline-drawer-title strong { font-size: 13px; }
 .outline-drawer-note { color: var(--muted); font-size: 11px; white-space: nowrap; }
 .outline-drawer-actions { display: flex; gap: 2px; }
-.outline-breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; flex-shrink: 0; padding: 8px 16px; border-bottom: 1px solid var(--line); }
-.outline-breadcrumb-item { display: inline-flex; align-items: center; gap: 2px; color: var(--muted); }
-.outline-breadcrumb-item svg { color: var(--muted); }
-.outline-breadcrumb-item button { padding: 3px 6px; background: transparent; border: 0; border-radius: 4px; color: var(--muted-strong); font-size: 12px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.outline-breadcrumb-item button:hover, .outline-breadcrumb-item button:focus-visible { background: var(--teal-soft); color: var(--teal-dark); }
-.outline-breadcrumb-item button[aria-current="page"] { color: var(--ink); font-weight: 600; }
-.outline-drawer-meta { display: flex; flex-wrap: wrap; gap: 10px; flex-shrink: 0; padding: 7px 16px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.outline-drawer-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; flex-shrink: 0; padding: 7px 16px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.outline-drawer-progress { display: inline-flex; align-items: center; gap: 5px; color: var(--teal-dark); }
 .outline-drawer-body { position: relative; flex: 1; min-height: 0; }
 .outline-status { display: flex; align-items: center; gap: 8px; padding: 24px; color: var(--muted-strong); font-size: 13px; }
 .outline-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 16px; padding: 12px; color: var(--danger-ink); background: var(--danger-bg); border: 1px solid var(--danger-line); border-radius: 6px; font-size: 12px; line-height: 1.7; }
@@ -2671,8 +2666,6 @@ html[data-theme="dark"] .reader-assistant {
 .outline-node.is-unlocatable rect { stroke-dasharray: 4 3; }
 .outline-node.is-structural rect { fill: var(--teal-soft); stroke: var(--teal); }
 .outline-node.is-structural .outline-node-title { fill: var(--teal-dark); }
-.outline-node.is-pending rect { stroke-dasharray: 4 3; }
-.outline-node.is-pending .outline-node-kind { fill: var(--muted); font-style: italic; }
 .outline-node.is-loading rect { animation: outline-pulse 1.2s ease-in-out infinite; }
 .outline-node.is-error rect { stroke: var(--danger-line, #d97706); }
 .outline-node.is-error .outline-node-kind { fill: var(--danger-ink, #b45309); }

@@ -16,8 +16,8 @@ export interface OutlineNode {
   structural?: boolean;
   /** 所属章节；章节节点指向自己，条目节点指向来源章节。 */
   sectionId?: string;
-  /** 章节子图尚未生成/生成中/失败的状态，仅章节节点携带。 */
-  sectionState?: "pending" | "loading" | "error";
+  /** 章节条目生成中/失败的状态，仅章节节点携带；一次性全量生成下没有“待生成”。 */
+  sectionState?: "loading" | "error";
   sectionError?: string;
   children: OutlineNode[];
 }
@@ -81,9 +81,9 @@ function sectionNode(section: WikiSection, input: OutlineProjectionInput): Outli
     locatable: Boolean(section.headingBlockId),
     structural: true,
     sectionId: section.id,
-    ...(entries.length ? {} : state?.state === "loading" ? { sectionState: "loading" as const } : state?.state === "error"
+    ...(entries.length ? {} : state?.state === "error"
       ? { sectionState: "error" as const, sectionError: state.error }
-      : { sectionState: "pending" as const }),
+      : { sectionState: "loading" as const }),
     children,
   };
 }
@@ -101,9 +101,19 @@ function countNodes(nodes: OutlineNode[]): { total: number; locatable: number } 
   return { total, locatable };
 }
 
+export function findOutlineNode(nodes: OutlineNode[], id: string | null): OutlineNode | null {
+  if (!id) return null;
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    const hit = findOutlineNode(node.children, id);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 /**
  * 投影：把本地骨架 + 模型条目组装成思维导图树。视图无关，领域层不依赖渲染。
- * 顶层 = 论证主线分支 + 各一级章节；章节节点的子树在条目未生成前保持“待生成”。
+ * 顶层 = 论证主线分支 + 各一级章节；全量生成期间章节保持“生成中”直至条目就位。
  */
 export function projectOutlineMap(input: OutlineProjectionInput): OutlineMap {
   const threadBranch: OutlineNode = {
@@ -135,37 +145,4 @@ export function projectOutlineMap(input: OutlineProjectionInput): OutlineMap {
       contentBlocks: input.coverage.total,
     },
   };
-}
-
-export function findOutlineNode(nodes: OutlineNode[], id: string | null): OutlineNode | null {
-  if (!id) return null;
-  for (const node of nodes) {
-    if (node.id === id) return node;
-    const hit = findOutlineNode(node.children, id);
-    if (hit) return hit;
-  }
-  return null;
-}
-
-export interface OutlineFocusCrumb {
-  id: string | null;
-  title: string;
-}
-
-/** 面包屑：从顶层到当前聚焦章节的路径。 */
-export function buildOutlineFocusPath(sections: WikiSection[], focusId: string | null): OutlineFocusCrumb[] {
-  const path: OutlineFocusCrumb[] = [];
-  function walk(list: WikiSection[], trail: WikiSection[]): boolean {
-    for (const section of list) {
-      const next = [...trail, section];
-      if (section.id === focusId) {
-        for (const item of next) path.push({ id: item.id, title: item.title });
-        return true;
-      }
-      if (walk(section.children, next)) return true;
-    }
-    return false;
-  }
-  if (focusId) walk(sections, []);
-  return [{ id: null, title: "总览" }, ...path];
 }

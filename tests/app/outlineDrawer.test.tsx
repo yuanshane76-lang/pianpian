@@ -39,8 +39,6 @@ const map = projectOutlineMap({
   mergedDuplicates: 0,
 });
 
-const focusPath = [{ id: null, title: "总览" }] as ComponentProps<typeof OutlineDrawer>["focusPath"];
-
 async function render(element: ReactElement) {
   container = document.createElement("div");
   document.body.append(container);
@@ -53,12 +51,10 @@ function props(overrides: Partial<ComponentProps<typeof OutlineDrawer>> = {}) {
     map,
     status: "ready" as const,
     error: null,
-    focusPath,
-    focusedTitle: null,
+    progress: null,
+    fitSignal: 0,
     selectedId: null,
     onSelect: vi.fn(),
-    onNavigate: vi.fn(),
-    onEnterSection: vi.fn(),
     onRetrySection: vi.fn(),
     onClose: vi.fn(),
     onRegenerate: vi.fn(),
@@ -70,6 +66,11 @@ function click(node: Element) {
   return act(async () => node.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 }
 
+function nodeByTitle(title: string): SVGGElement {
+  return Array.from(container.querySelectorAll<SVGGElement>(".outline-node"))
+    .find((node) => node.querySelector(".outline-node-title")?.textContent === title)!;
+}
+
 afterEach(async () => {
   if (root) await act(async () => root!.unmount());
   root = undefined;
@@ -78,50 +79,44 @@ afterEach(async () => {
 });
 
 describe("outline drawer", () => {
-  it("renders the thread branch, sections and generated entries with coverage meta", async () => {
-    await render(<OutlineDrawer {...props()} />);
+  it("shows the whole tree at once with generation progress and coverage meta", async () => {
+    await render(<OutlineDrawer {...props({ progress: { done: 2, total: 9 } })} />);
     const titles = Array.from(container.querySelectorAll(".outline-node-title")).map((node) => node.textContent);
     expect(titles).toContain("论证主线");
     expect(titles).toContain("Introduction");
+    expect(titles).toContain("2 Method");
     expect(titles).toContain("方法 Y");
     expect(container.querySelector(".outline-drawer-meta")!.textContent).toContain("已生成 1/2 章");
     expect(container.querySelector(".outline-drawer-meta")!.textContent).toContain("段落覆盖 50%");
-    expect(container.textContent).toContain("待生成 · 进入后自动提炼");
+    expect(container.querySelector(".outline-drawer-meta")!.textContent).toContain("正在提炼章节条目 2/9");
+    expect(container.textContent).toContain("条目生成中…"); // 未完成章节在树里显示生成中
+  });
+
+  it("disables regenerate while generating", async () => {
+    await render(<OutlineDrawer {...props({ progress: { done: 1, total: 3 } })} />);
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="重新生成文章架构"]')!.disabled).toBe(true);
+    await render(<OutlineDrawer {...props()} />);
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="重新生成文章架构"]')!.disabled).toBe(false);
   });
 
   it("reports the clicked entry node and jumps anchors", async () => {
     const onSelect = vi.fn();
     await render(<OutlineDrawer {...props({ onSelect })} />);
-    const entry = Array.from(container.querySelectorAll<SVGGElement>(".outline-node"))
-      .find((node) => node.querySelector(".outline-node-title")?.textContent === "方法 Y")!;
-    await click(entry);
+    await click(nodeByTitle("方法 Y"));
     expect(onSelect).toHaveBeenCalledTimes(1);
     const selected = onSelect.mock.calls[0][0] as OutlineNode;
     expect(selected.id).toBe("p002-b001:e1");
     expect(selected.anchors[0].blockId).toBe("p002-b002");
   });
 
-  it("enters a section through the chevron and navigates via the breadcrumb", async () => {
-    const onEnterSection = vi.fn();
-    const onNavigate = vi.fn();
-    await render(<OutlineDrawer {...props({ onEnterSection, onNavigate })} />);
-    const sectionNode = Array.from(container.querySelectorAll<SVGGElement>(".outline-node"))
-      .find((node) => node.querySelector(".outline-node-title")?.textContent === "Introduction")!;
-    const enter = sectionNode.querySelector(".outline-node-enter")!;
-    expect(enter).toBeTruthy();
-    await click(enter);
-    expect(onEnterSection).toHaveBeenCalledTimes(1);
-    expect((onEnterSection.mock.calls[0][0] as OutlineNode).id).toBe("p001-b001");
-
-    await act(async () => container.querySelectorAll<HTMLButtonElement>(".outline-breadcrumb-item button")[0].click());
-    expect(onNavigate).toHaveBeenCalledWith({ id: null, title: "总览" });
-  });
-
-  it("shows the focus breadcrumb and focused title", async () => {
-    const path = [{ id: null, title: "总览" }, { id: "p001-b001", title: "Introduction" }];
-    await render(<OutlineDrawer {...props({ focusPath: path, focusedTitle: "Introduction" })} />);
-    expect(container.querySelector(".outline-breadcrumb")!.textContent).toContain("Introduction");
-    expect(container.querySelector(".outline-drawer-title")!.textContent).toContain("Introduction");
+  it("collapses and expands section children from the toggle", async () => {
+    await render(<OutlineDrawer {...props()} />);
+    expect(container.querySelectorAll(".outline-node")).toHaveLength(5);
+    const toggle = nodeByTitle("2 Method").querySelector(".outline-node-toggle")!;
+    await click(toggle);
+    expect(container.querySelectorAll(".outline-node")).toHaveLength(4);
+    await click(nodeByTitle("2 Method").querySelector(".outline-node-toggle")!);
+    expect(container.querySelectorAll(".outline-node")).toHaveLength(5);
   });
 
   it("retries a failed section from its node", async () => {
@@ -137,18 +132,19 @@ describe("outline drawer", () => {
     });
     const onRetrySection = vi.fn();
     await render(<OutlineDrawer {...props({ map: failedMap, onRetrySection })} />);
-    const failed = Array.from(container.querySelectorAll<SVGGElement>(".outline-node.is-error"))[0];
+    const failed = container.querySelector<SVGGElement>(".outline-node.is-error")!;
     expect(failed.querySelector(".outline-node-kind")!.textContent).toContain("生成失败");
     await click(failed);
     expect(onRetrySection).toHaveBeenCalledTimes(1);
+    expect((onRetrySection.mock.calls[0][0] as OutlineNode).id).toBe("p001-b001");
   });
 
-  it("shows a loading state while the thread runs and a retryable error", async () => {
+  it("shows a loading state while the skeleton builds and a retryable error", async () => {
     await render(<OutlineDrawer {...props({ map: null, status: "loading" })} />);
     expect(container.querySelector('[role="status"]')?.textContent).toContain("正在提取文章架构");
     const onRegenerate = vi.fn();
-    await render(<OutlineDrawer {...props({ map: null, status: "error", error: "模型返回的结构无法解析，请重试", onRegenerate })} />);
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain("无法解析");
+    await render(<OutlineDrawer {...props({ map: null, status: "error", error: "当前论文还没有可分析的正文块", onRegenerate })} />);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("正文块");
     await act(async () => container.querySelector<HTMLButtonElement>(".outline-error .text-button")!.click());
     expect(onRegenerate).toHaveBeenCalledTimes(1);
   });
