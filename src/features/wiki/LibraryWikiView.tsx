@@ -1,10 +1,10 @@
-import { BookOpenText, ChevronLeft, List, LoaderCircle, RefreshCw, Search, Share2, Tags, Waypoints, X } from "lucide-react";
+import { BookOpenText, ChevronLeft, List, LoaderCircle, RefreshCw, RotateCcw, Search, Settings2, Share2, Tags, Waypoints, X } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import {
   buildLibraryWikiIndex,
   type LibraryWikiPage,
 } from "../../domain/libraryWiki";
-import { LibraryWikiGraph } from "./LibraryWikiGraph";
+import { DEFAULT_STAR_MAP_SETTINGS, LibraryWikiGraph, type StarMapSettings } from "./LibraryWikiGraph";
 
 const KIND_LABEL: Record<string, string> = { concept: "概念", method: "方法" };
 
@@ -81,6 +81,13 @@ export function LibraryWikiView({ pages, progress, failures, onRetryFailed, canJ
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<"star" | "list">("star");
   const [showAllLabels, setShowAllLabels] = useState(false);
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [starSettings, setStarSettings] = useState<StarMapSettings>(DEFAULT_STAR_MAP_SETTINGS);
+  const [resetSignal, setResetSignal] = useState(0);
+
+  function patchSettings(patch: Partial<StarMapSettings>) {
+    setStarSettings((current) => ({ ...current, ...patch }));
+  }
   // undefined = 初始（回退到第一个页面）；null = 用户显式关闭了详情。
   const [selectedId, setSelectedId] = useState<string | null | undefined>(pages[0]?.id);
   const index = useMemo(() => buildLibraryWikiIndex(pages), [pages]);
@@ -114,7 +121,8 @@ export function LibraryWikiView({ pages, progress, failures, onRetryFailed, canJ
       </button>
     </header>
     {mode === "star" ? <div className="wiki-starmap-wrap">
-      <LibraryWikiGraph index={index} selectedId={selected?.id ?? null} showAllLabels={showAllLabels} onSelect={(page) => setSelectedId(page.id)} />
+      <LibraryWikiGraph index={index} selectedId={selected?.id ?? null} showAllLabels={showAllLabels}
+        settings={starSettings} resetSignal={resetSignal} onSelect={(page) => setSelectedId(page.id)} />
       <div className="wiki-starmap-toolbar">
         <div className="wiki-starmap-search">
           <Search size={15} />
@@ -132,6 +140,55 @@ export function LibraryWikiView({ pages, progress, failures, onRetryFailed, canJ
           onClick={() => setShowAllLabels((current) => !current)}>
           <Tags size={14} />{showAllLabels ? "名称已全显" : "显示全部名称"}
         </button>
+        <div className="wiki-starmap-options-wrap">
+          <button type="button" className={`wiki-starmap-label-toggle ${optionsOpen ? "is-on" : ""}`} aria-pressed={optionsOpen}
+            aria-label="星图显示选项" title="显示选项"
+            onClick={() => setOptionsOpen((current) => !current)}>
+            <Settings2 size={14} />显示选项
+          </button>
+          {optionsOpen ? <div className="wiki-starmap-options" role="dialog" aria-label="星图显示选项">
+            <div className="wiki-starmap-legend">
+              <span><i className="legend-star concept" />概念星</span>
+              <span><i className="legend-star method" />方法星</span>
+              <span><i className="legend-star paper" />论文星群</span>
+              <span><i className="legend-line mention" />星座线</span>
+              <span><i className="legend-line related" />关联线</span>
+              <span><i className="legend-line paper" />星群线</span>
+            </div>
+            <div className="wiki-starmap-option-row">
+              <label><input type="checkbox" checked={starSettings.showConcept} onChange={(event) => patchSettings({ showConcept: event.target.checked })} />概念星</label>
+              <label><input type="checkbox" checked={starSettings.showMethod} onChange={(event) => patchSettings({ showMethod: event.target.checked })} />方法星</label>
+              <label><input type="checkbox" checked={starSettings.showRelated} onChange={(event) => patchSettings({ showRelated: event.target.checked })} />关联线</label>
+              <label><input type="checkbox" checked={starSettings.hideOrphans} onChange={(event) => patchSettings({ hideOrphans: event.target.checked })} />隐藏孤星</label>
+            </div>
+            <label className="wiki-starmap-slider">星体大小
+              <input type="range" min={0.6} max={2} step={0.1} value={starSettings.nodeScale}
+                onChange={(event) => patchSettings({ nodeScale: Number(event.target.value) })} />
+            </label>
+            <label className="wiki-starmap-slider">疏密（链接距离）
+              <input type="range" min={0.6} max={1.8} step={0.1} value={starSettings.distanceScale}
+                onChange={(event) => patchSettings({ distanceScale: Number(event.target.value) })} />
+            </label>
+            <label className="wiki-starmap-slider">斥力
+              <input type="range" min={0.3} max={3} step={0.1} value={starSettings.repelScale}
+                onChange={(event) => patchSettings({ repelScale: Number(event.target.value) })} />
+            </label>
+            <label className="wiki-starmap-slider">向心引力
+              <input type="range" min={0} max={0.2} step={0.01} value={starSettings.gravity}
+                onChange={(event) => patchSettings({ gravity: Number(event.target.value) })} />
+            </label>
+            <div className="wiki-starmap-option-actions">
+              <button className="text-button" type="button" aria-label="恢复默认设置并重排星图"
+                onClick={() => { setStarSettings(DEFAULT_STAR_MAP_SETTINGS); setResetSignal((signal) => signal + 1); }}>
+                <RotateCcw size={12} />恢复默认并重排
+              </button>
+              <button className="text-button" type="button" aria-label="重置布局"
+                onClick={() => setResetSignal((signal) => signal + 1)}>
+                <RotateCcw size={12} />重置布局
+              </button>
+            </div>
+          </div> : null}
+        </div>
       </div>
       {selected ? <div className="wiki-starmap-detail">
         <WikiPageDetail page={selected} index={index} canJump={canJump} onJump={onJump}

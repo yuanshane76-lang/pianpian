@@ -132,6 +132,21 @@ describe("library wiki view", () => {
     expect(container.querySelector(".library-wiki-detail h2")!.textContent).toBe("检索增强生成");
   });
 
+  it("offers display options: filters, sliders and layout reset", async () => {
+    await render(<LibraryWikiView {...props()} />);
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="星图显示选项"]')!.click());
+    const panel = container.querySelector(".wiki-starmap-options")!;
+    expect(panel.querySelector(".wiki-starmap-legend")!.textContent).toContain("概念星");
+    expect(panel.querySelectorAll(".wiki-starmap-slider input")).toHaveLength(4);
+
+    // 关闭方法星：方法知识星与其论文枢纽一起消失。
+    const methodToggle = Array.from(panel.querySelectorAll<HTMLInputElement>(".wiki-starmap-option-row input"))
+      .find((input) => input.parentElement!.textContent!.includes("方法星"))!;
+    await act(async () => methodToggle.click());
+    expect(container.querySelectorAll(".wiki-star")).toHaveLength(2); // 概念星 + 它的论文枢纽
+    expect(panel.querySelector('[aria-label="重置布局"]')).toBeTruthy();
+  });
+
   it("closes the detail card back to the starmap hint", async () => {
     await render(<LibraryWikiView {...props()} />);
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="关闭详情"]')!.click());
