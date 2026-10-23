@@ -310,7 +310,7 @@ export function ReaderView(props: ReaderViewProps) {
           <button type="button" className="wordbook-button" aria-label="打开单词表" title="单词表" onClick={props.onOpenWordbook}><BookMarked size={17} /><span>单词表</span><small>{props.wordbookCount ?? 0}</small></button>
           <button className="icon-button" aria-label={leftOpen ? "收起目录" : "展开目录"} onClick={toggleOutline}><PanelLeftClose size={17} /></button>
           <button ref={assistantToggleRef} className="icon-button" aria-label={rightOpen ? "收起助手" : "展开助手"} onClick={toggleAssistant}><PanelRightClose size={17} /></button>
-          <button className="icon-button" aria-label="生成文章架构" title="生成文章架构" disabled={props.pendingAction === "outline"} onClick={props.onBuildOutline}>{props.pendingAction === "outline" ? <LoaderCircle className="spin" size={17} /> : <Network size={17} />}</button>
+          <button className="icon-button" aria-label="生成文章架构" title="生成文章架构" disabled={props.pendingAction === "wiki-thread"} onClick={props.onBuildOutline}>{props.pendingAction === "wiki-thread" ? <LoaderCircle className="spin" size={17} /> : <Network size={17} />}</button>
           <ThemeToggle variant="icon" />
           <button className="icon-button" aria-label="服务配置" onClick={onOpenSettings}><Settings2 size={17} /></button>
           <button className="icon-button" aria-label="搜索正文" aria-pressed={searchOpen} onClick={() => setSearchOpen(!searchOpen)}><Search size={17} /></button>

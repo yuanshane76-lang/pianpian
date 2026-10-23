@@ -2,12 +2,15 @@ import { hierarchy, tree } from "d3-hierarchy";
 import { select } from "d3-selection";
 import { zoom as createZoom, zoomIdentity } from "d3-zoom";
 import { useEffect, useRef, useState } from "react";
-import type { OutlineNode, OutlineNodeKind } from "../../domain/outlineMap";
+import { findOutlineNode, type OutlineNode, type OutlineNodeKind } from "../../domain/outlineMap";
 
 interface Props {
   nodes: OutlineNode[];
+  focusId: string | null;
   selectedId: string | null;
   onSelect: (node: OutlineNode) => void;
+  onEnterSection: (node: OutlineNode) => void;
+  onRetrySection: (node: OutlineNode) => void;
 }
 
 interface TreeDatum {
@@ -28,6 +31,7 @@ const KIND_LABEL: Record<OutlineNodeKind, string> = {
   finding: "发现",
   limitation: "局限",
   background: "背景",
+  concept: "概念",
 };
 
 function truncate(value: string, maximum: number): string {
@@ -51,17 +55,20 @@ function linkPath(source: { x: number; y: number }, target: { x: number; y: numb
   return `M${x1},${y1}C${middle},${y1} ${middle},${y2} ${x2},${y2}`;
 }
 
-export function OutlineTree({ nodes, selectedId, onSelect }: Props) {
+export function OutlineTree({ nodes, focusId, selectedId, onSelect, onEnterSection, onRetrySection }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const svgRef = useRef<SVGSVGElement>(null);
   const groupRef = useRef<SVGGElement>(null);
 
   useEffect(() => {
     setCollapsed(new Set());
-  }, [nodes]);
+  }, [nodes, focusId]);
+
+  const focused = findOutlineNode(nodes, focusId);
+  const visibleNodes = focusId ? focused?.children ?? [] : nodes;
 
   const layout = (() => {
-    const rootDatum: TreeDatum = { id: "__root__", node: null, children: visibleChildren(nodes, collapsed) };
+    const rootDatum: TreeDatum = { id: "__root__", node: null, children: visibleChildren(visibleNodes, collapsed) };
     const root = hierarchy<TreeDatum>(rootDatum, (datum) => datum.children);
     const engine = tree<TreeDatum>().nodeSize([ROW_GAP, COLUMN_GAP]);
     const laid = engine(root);
@@ -99,8 +106,8 @@ export function OutlineTree({ nodes, selectedId, onSelect }: Props) {
       selection.call(zoom.transform, zoomIdentity.translate(translateX, translateY).scale(scale));
     }
     return () => { selection.on(".zoom", null); };
-    // Re-fit only when the tree shape changes; collapse/expand keeps the current viewport.
-  }, [nodes]);
+    // Re-fit when the visible tree changes (focus switch or new nodes); collapse keeps the viewport.
+  }, [nodes, focusId, visibleNodes.length]);
 
   function toggle(id: string) {
     setCollapsed((current) => {
@@ -120,18 +127,39 @@ export function OutlineTree({ nodes, selectedId, onSelect }: Props) {
       {layout.points.map((point) => {
         const node = point.data.node!;
         const selected = node.id === selectedId;
+        const isSection = Boolean(node.structural && node.sectionId === node.id);
         const hasChildren = node.children.length > 0;
         const isCollapsed = collapsed.has(node.id);
+        const stateLabel = node.sectionState === "loading"
+          ? "条目生成中…"
+          : node.sectionState === "error"
+            ? "生成失败 · 点击重试"
+            : node.sectionState === "pending"
+              ? "待生成 · 进入后自动提炼"
+              : KIND_LABEL[node.kind] + (node.structural || node.locatable ? "" : " · 未定位");
         return <g
           key={node.id}
-          className={`outline-node ${selected ? "is-selected" : ""} ${node.locatable ? "" : "is-unlocatable"}`}
+          className={`outline-node ${selected ? "is-selected" : ""} ${node.structural ? "is-structural" : ""} `
+            + `${node.locatable ? "" : "is-unlocatable"} ${node.sectionState ? `is-${node.sectionState}` : ""}`}
           transform={`translate(${point.y},${point.x})`}
-          onClick={() => onSelect(node)}
+          onClick={() => {
+            if (node.sectionState === "error") onRetrySection(node);
+            else onSelect(node);
+          }}
         >
+          <title>{[node.title, node.summary].filter(Boolean).join("\n")}</title>
           <rect x={0} y={-NODE_HEIGHT / 2} width={NODE_WIDTH} height={NODE_HEIGHT} rx={8} />
           <text className="outline-node-title" x={12} y={-3}>{truncate(node.title, 20)}</text>
-          <text className="outline-node-kind" x={12} y={15}>{KIND_LABEL[node.kind]}{node.locatable ? "" : " · 未定位"}</text>
-          {hasChildren ? <g
+          <text className="outline-node-kind" x={12} y={15}>{stateLabel}</text>
+          {isSection ? <g
+            className="outline-node-enter"
+            onClick={(event) => { event.stopPropagation(); onEnterSection(node); }}
+            role="button"
+            aria-label={`进入 ${node.title}`}
+          >
+            <circle cx={NODE_WIDTH - 18} cy={0} r={9} />
+            <text x={NODE_WIDTH - 18} y={4}>▸</text>
+          </g> : hasChildren ? <g
             className="outline-node-toggle"
             onClick={(event) => { event.stopPropagation(); toggle(node.id); }}
           >
@@ -140,6 +168,9 @@ export function OutlineTree({ nodes, selectedId, onSelect }: Props) {
           </g> : null}
         </g>;
       })}
+      {!layout.points.length ? <text className="outline-tree-empty" x={24} y={40}>
+        {focusId ? "该章节还没有展开的内容" : "还没有可展示的架构"}
+      </text> : null}
     </g>
   </svg>;
 }

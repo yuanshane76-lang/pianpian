@@ -9,11 +9,26 @@ import {
   type DocumentBlock,
 } from "../domain/documentBlocks";
 import {
-  buildOutlineCacheIdentity,
-  parseOutlineMap,
-  type OutlineMap,
+  buildOutlineFocusPath,
+  projectOutlineMap,
+  type OutlineFocusCrumb,
   type OutlineNode,
 } from "../domain/outlineMap";
+import {
+  buildSectionSkeleton,
+  buildWikiSectionCacheIdentity,
+  buildWikiThreadCacheIdentity,
+  computeWikiCoverage,
+  flattenSections,
+  getWikiSectionPath,
+  getWikiSectionSignature,
+  getWikiSiblingTitles,
+  parseSectionEntries,
+  parseThreadEntries,
+  type WikiEntry,
+  type WikiEntryParseStats,
+  type WikiSection,
+} from "../domain/paperWiki";
 import { OutlineDrawer } from "../features/reader/OutlineDrawer";
 import {
   buildAnalysisCacheKey,
@@ -135,7 +150,12 @@ export default function App() {
   const [actionError, setActionError] = useState<string | null>(null);
   const activeAnalysisAbortRef = useRef(new Set<AbortController>());
   const [pipelineStates, setPipelineStates] = useState<Record<string, PaperPipelineState>>({});
-  const [outlineMap, setOutlineMap] = useState<OutlineMap | null>(null);
+  const [paperWiki, setPaperWiki] = useState<{ title: string; sections: WikiSection[]; thread: WikiEntry[] } | null>(null);
+  const [wikiSectionEntries, setWikiSectionEntries] = useState<Record<string, WikiEntry[]>>({});
+  const [wikiSectionStates, setWikiSectionStates] = useState<Record<string, { state: "loading" | "error"; error?: string }>>({});
+  const [wikiSectionStats, setWikiSectionStats] = useState<Record<string, WikiEntryParseStats>>({});
+  const [wikiThreadStats, setWikiThreadStats] = useState<WikiEntryParseStats | null>(null);
+  const [outlineFocusId, setOutlineFocusId] = useState<string | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [outlineError, setOutlineError] = useState<string | null>(null);
   const [outlineSelectedId, setOutlineSelectedId] = useState<string | null>(null);
@@ -306,7 +326,12 @@ export default function App() {
   }, [selectedPaperId]);
 
   useEffect(() => {
-    setOutlineMap(null);
+    setPaperWiki(null);
+    setWikiSectionEntries({});
+    setWikiSectionStates({});
+    setWikiSectionStats({});
+    setWikiThreadStats(null);
+    setOutlineFocusId(null);
     setOutlineOpen(false);
     setOutlineError(null);
     setOutlineSelectedId(null);
@@ -331,6 +356,29 @@ export default function App() {
   const visualSignature = selectedBlock && isVisualBlock(selectedBlock) ? getDocumentVisualSignature(selectedBlock) : "";
   const availability = getAnalysisAvailability(serviceSettings);
   const documentSignature = useMemo(() => getDocumentSourceSignature(selectedPaper?.blockData ?? []), [selectedPaper?.blockData]);
+  const outlineMap = useMemo(() => {
+    if (!paperWiki || !selectedPaper) return null;
+    return projectOutlineMap({
+      paperTitle: selectedPaper.title,
+      threadTitle: paperWiki.title,
+      sections: paperWiki.sections,
+      threadEntries: paperWiki.thread,
+      sectionEntries: wikiSectionEntries,
+      sectionStates: wikiSectionStates,
+      coverage: computeWikiCoverage(wikiSectionEntries, paperWiki.sections, selectedPaper.blockData ?? []),
+      droppedAnchors: (wikiThreadStats?.droppedAnchors ?? 0)
+        + Object.values(wikiSectionStats).reduce((sum, stats) => sum + stats.droppedAnchors, 0),
+      mergedDuplicates: (wikiThreadStats?.mergedDuplicates ?? 0)
+        + Object.values(wikiSectionStats).reduce((sum, stats) => sum + stats.mergedDuplicates, 0),
+    });
+  }, [paperWiki, selectedPaper, wikiSectionEntries, wikiSectionStates, wikiThreadStats, wikiSectionStats]);
+  const outlineFocusPath = useMemo<OutlineFocusCrumb[]>(
+    () => buildOutlineFocusPath(paperWiki?.sections ?? [], outlineFocusId),
+    [paperWiki, outlineFocusId],
+  );
+  const outlineFocusedTitle = outlineFocusId && outlineFocusPath.length > 1
+    ? outlineFocusPath[outlineFocusPath.length - 1].title
+    : null;
   const visiblePapers = useMemo(() => {
     const groupNames = new Map(groups.map((group) => [group.id, group.name]));
     let filtered = filterPapers(papers, query, groupNames);
@@ -1247,19 +1295,28 @@ export default function App() {
     }
   }
 
-  // 文章架构：有缓存直接复用，否则调用一次模型并按文档签名缓存原始 JSON。
+  // 文章架构 = 本地标题骨架（真值）+ 论证主线（一次小调用）+ 章节条目（进入章节时懒生成、按章缓存）。
   async function handleBuildOutline(force = false) {
     if (!selectedPaper) return;
-    if (!force && outlineMap) {
+    if (!force && paperWiki) {
       setOutlineOpen((open) => !open);
       return;
     }
     if (!availability.available) { setSettingsOpen(true); return; }
-    if (isBusy) return;
     const paper = selectedPaper;
+    const blocks = paper.blockData ?? [];
+    const sections = buildSectionSkeleton(blocks);
+    setOutlineOpen(true);
+    if (!sections.length) {
+      setPaperWiki(null);
+      setOutlineError("当前论文还没有可分析的正文块");
+      return;
+    }
+    if (isBusy) return;
+
     const identity = serviceIdentity;
-    const documentSignature = getDocumentSourceSignature(paper.blockData ?? []);
-    const cacheIdentity = buildOutlineCacheIdentity({
+    const documentSignature = getDocumentSourceSignature(blocks);
+    const cacheIdentity = buildWikiThreadCacheIdentity({
       paperId: paper.id,
       serviceIdentity: identity,
       documentSignature,
@@ -1268,34 +1325,49 @@ export default function App() {
       const cached = getCachedAnalysis(analysisCache, cacheIdentity.key);
       if (cached) {
         try {
-          setOutlineMap(parseOutlineMap(cached.value, paper.blockData ?? []));
+          const parsed = parseThreadEntries(cached.value, blocks);
+          setPaperWiki({ title: parsed.title || paper.title, sections, thread: parsed.entries });
+          setWikiThreadStats(parsed.stats);
           setOutlineError(null);
-          setOutlineOpen(true);
+          setOutlineFocusId(null);
+          setOutlineSelectedId(null);
           return;
         } catch {
-          // The stored tree no longer matches this document; regenerate below.
+          // 缓存与当前文档不匹配，落到下方重新生成。
         }
       }
     }
+
     const requestId = analysisRequestIdRef.current;
-    setOutlineOpen(true);
     setOutlineError(null);
+    setOutlineFocusId(null);
+    setOutlineSelectedId(null);
     setIsBusy(true);
-    setPendingAction("outline");
+    setPendingAction("wiki-thread");
     setActionError(null);
     try {
-      const value = await requestAnalysis({ operation: "outline", paper }, () => undefined);
+      const flat = flattenSections(sections);
+      const value = await requestAnalysis({
+        operation: "wiki-thread",
+        paper,
+        wikiSkeleton: flat.map((section) => ({
+          id: section.id,
+          title: section.title,
+          level: section.level,
+          ...(section.level === 1 && section.blockIds.length ? { firstBlockIds: section.blockIds.slice(0, 1) } : {}),
+        })),
+      }, () => undefined);
       if (analysisRequestIdRef.current !== requestId) return;
-      const parsed = parseOutlineMap(value, paper.blockData ?? []);
-      setOutlineMap(parsed);
-      setOutlineSelectedId(null);
+      const parsed = parseThreadEntries(value, blocks);
+      setPaperWiki({ title: parsed.title || paper.title, sections, thread: parsed.entries });
+      setWikiThreadStats(parsed.stats);
       setAnalysisCache((current) => {
         const next = new Map(current);
         setCachedAnalysis(next, {
           key: cacheIdentity.key,
           paperId: paper.id,
           scopeId: cacheIdentity.scopeId,
-          operation: "outline",
+          operation: "wiki-thread",
           sourceSignature: cacheIdentity.sourceSignature,
           value,
           createdAt: new Date().toISOString(),
@@ -1305,13 +1377,96 @@ export default function App() {
     } catch (error) {
       const failure = error as { name?: unknown; message?: unknown } | null;
       if (analysisRequestIdRef.current !== requestId || failure?.name === "AbortError") return;
-      setOutlineError(typeof failure?.message === "string" ? failure.message : "文章架构生成失败，请重试");
+      // 主线失败不拦章节结构：骨架是本地真值，章节照常可进入（借鉴 wiki 项目“链接失败不丢笔记”）。
+      setPaperWiki({ title: paper.title, sections, thread: [] });
+      setWikiThreadStats(null);
+      setOutlineError(typeof failure?.message === "string" ? failure.message : "论证主线生成失败，请重试");
     } finally {
       if (analysisRequestIdRef.current === requestId) {
         setIsBusy(false);
         setPendingAction(null);
       }
     }
+  }
+
+  async function ensureSectionEntries(section: WikiSection, force = false) {
+    if (!selectedPaper || !paperWiki) return;
+    if (!section.blockIds.length) return;
+    if (!force && (wikiSectionEntries[section.id]?.length || wikiSectionStates[section.id]?.state === "loading")) return;
+    if (!availability.available) { setSettingsOpen(true); return; }
+    const paper = selectedPaper;
+    const blocks = paper.blockData ?? [];
+    const sectionSignature = getWikiSectionSignature(section, blocks);
+    const cacheIdentity = buildWikiSectionCacheIdentity({
+      paperId: paper.id,
+      serviceIdentity,
+      sectionId: section.id,
+      sectionSignature,
+    });
+    if (!force) {
+      const cached = getCachedAnalysis(analysisCache, cacheIdentity.key);
+      if (cached) {
+        try {
+          applySectionEntries(section.id, parseSectionEntries(cached.value, section, blocks));
+          return;
+        } catch {
+          // 章节内容已变化，缓存失效，落到下方重新生成。
+        }
+      }
+    }
+    const requestId = analysisRequestIdRef.current;
+    setWikiSectionStates((current) => ({ ...current, [section.id]: { state: "loading" } }));
+    try {
+      const wanted = new Set<string>([section.id, ...section.blockIds]);
+      const sectionBlocks = blocks.filter((block) => wanted.has(block.id));
+      const value = await requestAnalysis({
+        operation: "wiki-section",
+        paper: { ...paper, blockData: sectionBlocks },
+        wikiSection: {
+          id: section.id,
+          title: section.title,
+          path: getWikiSectionPath(paperWiki.sections, section.id) || section.title,
+          siblingTitles: getWikiSiblingTitles(paperWiki.sections, section.id),
+        },
+      }, () => undefined, { concurrent: true });
+      if (analysisRequestIdRef.current !== requestId) return;
+      const parsed = parseSectionEntries(value, section, blocks);
+      applySectionEntries(section.id, parsed);
+      setAnalysisCache((current) => {
+        const next = new Map(current);
+        setCachedAnalysis(next, {
+          key: cacheIdentity.key,
+          paperId: paper.id,
+          scopeId: cacheIdentity.scopeId,
+          operation: "wiki-section",
+          sourceSignature: cacheIdentity.sourceSignature,
+          value,
+          createdAt: new Date().toISOString(),
+        });
+        return next;
+      });
+    } catch (error) {
+      const failure = error as { name?: unknown; message?: unknown } | null;
+      if (analysisRequestIdRef.current !== requestId || failure?.name === "AbortError") return;
+      setWikiSectionStates((current) => ({
+        ...current,
+        [section.id]: { state: "error", error: typeof failure?.message === "string" ? failure.message : "章节条目生成失败，请重试" },
+      }));
+    }
+  }
+
+  function applySectionEntries(sectionId: string, parsed: { entries: WikiEntry[]; stats: WikiEntryParseStats }) {
+    setWikiSectionEntries((current) => ({ ...current, [sectionId]: parsed.entries }));
+    setWikiSectionStats((current) => ({ ...current, [sectionId]: parsed.stats }));
+    setWikiSectionStates((current) => {
+      const next = { ...current };
+      delete next[sectionId];
+      return next;
+    });
+  }
+
+  function findWikiSection(sectionId: string): WikiSection | null {
+    return paperWiki ? flattenSections(paperWiki.sections).find((section) => section.id === sectionId) ?? null : null;
   }
 
   function handleOutlineSelect(node: OutlineNode) {
@@ -1324,6 +1479,27 @@ export default function App() {
       blockId: anchor.blockId,
       requestId: ++sourceNavigationSequence.current,
     });
+  }
+
+  function handleOutlineEnterSection(node: OutlineNode) {
+    const section = node.sectionId ? findWikiSection(node.sectionId) : null;
+    if (!section) return;
+    setOutlineFocusId(section.id);
+    setOutlineSelectedId(null);
+    void ensureSectionEntries(section);
+  }
+
+  function handleOutlineNavigate(crumb: OutlineFocusCrumb) {
+    setOutlineFocusId(crumb.id);
+    setOutlineSelectedId(null);
+    const section = crumb.id ? findWikiSection(crumb.id) : null;
+    if (section) void ensureSectionEntries(section);
+  }
+
+  function handleOutlineRegenerate() {
+    const focused = outlineFocusId ? findWikiSection(outlineFocusId) : null;
+    if (focused) void ensureSectionEntries(focused, true);
+    else void handleBuildOutline(true);
   }
 
   const storageWarning = storageError ? (
@@ -1407,12 +1583,20 @@ export default function App() {
           onBuildOutline={() => void handleBuildOutline()}
           outlinePanel={outlineOpen ? <OutlineDrawer
             map={outlineMap}
-            status={pendingAction === "outline" ? "loading" : outlineError ? "error" : outlineMap ? "ready" : "loading"}
+            status={pendingAction === "wiki-thread" && !outlineMap ? "loading" : !outlineMap && outlineError ? "error" : "ready"}
             error={outlineError}
+            focusPath={outlineFocusPath}
+            focusedTitle={outlineFocusedTitle}
             selectedId={outlineSelectedId}
             onSelect={handleOutlineSelect}
+            onNavigate={handleOutlineNavigate}
+            onEnterSection={handleOutlineEnterSection}
+            onRetrySection={(node) => {
+              const section = node.sectionId ? findWikiSection(node.sectionId) : null;
+              if (section) void ensureSectionEntries(section, true);
+            }}
             onClose={() => setOutlineOpen(false)}
-            onRegenerate={() => void handleBuildOutline(true)}
+            onRegenerate={handleOutlineRegenerate}
           /> : undefined}
           onBack={() => { invalidateAnalysisRequests(); setView("library"); }}
           onSelectBlock={(block) => {

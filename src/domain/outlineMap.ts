@@ -1,20 +1,8 @@
-import { buildAnalysisCacheKey } from "./analysis";
-import type { DocumentBlock } from "./documentBlocks";
+import { flattenSections, THREAD_ENTRY_SECTION_ID, type WikiAnchor, type WikiEntry, type WikiSection } from "./paperWiki";
 
-export const OUTLINE_PROTOCOL_VERSION = "outline-v1";
-export const OUTLINE_MAX_DEPTH = 3;
-export const OUTLINE_MAX_NODES = 40;
-export const OUTLINE_MAX_ANCHORS = 2;
+export type OutlineNodeKind = "section" | "problem" | "method" | "finding" | "limitation" | "background" | "concept";
 
-export type OutlineNodeKind = "section" | "problem" | "method" | "finding" | "limitation" | "background";
-
-const KINDS: OutlineNodeKind[] = ["section", "problem", "method", "finding", "limitation", "background"];
-
-export interface OutlineAnchor {
-  blockId: string;
-  pageNumber: number;
-  quote: string;
-}
+export interface OutlineAnchor extends WikiAnchor {}
 
 export interface OutlineNode {
   id: string;
@@ -22,165 +10,162 @@ export interface OutlineNode {
   summary?: string;
   kind: OutlineNodeKind;
   anchors: OutlineAnchor[];
-  /** False when the model named a block that does not exist; the node stays readable but cannot jump. */
+  /** False when the node has no valid block anchor; the node stays readable but cannot jump. */
   locatable: boolean;
+  /** 结构节点（主线/章节分支、章节骨架），不是模型条目，不参与“未定位”提示。 */
+  structural?: boolean;
+  /** 所属章节；章节节点指向自己，条目节点指向来源章节。 */
+  sectionId?: string;
+  /** 章节子图尚未生成/生成中/失败的状态，仅章节节点携带。 */
+  sectionState?: "pending" | "loading" | "error";
+  sectionError?: string;
   children: OutlineNode[];
+}
+
+export interface OutlineStats {
+  total: number;
+  locatable: number;
+  droppedAnchors: number;
+  mergedDuplicates: number;
+  sectionsGenerated: number;
+  sectionsTotal: number;
+  coveredBlocks: number;
+  contentBlocks: number;
 }
 
 export interface OutlineMap {
   title: string;
   nodes: OutlineNode[];
-  stats: { total: number; locatable: number; droppedAnchors: number };
+  stats: OutlineStats;
 }
 
-interface Stats {
-  total: number;
-  locatable: number;
+export interface OutlineProjectionInput {
+  paperTitle: string;
+  threadTitle?: string;
+  sections: WikiSection[];
+  threadEntries: WikiEntry[];
+  sectionEntries: Record<string, WikiEntry[]>;
+  sectionStates: Record<string, { state: "loading" | "error"; error?: string }>;
+  coverage: { covered: number; total: number };
   droppedAnchors: number;
+  mergedDuplicates: number;
 }
 
-function clean(value: unknown, maximum: number): string {
-  if (typeof value !== "string") return "";
-  return value.replace(/\s+/g, " ").trim().slice(0, maximum);
+function entryNode(entry: WikiEntry): OutlineNode {
+  return {
+    id: entry.id,
+    title: entry.title,
+    ...(entry.statement ? { summary: entry.statement } : {}),
+    kind: entry.kind,
+    anchors: entry.anchors,
+    locatable: entry.locatable,
+    sectionId: entry.sectionId === THREAD_ENTRY_SECTION_ID ? undefined : entry.sectionId,
+    children: [],
+  };
 }
 
-function extractJsonText(text: string): string {
-  if (typeof text !== "string" || !text.trim()) throw new Error("模型没有返回大纲内容，请重试");
-  const trimmed = text.trim();
-  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
-  const body = fenced ? fenced[1].trim() : trimmed;
-  try {
-    JSON.parse(body);
-    return body;
-  } catch {
-    // Fall through: the model may have wrapped the JSON in prose.
+function sectionNode(section: WikiSection, input: OutlineProjectionInput): OutlineNode {
+  const entries = input.sectionEntries[section.id] ?? [];
+  const state = input.sectionStates[section.id];
+  const children = [
+    ...section.children.map((child) => sectionNode(child, input)),
+    ...entries.map(entryNode),
+  ];
+  return {
+    id: section.id,
+    title: section.title,
+    kind: "section",
+    anchors: section.headingBlockId
+      ? [{ blockId: section.headingBlockId, pageNumber: section.pageNumber ?? 1, quote: section.title }]
+      : [],
+    locatable: Boolean(section.headingBlockId),
+    structural: true,
+    sectionId: section.id,
+    ...(entries.length ? {} : state?.state === "loading" ? { sectionState: "loading" as const } : state?.state === "error"
+      ? { sectionState: "error" as const, sectionError: state.error }
+      : { sectionState: "pending" as const }),
+    children,
+  };
+}
+
+function countNodes(nodes: OutlineNode[]): { total: number; locatable: number } {
+  let total = 0;
+  let locatable = 0;
+  for (const node of nodes) {
+    total += 1;
+    if (node.locatable) locatable += 1;
+    const childCount = countNodes(node.children);
+    total += childCount.total;
+    locatable += childCount.locatable;
   }
-  const starts = [body.indexOf("{"), body.indexOf("[")].filter((index) => index >= 0);
-  if (!starts.length) throw new Error("模型返回的大纲结构无法解析，请重试");
-  const start = Math.min(...starts);
-  const closer = body[start] === "{" ? "}" : "]";
-  const end = body.lastIndexOf(closer);
-  if (end <= start) throw new Error("模型返回的大纲结构无法解析，请重试");
-  const candidate = body.slice(start, end + 1);
-  try {
-    JSON.parse(candidate);
-    return candidate;
-  } catch {
-    throw new Error("模型返回的大纲结构无法解析，请重试");
-  }
-}
-
-function readAnchorIds(source: Record<string, unknown>): unknown[] {
-  if (Array.isArray(source.anchorBlockIds)) return source.anchorBlockIds;
-  if (Array.isArray(source.anchors)) return source.anchors;
-  if (typeof source.anchorBlockId === "string") return [source.anchorBlockId];
-  return [];
-}
-
-function normalizeKind(value: unknown): OutlineNodeKind {
-  return typeof value === "string" && (KINDS as string[]).includes(value) ? value as OutlineNodeKind : "section";
-}
-
-function quoteOf(block: DocumentBlock): string {
-  return clean(block.text, 160);
+  return { total, locatable };
 }
 
 /**
- * The model only returns block ids; page numbers and quotes are resolved locally so a
- * hallucinated page or coordinate cannot reach the reader.
+ * 投影：把本地骨架 + 模型条目组装成思维导图树。视图无关，领域层不依赖渲染。
+ * 顶层 = 论证主线分支 + 各一级章节；章节节点的子树在条目未生成前保持“待生成”。
  */
-export function parseOutlineMap(text: string, blocks: DocumentBlock[]): OutlineMap {
-  const parsed = JSON.parse(extractJsonText(text)) as unknown;
-  const container = parsed && typeof parsed === "object" && !Array.isArray(parsed)
-    ? parsed as Record<string, unknown>
-    : null;
-  const rawNodes = Array.isArray(parsed)
-    ? parsed
-    : container && Array.isArray(container.nodes)
-      ? container.nodes
-      : container && Array.isArray(container.outline)
-        ? container.outline
-        : [];
-  if (!rawNodes.length) throw new Error("模型没有返回可用的大纲节点，请重试");
-
-  const blockMap = new Map(blocks.map((block) => [block.id, block]));
-  const stats: Stats = { total: 0, locatable: 0, droppedAnchors: 0 };
-
-  function build(raw: unknown, path: string, depth: number): OutlineNode | null {
-    if (stats.total >= OUTLINE_MAX_NODES) return null;
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-    const source = raw as Record<string, unknown>;
-    const title = clean(source.title, 120);
-    if (!title) return null;
-
-    const anchors: OutlineAnchor[] = [];
-    const seen = new Set<string>();
-    for (const candidate of readAnchorIds(source)) {
-      const blockId = typeof candidate === "string" ? candidate.trim() : "";
-      if (!blockId || seen.has(blockId)) continue;
-      seen.add(blockId);
-      const block = blockMap.get(blockId);
-      if (!block) {
-        stats.droppedAnchors += 1;
-        continue;
-      }
-      anchors.push({ blockId, pageNumber: block.pageNumber, quote: quoteOf(block) });
-      if (anchors.length >= OUTLINE_MAX_ANCHORS) break;
-    }
-
-    const id = clean(source.id, 40) || path;
-    const summary = clean(source.summary, 240);
-    const node: OutlineNode = {
-      id,
-      title,
-      ...(summary ? { summary } : {}),
-      kind: normalizeKind(source.kind),
-      anchors,
-      locatable: anchors.length > 0,
-      children: [],
-    };
-    stats.total += 1;
-    if (node.locatable) stats.locatable += 1;
-
-    if (depth + 1 < OUTLINE_MAX_DEPTH && Array.isArray(source.children)) {
-      const children: OutlineNode[] = [];
-      for (const [index, child] of source.children.entries()) {
-        const next = build(child, `${path}.${index + 1}`, depth + 1);
-        if (next) children.push(next);
-        if (stats.total >= OUTLINE_MAX_NODES) break;
-      }
-      node.children = children;
-    }
-    return node;
-  }
-
-  const nodes: OutlineNode[] = [];
-  for (const [index, raw] of rawNodes.entries()) {
-    const node = build(raw, String(index + 1), 0);
-    if (node) nodes.push(node);
-    if (stats.total >= OUTLINE_MAX_NODES) break;
-  }
-  if (!nodes.length) throw new Error("模型没有返回可用的大纲节点，请重试");
-  if (!stats.locatable) throw new Error("模型没有给出可用的原文锚点，请重试");
-
-  const title = container ? clean(container.title, 200) : "";
+export function projectOutlineMap(input: OutlineProjectionInput): OutlineMap {
+  const threadBranch: OutlineNode = {
+    id: "thread-branch",
+    title: "论证主线",
+    kind: "section",
+    anchors: [],
+    locatable: false,
+    structural: true,
+    children: input.threadEntries.map(entryNode),
+  };
+  const nodes = [
+    ...(input.threadEntries.length ? [threadBranch] : []),
+    ...input.sections.map((section) => sectionNode(section, input)),
+  ];
+  const counts = countNodes(nodes);
+  const flat = flattenSections(input.sections);
   return {
-    title: title || "文章架构",
+    title: input.threadTitle?.trim() || input.paperTitle || "文章架构",
     nodes,
-    stats,
+    stats: {
+      total: counts.total,
+      locatable: counts.locatable,
+      droppedAnchors: input.droppedAnchors,
+      mergedDuplicates: input.mergedDuplicates,
+      sectionsGenerated: flat.filter((section) => Boolean(input.sectionEntries[section.id]?.length)).length,
+      sectionsTotal: flat.length,
+      coveredBlocks: input.coverage.covered,
+      contentBlocks: input.coverage.total,
+    },
   };
 }
 
-export function buildOutlineCacheIdentity(options: {
-  paperId: string;
-  serviceIdentity: string;
-  documentSignature: string;
-}): { key: string; scopeId: string; sourceSignature: string } {
-  const scopeId = "paper";
-  const sourceSignature = `${options.serviceIdentity}:${options.documentSignature}:${OUTLINE_PROTOCOL_VERSION}`;
-  return {
-    key: buildAnalysisCacheKey(options.paperId, scopeId, "outline", sourceSignature),
-    scopeId,
-    sourceSignature,
-  };
+export function findOutlineNode(nodes: OutlineNode[], id: string | null): OutlineNode | null {
+  if (!id) return null;
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    const hit = findOutlineNode(node.children, id);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+export interface OutlineFocusCrumb {
+  id: string | null;
+  title: string;
+}
+
+/** 面包屑：从顶层到当前聚焦章节的路径。 */
+export function buildOutlineFocusPath(sections: WikiSection[], focusId: string | null): OutlineFocusCrumb[] {
+  const path: OutlineFocusCrumb[] = [];
+  function walk(list: WikiSection[], trail: WikiSection[]): boolean {
+    for (const section of list) {
+      const next = [...trail, section];
+      if (section.id === focusId) {
+        for (const item of next) path.push({ id: item.id, title: item.title });
+        return true;
+      }
+      if (walk(section.children, next)) return true;
+    }
+    return false;
+  }
+  if (focusId) walk(sections, []);
+  return [{ id: null, title: "总览" }, ...path];
 }
