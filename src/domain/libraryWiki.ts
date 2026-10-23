@@ -164,6 +164,8 @@ export interface LibraryWikiIndex {
   links: Record<string, string[]>;
   /** page -> 提到它的页面（反向链接）。 */
   backlinks: Record<string, string[]>;
+  /** page -> 标题近似的关联页面（包含或字符二元组相似且同类），跨论文星群的桥。 */
+  related: Record<string, string[]>;
   totalCitations: number;
 }
 
@@ -174,13 +176,40 @@ function pageText(page: LibraryWikiPage): string {
   ].join("\n");
 }
 
-/** 化用 Obsidian 双向链接：页面标题（或别名）出现在其他页面的论述里即建立链接，纯本地计算。 */
+function titleBigrams(value: string): Set<string> {
+  const normalized = libraryWikiNormalize(value);
+  const grams = new Set<string>();
+  for (let index = 0; index < normalized.length - 1; index += 1) grams.add(normalized.slice(index, index + 2));
+  return grams;
+}
+
+/** 标题近似度：一方包含另一方（≥3 字）得满分，否则按字符二元组 Jaccard。 */
+function titleAffinity(left: { title: string; kind: string }, right: { title: string; kind: string }): number {
+  const a = libraryWikiNormalize(left.title);
+  const b = libraryWikiNormalize(right.title);
+  if (a.length < 2 || b.length < 2) return 0;
+  if (a.length >= 3 && b.includes(a)) return 1;
+  if (b.length >= 3 && a.includes(b)) return 1;
+  const ga = titleBigrams(left.title);
+  const gb = titleBigrams(right.title);
+  if (!ga.size || !gb.size) return 0;
+  let shared = 0;
+  for (const gram of ga) if (gb.has(gram)) shared += 1;
+  return shared / (ga.size + gb.size - shared);
+}
+
+/**
+ * 化用 Obsidian 双向链接：页面标题（或别名）出现在其他页面的论述里即建立链接，纯本地计算；
+ * 此外标题近似的同类页面（包含或相似度 ≥ 0.3）互为“关联”，把不同论文的星群桥接起来。
+ */
 export function buildLibraryWikiIndex(pages: LibraryWikiPage[]): LibraryWikiIndex {
   const links: Record<string, string[]> = {};
   const backlinks: Record<string, string[]> = {};
+  const related: Record<string, string[]> = {};
   for (const page of pages) {
     links[page.id] = [];
     backlinks[page.id] = [];
+    related[page.id] = [];
   }
   const searchable = pages
     .map((page) => ({
@@ -201,6 +230,20 @@ export function buildLibraryWikiIndex(pages: LibraryWikiPage[]): LibraryWikiInde
       }
     }
   }
+  // 近似关联：同类 + (包含 或 相似度 ≥ 0.3)；每页最多 3 条，按相似度取 top。
+  const affinityThreshold = 0.3;
+  const maxRelatedPerNode = 3;
+  for (const left of pages) {
+    const scored: Array<{ id: string; score: number }> = [];
+    for (const right of pages) {
+      if (right.id === left.id || right.kind !== left.kind) continue;
+      if (links[left.id].includes(right.id) || links[right.id].includes(left.id)) continue; // 已有提及线
+      const score = titleAffinity(left, right);
+      if (score >= affinityThreshold) scored.push({ id: right.id, score });
+    }
+    scored.sort((first, second) => second.score - first.score);
+    related[left.id] = scored.slice(0, maxRelatedPerNode).map((entry) => entry.id);
+  }
   const sorted = [...pages].sort((left, right) => {
     const leftCount = Object.keys(left.occurrences).length;
     const rightCount = Object.keys(right.occurrences).length;
@@ -210,7 +253,7 @@ export function buildLibraryWikiIndex(pages: LibraryWikiPage[]): LibraryWikiInde
     (sum, page) => sum + Object.values(page.occurrences).reduce((inner, occurrence) => inner + occurrence.citations.length, 0),
     0,
   );
-  return { pages: sorted, links, backlinks, totalCitations };
+  return { pages: sorted, links, backlinks, related, totalCitations };
 }
 
 /** 供持久化校验的宽松解析：结构不符的页面丢弃，不让单条脏数据拖垮整个知识库。 */

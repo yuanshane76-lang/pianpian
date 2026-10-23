@@ -25,8 +25,8 @@ interface GraphNode extends SimulationNodeDatum {
 interface GraphLink {
   source: GraphNode;
   target: GraphNode;
-  /** mention = 知识星之间的星座线；paper = 论文枢纽与其知识星的星群线。 */
-  type: "mention" | "paper";
+  /** mention = 星座线（提及）；related = 近似关联线（标题相近的同类概念）；paper = 星群线。 */
+  type: "mention" | "related" | "paper";
 }
 
 interface Scene {
@@ -106,6 +106,17 @@ export function LibraryWikiGraph({ index, selectedId, showAllLabels, onSelect }:
         if (source && target) links.push({ source, target, type: "mention" });
       }
     }
+    for (const [sourceId, targets] of Object.entries(index.related ?? {})) {
+      for (const targetId of targets) {
+        const source = byId.get(sourceId);
+        const target = byId.get(targetId);
+        if (source && target && !links.some((link) => link.type !== "paper"
+          && (link.source.id === sourceId && link.target.id === targetId
+            || link.source.id === targetId && link.target.id === sourceId))) {
+          links.push({ source, target, type: "related" });
+        }
+      }
+    }
     for (const page of index.pages) {
       const target = byId.get(page.id)!;
       for (const paperId of Object.keys(page.occurrences)) {
@@ -156,7 +167,7 @@ export function LibraryWikiGraph({ index, selectedId, showAllLabels, onSelect }:
     const labelWorthy = new Set<string>(nodes.filter((node) => node.type === "paper").map((node) => node.id));
     const linkedCount: Record<string, number> = {};
     for (const link of links) {
-      if (link.type !== "mention") continue;
+      if (link.type === "paper") continue;
       linkedCount[link.source.id] = (linkedCount[link.source.id] ?? 0) + 1;
       linkedCount[link.target.id] = (linkedCount[link.target.id] ?? 0) + 1;
     }
@@ -167,8 +178,8 @@ export function LibraryWikiGraph({ index, selectedId, showAllLabels, onSelect }:
     // 密集星群：短链接 + 弱斥力 + 向心引力，星与星群彼此靠拢。
     const simulation = forceSimulation<GraphNode>(nodes)
       .force("link", forceLink<GraphNode, GraphLink>(links).id((node) => node.id)
-        .distance((link) => link.type === "paper" ? 52 : 78)
-        .strength((link) => link.type === "paper" ? 0.7 : 0.35))
+        .distance((link) => link.type === "paper" ? 52 : link.type === "related" ? 92 : 78)
+        .strength((link) => link.type === "paper" ? 0.7 : link.type === "related" ? 0.15 : 0.35))
       .force("charge", forceManyBody<GraphNode>().strength((node) => (node.type === "paper" ? -230 : -65)))
       .force("collide", forceCollide<GraphNode>((node) => starRadius(node) + 5))
       .force("x", forceX(width / 2).strength(0.06))
@@ -216,7 +227,7 @@ export function LibraryWikiGraph({ index, selectedId, showAllLabels, onSelect }:
     const scene = sceneRef.current;
     if (!scene) return;
     scene.nodeSelection.attr("class", (node) => `wiki-star ${node.type === "paper" ? "wiki-star-paper" : node.kind} ${node.id === selectedId ? "is-selected" : ""}`);
-    scene.linkSelection.attr("class", (link) => `wiki-star-link wiki-star-link-${link.type} ${link.type === "mention" && (link.source.id === selectedId || link.target.id === selectedId) ? "is-lit" : ""}`);
+    scene.linkSelection.attr("class", (link) => `wiki-star-link wiki-star-link-${link.type} ${link.type !== "paper" && (link.source.id === selectedId || link.target.id === selectedId) ? "is-lit" : ""}`);
     scene.nodeSelection.select<SVGTextElement>(".wiki-star-label")
       .attr("visibility", (node) => (showAllLabels || scene.labelWorthy.has(node.id) ? "visible" : "hidden"));
   }, [selectedId, showAllLabels]);

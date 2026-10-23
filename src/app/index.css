@@ -2593,6 +2593,8 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
 @keyframes wiki-twinkle { 0%, 100% { opacity: 0.16; } 50% { opacity: 0.55; } }
 .wiki-star-link { stroke: #8fb7e8; stroke-width: 1; opacity: 0.18; }
 .wiki-star-link-paper { stroke: #d9b36a; stroke-width: 1.1; opacity: 0.22; }
+.wiki-star-link-related { stroke: #93b4e8; stroke-width: 0.9; stroke-dasharray: 2 5; opacity: 0.14; }
+.wiki-star-link-related.is-lit { stroke: #a5cdfb; opacity: 0.65; }
 .wiki-star-link.is-lit { stroke: #bfe3ff; opacity: 0.8; stroke-width: 1.6; }
 .wiki-star { cursor: grab; }
 .wiki-star:active { cursor: grabbing; }

@@ -98,6 +98,24 @@ describe("library wiki links (Obsidian-style)", () => {
     expect(index.totalCitations).toBe(2);
   });
 
+  it("bridges similar same-kind concepts across papers as related links", () => {
+    let pages = ingest([], "p1", "注意力机制", "concept", { statement: "A 论文的方法。" }).pages;
+    pages = ingest(pages, "p2", "多头注意力", "concept", { statement: "B 论文的变体。" }).pages;
+    pages = ingest(pages, "p3", "数据增强", "concept", { statement: "C 论文的数据技巧。" }).pages;
+    const index = buildLibraryWikiIndex(pages);
+    const attention = index.pages.find((page) => page.title === "注意力机制")!;
+    const multiHead = index.pages.find((page) => page.title === "多头注意力")!;
+    const augment = index.pages.find((page) => page.title === "数据增强")!;
+    expect(index.related[attention.id]).toContain(multiHead.id); // 相似同类 → 关联
+    expect(index.related[attention.id]).not.toContain(augment.id); // 相似度不足不硬连
+    expect(index.related[augment.id]).toEqual([]);
+    // 不同类型（concept vs method）即使相似也不关联
+    let mixed = ingest(pages, "p4", "数据增强方法", "method", { statement: "D 论文。" }).pages;
+    const mixedIndex = buildLibraryWikiIndex(mixed);
+    const augmentMethod = mixedIndex.pages.find((page) => page.title === "数据增强方法")!;
+    expect(mixedIndex.related[augmentMethod.id]).not.toContain(augment.id);
+  });
+
   it("sorts pages by paper count and survives tolerant parsing", () => {
     let pages = ingest([], "p1", "概念A", "concept").pages;
     pages = ingest(pages, "p2", "概念A", "concept").pages;
