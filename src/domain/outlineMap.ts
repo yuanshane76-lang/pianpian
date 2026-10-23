@@ -124,12 +124,14 @@ export function findOutlineNode(nodes: OutlineNode[], id: string | null): Outlin
   return null;
 }
 
-/** 有子节点的第二层节点 id（收起支撑点时用）。 */
+/** 根之下第二层（要点层）有子节点的节点 id（默认收起支撑点时用）。 */
 export function secondLevelIdsWithChildren(nodes: OutlineNode[]): string[] {
   const ids: string[] = [];
-  for (const node of nodes) {
-    for (const child of node.children) {
-      if (child.children.length) ids.push(child.id);
+  for (const root of nodes) {
+    for (const branch of root.children) {
+      for (const child of branch.children) {
+        if (child.children.length) ids.push(child.id);
+      }
     }
   }
   return ids;
@@ -137,7 +139,8 @@ export function secondLevelIdsWithChildren(nodes: OutlineNode[]): string[] {
 
 /**
  * 投影：把本地大块划分 + 模型要点树组装成思维导图。
- * 顶层 = 论证主线分支 + 各部分（语义标题）；要点挂部分之下，支撑点挂要点之下。
+ * 根节点 = 论文标题（最终母节点），其下为论证主线分支与各部分（语义标题）；
+ * 要点挂部分之下，支撑点挂要点之下。
  */
 export function projectOutlineMap(input: OutlineProjectionInput): OutlineMap {
   const threadBranch: OutlineNode = {
@@ -159,14 +162,23 @@ export function projectOutlineMap(input: OutlineProjectionInput): OutlineMap {
       children: [],
     })),
   };
-  const nodes = [
+  const branches = [
     ...(input.thread.length ? [threadBranch] : []),
     ...input.parts.map((part) => partNode(part, input)),
   ];
-  const counts = countNodes(nodes);
-  return {
+  const root: OutlineNode = {
+    id: "paper-root",
     title: input.threadTitle?.trim() || input.paperTitle || "文章架构",
-    nodes,
+    kind: "section",
+    anchors: [],
+    locatable: false,
+    structural: true,
+    children: branches,
+  };
+  const counts = countNodes([root]);
+  return {
+    title: root.title,
+    nodes: [root],
     stats: {
       total: counts.total,
       locatable: counts.locatable,

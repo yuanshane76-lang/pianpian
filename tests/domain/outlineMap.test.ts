@@ -196,25 +196,33 @@ describe("outline projection", () => {
     });
   }
 
-  it("projects thread branch plus renamed parts with semantic trees", () => {
+  it("projects a paper-title root with thread branch and renamed parts below", () => {
     const map = project();
     expect(map.title).toBe("A Paper");
-    expect(map.nodes[0]).toMatchObject({ id: "thread-branch", title: "论证主线", structural: true });
-    expect(map.nodes[0].children[0]).toMatchObject({ id: "thread:e1", kind: "problem" });
-    expect(map.nodes[1]).toMatchObject({ id: WIKI_PRELUDE_PART_ID, title: "开篇", sectionState: "loading" });
-    const method = map.nodes.find((node) => node.id === methodPart.id)!;
+    expect(map.nodes).toHaveLength(1);
+    const rootNode = map.nodes[0];
+    expect(rootNode).toMatchObject({ id: "paper-root", title: "A Paper", structural: true, locatable: false });
+    expect(rootNode.children[0]).toMatchObject({ id: "thread-branch", title: "论证主线", structural: true });
+    expect(rootNode.children[0].children[0]).toMatchObject({ id: "thread:e1", kind: "problem" });
+    expect(rootNode.children[1]).toMatchObject({ id: WIKI_PRELUDE_PART_ID, title: "开篇", sectionState: "loading" });
+    const method = rootNode.children.find((node) => node.id === methodPart.id)!;
     expect(method).toMatchObject({ title: "方法设计", summary: "提出方法 Y", structural: true });
     expect(method.anchors[0]).toMatchObject({ blockId: methodPart.headingBlockId });
     expect(method.children[0]).toMatchObject({ id: `${methodPart.id}:i1`, structural: true });
     expect(method.children[0].children[0]).toMatchObject({ id: `${methodPart.id}:i1:p1`, kind: "method", locatable: true });
   });
 
+  it("prefers the assembly title over the file title for the root", () => {
+    const map = project({ threadTitle: "论文 X 的方法研究" });
+    expect(map.nodes[0].title).toBe("论文 X 的方法研究");
+  });
+
   it("drops the thread branch when empty and counts stats over the tree", () => {
     const map = project({ thread: [] });
-    expect(map.nodes[0].id).not.toBe("thread-branch");
+    expect(map.nodes[0].children[0].id).not.toBe("thread-branch");
     const full = project();
-    // 主线分支1+主线1+3部分+要点1+支撑点2 = 8；可定位 = 主线1 + 两个有标题的部分 + 支撑点2 = 5
-    expect(full.stats.total).toBe(8);
+    // 根1+主线分支1+主线1+3部分+要点1+支撑点2 = 9；可定位 = 主线1 + 两个有标题的部分 + 支撑点2 = 5
+    expect(full.stats.total).toBe(9);
     expect(full.stats.locatable).toBe(5);
     expect(full.stats.sectionsGenerated).toBe(1);
     expect(full.stats.sectionsTotal).toBe(3);
@@ -222,7 +230,7 @@ describe("outline projection", () => {
 
   it("propagates part error states and finds nodes recursively", () => {
     const failed = project({ partStates: { [introPart.id]: { state: "error", error: "服务超时" } } });
-    const node = failed.nodes.find((item) => item.id === introPart.id)!;
+    const node = findOutlineNode(failed.nodes, introPart.id)!;
     expect(node.sectionState).toBe("error");
     expect(node.sectionError).toBe("服务超时");
     const map = project();
@@ -230,14 +238,14 @@ describe("outline projection", () => {
     expect(findOutlineNode(map.nodes, "nope")).toBeNull();
   });
 
-  it("lists second-level nodes with children for default collapsing", () => {
+  it("lists insight-level nodes with children for default collapsing", () => {
     const map = project();
     expect(secondLevelIdsWithChildren(map.nodes)).toEqual([`${methodPart.id}:i1`]);
   });
 
   it("uses prelude part without heading anchor as unlocatable structure", () => {
     const map = project();
-    const prelude = map.nodes.find((node) => node.id === preludePart.id)!;
+    const prelude = findOutlineNode(map.nodes, preludePart.id)!;
     expect(prelude.locatable).toBe(false);
     expect(prelude.anchors).toEqual([]);
   });
