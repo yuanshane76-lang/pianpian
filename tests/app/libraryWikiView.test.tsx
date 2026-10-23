@@ -99,6 +99,6 @@ describe("library wiki view", () => {
 
   it("shows an onboarding hint for an empty wiki", async () => {
     await render(<LibraryWikiView {...props({ pages: [] })} />);
-    expect(container.querySelector(".library-wiki-empty")!.textContent).toContain("自动汇聚");
+    expect(container.querySelector(".library-wiki-empty")!.textContent).toContain("自动汇入");
   });
 });

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
+import type { DocumentBlock } from "../../src/domain/documentBlocks";
+import {
+  buildWikiPartCacheIdentity,
+  buildWikiParts,
+  getWikiPartSignature,
+} from "../../src/domain/paperWiki";
 import {
   buildLibraryWikiIndex,
+  collectBackfillSources,
   ingestPaperWikiPages,
   libraryWikiPageId,
   parseLibraryWikiPages,
@@ -103,5 +110,47 @@ describe("library wiki links (Obsidian-style)", () => {
     expect(parsed).toHaveLength(2);
     expect(parseLibraryWikiPages([null, { id: "x" }, "junk", { id: "ok", title: "有效", kind: "method", occurrences: { p: { contentSignature: "s" } } }]))
       .toEqual([expect.objectContaining({ id: "ok", title: "有效", kind: "method", occurrences: {} })]); // 缺 citations 的脏占位被丢弃
+  });
+});
+
+describe("library wiki backfill from caches", () => {
+  const blocks: DocumentBlock[] = [
+    { id: "h1", pageNumber: 1, order: 0, kind: "heading", text: "1 Method", headingLevel: 1 },
+    { id: "b1", pageNumber: 1, order: 1, kind: "paragraph", text: "We use attention." },
+  ];
+  const partTreeJson = JSON.stringify({
+    children: [{ title: "要点", children: [
+      { kind: "concept", title: "注意力机制", statement: "按相关度加权", anchorBlockIds: ["b1"] },
+    ] }],
+  });
+
+  it("collects ingest sources from cached part trees without model calls", () => {
+    const parts = buildWikiParts(blocks);
+    const identity = buildWikiPartCacheIdentity({
+      paperId: "p1", serviceIdentity: "rev:a:m", partId: parts[0].id,
+      partSignature: getWikiPartSignature(parts[0], blocks),
+    });
+    const cache = new Map([[identity.key, { value: partTreeJson }]]);
+    const sources = collectBackfillSources([{ id: "p1", title: "论文一", blockData: blocks }], cache, "rev:a:m");
+    expect(sources).toHaveLength(1);
+    expect(sources[0]).toMatchObject({ paperId: "p1", paperTitle: "论文一" });
+    expect(sources[0].points[0]).toMatchObject({ kind: "concept", title: "注意力机制" });
+    // 直接可入库
+    const pages = ingestPaperWikiPages([], sources[0]).pages;
+    expect(pages[0].occurrences.p1.citations[0]).toMatchObject({ blockId: "b1" });
+  });
+
+  it("skips papers without matching caches and tolerates stale entries", () => {
+    const sources = collectBackfillSources(
+      [
+        { id: "p1", title: "有缓存", blockData: blocks },
+        { id: "p2", title: "无缓存", blockData: blocks },
+      ],
+      new Map(), // 空缓存
+      "rev:a:m",
+    );
+    expect(sources).toHaveLength(0);
+    const stale = new Map([["unrelated-key", { value: "not json {" }]]);
+    expect(collectBackfillSources([{ id: "p1", title: "坏缓存", blockData: blocks }], stale, "rev:a:m")).toHaveLength(0);
   });
 });

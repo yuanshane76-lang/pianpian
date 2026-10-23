@@ -61,7 +61,7 @@ import { extractAcademicVocabulary, type AcademicTerm } from "../domain/vocabula
 import { academicTermKey, addWordbookTerm, resolveWordbookSourceBlock, type WordbookSource, type WordbookEntry } from "../domain/wordbook";
 import { loadWordbook, saveWordbook } from "../services/wordbook";
 import { loadLibraryWiki, saveLibraryWiki } from "../services/libraryWiki";
-import { ingestPaperWikiPages, LIBRARY_PAGE_KINDS, type LibraryWikiPage } from "../domain/libraryWiki";
+import { collectBackfillSources, ingestPaperWikiPages, LIBRARY_PAGE_KINDS, type LibraryWikiPage } from "../domain/libraryWiki";
 import { LibraryWikiView } from "../features/wiki/LibraryWikiView";
 import { WordbookDialog } from "../features/reader/WordbookDialog";
 import { LibraryView } from "../features/library/LibraryView";
@@ -310,6 +310,21 @@ export default function App() {
     if (libraryWiki.error) return; // 读取失败时不回写，避免覆盖原有知识库
     if (!saveLibraryWiki(libraryWiki.pages)) setStorageError(true);
   }, [libraryWiki]);
+
+  // 打开知识库时从各论文已缓存的部分要点树自动回填（零模型调用），每个会话一次。
+  const wikiBackfilledRef = useRef(false);
+  useEffect(() => {
+    if (view !== "wiki" || wikiBackfilledRef.current) return;
+    wikiBackfilledRef.current = true;
+    setLibraryWiki((current) => {
+      if (current.error) return current;
+      let pages = current.pages;
+      for (const source of collectBackfillSources(papersRef.current, analysisCache, serviceIdentityRef.current)) {
+        pages = ingestPaperWikiPages(pages, source).pages;
+      }
+      return { ...current, pages };
+    });
+  }, [view, analysisCache]);
 
   useEffect(() => {
     const bridge = getDesktopBridge();

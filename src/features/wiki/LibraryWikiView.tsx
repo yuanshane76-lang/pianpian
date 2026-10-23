@@ -64,7 +64,7 @@ export function LibraryWikiView({ pages, canJump, onJump, onBack }: Props) {
             <span className="library-wiki-item-title">{page.title}</span>
             <span className="library-wiki-item-count">{count} 篇</span>
           </button>;
-        }) : <p className="library-wiki-empty">{pages.length ? "没有匹配的知识页面。" : "还没有知识页面。生成论文的文章架构后，其中的概念与方法会自动汇聚到这里。"}</p>}
+        }) : <p className="library-wiki-empty">{pages.length ? "没有匹配的知识页面。" : "还没有知识页面。已生成过文章架构的论文会在打开知识库时自动汇入；若仍为空，到阅读器里生成一次文章架构。"}</p>}
       </aside>
       {selected ? <section className="library-wiki-detail" aria-label={selected.title}>
         <div className="library-wiki-detail-head">
