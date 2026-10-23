@@ -1,4 +1,5 @@
-import { forceCenter, forceLink, forceManyBody, forceSimulation, forceCollide, type SimulationNodeDatum } from "d3-force";
+import { drag } from "d3-drag";
+import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, type SimulationNodeDatum } from "d3-force";
 import { select, type Selection } from "d3-selection";
 import { zoom as createZoom } from "d3-zoom";
 import { useEffect, useRef } from "react";
@@ -163,12 +164,15 @@ export function LibraryWikiGraph({ index, selectedId, showAllLabels, onSelect }:
       if (node.type === "page" && ((linkedCount[node.id] ?? 0) >= 2 || node.count >= 2)) labelWorthy.add(node.id);
     }
 
+    // 密集星群：短链接 + 弱斥力 + 向心引力，星与星群彼此靠拢。
     const simulation = forceSimulation<GraphNode>(nodes)
       .force("link", forceLink<GraphNode, GraphLink>(links).id((node) => node.id)
-        .distance((link) => link.type === "paper" ? 85 : 120)
-        .strength((link) => link.type === "paper" ? 0.55 : 0.3))
-      .force("charge", forceManyBody<GraphNode>().strength((node) => (node.type === "paper" ? -420 : -150)))
-      .force("collide", forceCollide<GraphNode>((node) => starRadius(node) + (node.type === "paper" ? 26 : 12)))
+        .distance((link) => link.type === "paper" ? 52 : 78)
+        .strength((link) => link.type === "paper" ? 0.7 : 0.35))
+      .force("charge", forceManyBody<GraphNode>().strength((node) => (node.type === "paper" ? -230 : -65)))
+      .force("collide", forceCollide<GraphNode>((node) => starRadius(node) + 5))
+      .force("x", forceX(width / 2).strength(0.06))
+      .force("y", forceY(height / 2).strength(0.06))
       .force("center", forceCenter(width / 2, height / 2))
       .on("tick", () => {
         linkSelection
@@ -176,6 +180,23 @@ export function LibraryWikiGraph({ index, selectedId, showAllLabels, onSelect }:
           .attr("x2", (link) => link.target.x ?? 0).attr("y2", (link) => link.target.y ?? 0);
         nodeSelection.attr("transform", (node) => `translate(${node.x ?? 0},${node.y ?? 0})`);
       });
+
+    // 基本拖拽：按住星星拖动，松手钉在原地，用户可自行排版星图。
+    const dragBehavior = drag<SVGGElement, GraphNode>()
+      .on("start", (event, node) => {
+        event.sourceEvent.stopPropagation();
+        if (!event.active) simulation.alphaTarget(0.25).restart();
+        node.fx = node.x;
+        node.fy = node.y;
+      })
+      .on("drag", (event, node) => {
+        node.fx = event.x;
+        node.fy = event.y;
+      })
+      .on("end", (event) => {
+        if (!event.active) simulation.alphaTarget(0);
+      });
+    nodeSelection.call(dragBehavior);
 
     const zoom = createZoom<SVGSVGElement, unknown>().scaleExtent([0.3, 4])
       .on("zoom", (event) => stage.attr("transform", event.transform.toString()));

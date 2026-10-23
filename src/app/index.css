@@ -2594,7 +2594,8 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
 .wiki-star-link { stroke: #8fb7e8; stroke-width: 1; opacity: 0.18; }
 .wiki-star-link-paper { stroke: #d9b36a; stroke-width: 1.1; opacity: 0.22; }
 .wiki-star-link.is-lit { stroke: #bfe3ff; opacity: 0.8; stroke-width: 1.6; }
-.wiki-star { cursor: pointer; }
+.wiki-star { cursor: grab; }
+.wiki-star:active { cursor: grabbing; }
 .wiki-star .wiki-star-halo { fill: var(--star-halo, #38bdf8); opacity: 0.24; filter: url(#wiki-star-glow); transition: opacity 0.25s ease; }
 .wiki-star .wiki-star-core { fill: var(--star-core, #bae6fd); stroke: #f0f9ff; stroke-width: 0.7; filter: url(#wiki-star-glow); }
 .wiki-star.method { --star-halo: #8b5cf6; --star-core: #ddd6fe; }
