@@ -2643,3 +2643,32 @@ html[data-theme="dark"] .reader-assistant {
 .radar-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
 .radar-citation { color: var(--muted); font-size: 11px; }
 .radar-source { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+
+/* 文章架构抽屉：覆盖右侧，左侧 PDF 保持可见，点节点时能看到原文闪烁。 */
+.outline-drawer { position: absolute; top: 0; right: 0; bottom: 0; z-index: 20; display: flex; flex-direction: column; width: min(760px, calc(100% - 320px)); background: var(--surface); border-left: 1px solid var(--line); box-shadow: -18px 0 48px rgba(0, 0, 0, 0.18); }
+.outline-drawer-head { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; gap: 12px; min-height: 56px; padding: 0 16px; border-bottom: 1px solid var(--line); }
+.outline-drawer-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.outline-drawer-title strong { font-size: 13px; }
+.outline-drawer-note { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.outline-drawer-actions { display: flex; gap: 2px; }
+.outline-drawer-body { position: relative; flex: 1; min-height: 0; }
+.outline-status { display: flex; align-items: center; gap: 8px; padding: 24px; color: var(--muted-strong); font-size: 13px; }
+.outline-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 16px; padding: 12px; color: var(--danger-ink); background: var(--danger-bg); border: 1px solid var(--danger-line); border-radius: 6px; font-size: 12px; line-height: 1.7; }
+.outline-error span { flex: 1; min-width: 0; }
+.outline-tree { display: block; width: 100%; height: 100%; touch-action: none; }
+.outline-link { fill: none; stroke: var(--line-strong); stroke-width: 1.4; }
+.outline-node { cursor: pointer; }
+.outline-node rect { fill: var(--surface-raised); stroke: var(--line); stroke-width: 1; }
+.outline-node:hover rect { stroke: var(--teal); }
+.outline-node.is-selected rect { fill: var(--teal-soft); stroke: var(--teal); stroke-width: 2; }
+.outline-node.is-unlocatable rect { stroke-dasharray: 4 3; }
+.outline-node-title { fill: var(--ink); font-size: 12px; font-weight: 500; }
+.outline-node-kind { fill: var(--muted); font-size: 10px; }
+.outline-node.is-selected .outline-node-title { fill: var(--teal-dark); }
+.outline-node-toggle { cursor: pointer; }
+.outline-node-toggle circle { fill: var(--surface); stroke: var(--line-strong); }
+.outline-node-toggle:hover circle { stroke: var(--teal); }
+.outline-node-toggle text { fill: var(--muted-strong); font-size: 12px; text-anchor: middle; pointer-events: none; }
+@media (max-width: 840px) {
+  .outline-drawer { width: 100%; }
+}

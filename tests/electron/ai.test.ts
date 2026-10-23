@@ -258,3 +258,58 @@ describe("real translation transport", () => {
     }
   });
 });
+
+describe("outline map request", () => {
+  const paper = {
+    title: "A Structured Paper",
+    blockData: [
+      { id: "p001-b001", pageNumber: 1, kind: "heading", headingLevel: 1, text: "Introduction" },
+      { id: "p001-b002", pageNumber: 1, kind: "paragraph", text: "We study the problem of X." },
+      { id: "p002-b001", pageNumber: 2, kind: "paragraph", text: "Our method uses Y." },
+    ],
+  };
+
+  it("sends block ids as the only locator and disables thinking", async () => {
+    for (const provider of ["deepseek", "aliyun"]) {
+      const settings = { ...DEFAULT, aiProvider: provider, [provider]: { ...DEFAULT[provider], apiKey: "unit-test-secret" } };
+      const fetchImpl = vi.fn().mockResolvedValue(sseResponse('{"choices":[{"delta":{"content":"{}"}}]}'));
+      await callModel(settings, { operation: "outline", paper }, fetchImpl);
+      const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+      const system = body.messages[0].content;
+      const user = body.messages[1].content;
+      expect(system).toContain("anchorBlockIds");
+      expect(system).toContain("只能从输入中出现的方括号 ID");
+      expect(system).toContain("最多 3 层");
+      expect(user).toContain("[p001-b002 | 第1页 | paragraph]");
+      expect(user).toContain("[p002-b001 | 第2页 | paragraph]");
+      expect(user).toContain("[p001-b001 | 第1页 | heading | H1]");
+      expect(body.max_tokens).toBe(4000);
+      if (provider === "deepseek") expect(body.thinking).toEqual({ type: "disabled" });
+      else expect(body.enable_thinking).toBe(false);
+    }
+  });
+
+  it("refuses to outline a paper without text blocks", async () => {
+    const settings = { ...DEFAULT, aiProvider: "deepseek", deepseek: { ...DEFAULT.deepseek, apiKey: "unit-test-secret" } };
+    const fetchImpl = vi.fn();
+    await expect(callModel(settings, { operation: "outline", paper: { title: "Empty", blockData: [] } }, fetchImpl))
+      .rejects.toThrow(/没有可分析的正文块/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("truncates long paragraph blocks but keeps heading text", async () => {
+    const settings = { ...DEFAULT, aiProvider: "deepseek", deepseek: { ...DEFAULT.deepseek, apiKey: "unit-test-secret" } };
+    const fetchImpl = vi.fn().mockResolvedValue(sseResponse('{"choices":[{"delta":{"content":"{}"}}]}'));
+    const longText = "A".repeat(2000);
+    await callModel(settings, {
+      operation: "outline",
+      paper: { title: "Long", blockData: [
+        { id: "p001-b001", pageNumber: 1, kind: "heading", headingLevel: 2, text: "Short heading" },
+        { id: "p001-b002", pageNumber: 1, kind: "paragraph", text: longText },
+      ] },
+    }, fetchImpl);
+    const user = JSON.parse(fetchImpl.mock.calls[0][1].body).messages[1].content;
+    expect(user).toContain("Short heading");
+    expect(user).not.toContain("A".repeat(401));
+  });
+});
