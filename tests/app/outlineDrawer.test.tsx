@@ -88,27 +88,32 @@ afterEach(async () => {
 });
 
 describe("outline drawer", () => {
-  it("defaults to parts plus insights visible with supporting points collapsed", async () => {
+  it("defaults to the collapsed skeleton: root, thread branch and parts only", async () => {
     await render(<OutlineDrawer {...props()} />);
     const titles = Array.from(container.querySelectorAll(".outline-node-title")).map((node) => node.textContent);
+    expect(titles).toContain("A Paper"); // 根母节点
     expect(titles).toContain("论证主线");
-    expect(titles).toContain("研究问题");
-    expect(titles).toContain("方法设计"); // 语义标题
-    expect(titles).toContain("注意力机制设计"); // 要点可见
-    expect(titles).not.toContain("注意力权重"); // 支撑点默认收起
+    expect(titles).toContain("方法设计"); // 部分语义标题
+    expect(titles).not.toContain("研究问题"); // 主线条目收起
+    expect(titles).not.toContain("注意力机制设计"); // 要点收起
+    expect(titles).not.toContain("注意力权重"); // 支撑点收起
     expect(container.querySelector(".outline-drawer-meta")!.textContent).toContain("已生成 1/3 部分");
     expect(container.querySelector(".outline-drawer-meta")!.textContent).toContain("段落覆盖 100%");
   });
 
-  it("expands all and collapses supporting points from the meta buttons", async () => {
+  it("expands all and collapses back to the skeleton from the meta buttons", async () => {
     await render(<OutlineDrawer {...props()} />);
     expect(container.textContent).not.toContain("注意力权重");
     await act(async () => Array.from(container.querySelectorAll<HTMLButtonElement>(".outline-drawer-fold button"))
       .find((button) => button.textContent === "展开全部")!.click());
-    expect(container.textContent).toContain("注意力权重");
+    const titles = Array.from(container.querySelectorAll(".outline-node-title")).map((node) => node.textContent);
+    expect(titles).toContain("研究问题");
+    expect(titles).toContain("注意力机制设计");
+    expect(titles).toContain("注意力权重");
     await act(async () => Array.from(container.querySelectorAll<HTMLButtonElement>(".outline-drawer-fold button"))
-      .find((button) => button.textContent === "收起支撑点")!.click());
+      .find((button) => button.textContent === "收起全部")!.click());
     expect(container.textContent).not.toContain("注意力权重");
+    expect(container.textContent).not.toContain("研究问题");
   });
 
   it("shows generation progress and disables regenerate while running", async () => {
@@ -130,13 +135,13 @@ describe("outline drawer", () => {
     expect(selected.anchors[0].blockId).toBe("p002-b002");
   });
 
-  it("collapses and expands a part subtree from its toggle", async () => {
+  it("expands and re-collapses the thread branch from its toggle", async () => {
     await render(<OutlineDrawer {...props()} />);
-    const before = container.querySelectorAll(".outline-node").length;
+    expect(container.textContent).not.toContain("研究问题");
     await click(nodeByTitle("论证主线").querySelector(".outline-node-toggle")!);
-    expect(container.querySelectorAll(".outline-node").length).toBe(before - 1);
+    expect(container.textContent).toContain("研究问题");
     await click(nodeByTitle("论证主线").querySelector(".outline-node-toggle")!);
-    expect(container.querySelectorAll(".outline-node").length).toBe(before);
+    expect(container.textContent).not.toContain("研究问题");
   });
 
   it("retries a failed part from its node", async () => {

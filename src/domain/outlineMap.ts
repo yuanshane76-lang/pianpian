@@ -124,14 +124,12 @@ export function findOutlineNode(nodes: OutlineNode[], id: string | null): Outlin
   return null;
 }
 
-/** 根之下第二层（要点层）有子节点的节点 id（默认收起支撑点时用）。 */
-export function secondLevelIdsWithChildren(nodes: OutlineNode[]): string[] {
+/** 第一层分支（论证主线、各部分）中有子节点的节点 id，用于“默认收起/收起全部”。 */
+export function branchIdsWithChildren(nodes: OutlineNode[]): string[] {
   const ids: string[] = [];
   for (const root of nodes) {
     for (const branch of root.children) {
-      for (const child of branch.children) {
-        if (child.children.length) ids.push(child.id);
-      }
+      if (branch.children.length) ids.push(branch.id);
     }
   }
   return ids;

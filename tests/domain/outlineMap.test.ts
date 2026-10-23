@@ -14,9 +14,9 @@ import {
   type WikiPoint,
 } from "../../src/domain/paperWiki";
 import {
+  branchIdsWithChildren,
   findOutlineNode,
   projectOutlineMap,
-  secondLevelIdsWithChildren,
 } from "../../src/domain/outlineMap";
 
 const blocks: DocumentBlock[] = [
@@ -238,9 +238,9 @@ describe("outline projection", () => {
     expect(findOutlineNode(map.nodes, "nope")).toBeNull();
   });
 
-  it("lists insight-level nodes with children for default collapsing", () => {
+  it("lists branch nodes with children for default collapsing", () => {
     const map = project();
-    expect(secondLevelIdsWithChildren(map.nodes)).toEqual([`${methodPart.id}:i1`]);
+    expect(branchIdsWithChildren(map.nodes)).toEqual(["thread-branch", methodPart.id]);
   });
 
   it("uses prelude part without heading anchor as unlocatable structure", () => {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, FoldHorizontal, LoaderCircle, Network, RefreshCw, UnfoldVertical, X } from "lucide-react";
-import { secondLevelIdsWithChildren, type OutlineMap, type OutlineNode } from "../../domain/outlineMap";
+import { branchIdsWithChildren, type OutlineMap, type OutlineNode } from "../../domain/outlineMap";
 import { OutlineTree } from "./OutlineTree";
 
 interface Props {
@@ -22,9 +22,9 @@ export function OutlineDrawer({
 }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const rootNodeKey = map ? map.nodes.map((node) => node.id).join(",") : "";
-  const collapsible = map ? secondLevelIdsWithChildren(map.nodes) : [];
+  const collapsible = map ? branchIdsWithChildren(map.nodes) : [];
 
-  // 新论文/顶层结构变化时回到默认视图：主线 + 部分语义标题 + 要点可见，支撑点收起。
+  // 新论文/顶层结构变化时回到默认视图：只展开骨架（论证主线、各部分），下层全部收起。
   useEffect(() => {
     setCollapsed(new Set(collapsible));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -72,7 +72,7 @@ export function OutlineDrawer({
           <UnfoldVertical size={12} />展开全部
         </button>
         <button className="text-button" type="button" onClick={() => setCollapsed(new Set(collapsible))}>
-          <FoldHorizontal size={12} />收起支撑点
+          <FoldHorizontal size={12} />收起全部
         </button>
       </span> : null}
     </div> : null}
