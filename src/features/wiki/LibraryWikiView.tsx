@@ -1,4 +1,4 @@
-import { BookOpenText, ChevronLeft, List, LoaderCircle, RefreshCw, Search, Share2, Waypoints, X } from "lucide-react";
+import { BookOpenText, ChevronLeft, List, LoaderCircle, RefreshCw, Search, Share2, Tags, Waypoints, X } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import {
   buildLibraryWikiIndex,
@@ -80,6 +80,7 @@ function WikiPageDetail({ page, index, canJump, onJump, onNavigate, onClose }: {
 export function LibraryWikiView({ pages, progress, failures, onRetryFailed, canJump, onJump, onBack }: Props) {
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<"star" | "list">("star");
+  const [showAllLabels, setShowAllLabels] = useState(false);
   // undefined = 初始（回退到第一个页面）；null = 用户显式关闭了详情。
   const [selectedId, setSelectedId] = useState<string | null | undefined>(pages[0]?.id);
   const index = useMemo(() => buildLibraryWikiIndex(pages), [pages]);
@@ -113,17 +114,24 @@ export function LibraryWikiView({ pages, progress, failures, onRetryFailed, canJ
       </button>
     </header>
     {mode === "star" ? <div className="wiki-starmap-wrap">
-      <LibraryWikiGraph index={index} selectedId={selected?.id ?? null} onSelect={(page) => setSelectedId(page.id)} />
-      <div className="wiki-starmap-search">
-        <Search size={14} />
-        <input aria-label="搜索知识页面" placeholder="搜索概念或方法" type="search" value={query} onChange={(event) => setQuery(event.target.value)} />
-        {normalizedQuery ? <div className="wiki-starmap-hits">
-          {list.length ? list.slice(0, 8).map((page) => <button key={page.id} type="button" onClick={() => setSelectedId(page.id)}>
-            <span className={`library-wiki-kind ${page.kind}`}>{KIND_LABEL[page.kind] ?? page.kind}</span>
-            {page.title}
-            <small>{Object.keys(page.occurrences).length} 篇</small>
-          </button>) : <span className="wiki-starmap-hits-empty">没有匹配的知识页面。</span>}
-        </div> : null}
+      <LibraryWikiGraph index={index} selectedId={selected?.id ?? null} showAllLabels={showAllLabels} onSelect={(page) => setSelectedId(page.id)} />
+      <div className="wiki-starmap-toolbar">
+        <div className="wiki-starmap-search">
+          <Search size={15} />
+          <input aria-label="搜索知识页面" placeholder="搜索概念、方法或论文" type="search" value={query} onChange={(event) => setQuery(event.target.value)} />
+          {normalizedQuery ? <div className="wiki-starmap-hits">
+            {list.length ? list.slice(0, 8).map((page) => <button key={page.id} type="button" onClick={() => setSelectedId(page.id)}>
+              <span className={`library-wiki-kind ${page.kind}`}>{KIND_LABEL[page.kind] ?? page.kind}</span>
+              {page.title}
+              <small>{Object.keys(page.occurrences).length} 篇</small>
+            </button>) : <span className="wiki-starmap-hits-empty">没有匹配的知识页面。</span>}
+          </div> : null}
+        </div>
+        <button type="button" className={`wiki-starmap-label-toggle ${showAllLabels ? "is-on" : ""}`} aria-pressed={showAllLabels}
+          title={showAllLabels ? "只显示枢纽与高连接度星名" : "显示全部星名"}
+          onClick={() => setShowAllLabels((current) => !current)}>
+          <Tags size={14} />{showAllLabels ? "名称已全显" : "显示全部名称"}
+        </button>
       </div>
       {selected ? <div className="wiki-starmap-detail">
         <WikiPageDetail page={selected} index={index} canJump={canJump} onJump={onJump}

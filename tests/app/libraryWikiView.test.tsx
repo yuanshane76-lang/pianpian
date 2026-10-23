@@ -61,12 +61,24 @@ afterEach(async () => {
 });
 
 describe("library wiki view", () => {
-  it("opens on the star map by default with the selected star's detail card", async () => {
+  it("opens on the star map with paper hubs and the selected star's detail card", async () => {
     await render(<LibraryWikiView {...props()} />);
     expect(container.querySelector(".wiki-graph")).toBeTruthy();
-    expect(container.querySelectorAll(".wiki-star")).toHaveLength(2);
+    expect(container.querySelectorAll(".wiki-star")).toHaveLength(4); // 2 知识星 + 2 论文枢纽
+    expect(container.querySelectorAll(".wiki-star-paper")).toHaveLength(2);
     expect(container.querySelector(".wiki-starmap-detail")!.textContent).toContain("注意力机制");
     expect(container.querySelector(".wiki-starmap-hint")).toBeFalsy(); // 有选中详情时不再显示提示
+  });
+
+  it("toggles showing every star name from the toolbar", async () => {
+    await render(<LibraryWikiView {...props()} />);
+    const visibleLabels = () => Array.from(container.querySelectorAll<SVGTextElement>(".wiki-star-label"))
+      .filter((label) => label.getAttribute("visibility") === "visible");
+    const autoVisible = visibleLabels().length;
+    expect(autoVisible).toBeGreaterThan(0);
+    expect(autoVisible).toBeLessThan(4); // 自动模式不显示全部
+    await act(async () => container.querySelector<HTMLButtonElement>(".wiki-starmap-label-toggle")!.click());
+    expect(visibleLabels()).toHaveLength(4); // 全显模式：两颗知识星 + 两颗论文星
   });
 
   it("switches to the list view and shows cross-paper detail", async () => {
