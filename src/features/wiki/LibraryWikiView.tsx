@@ -15,6 +15,8 @@ interface Props {
   /** 提取失败的论文（论文 id → 错误信息）。 */
   failures: Record<string, string> | null;
   onRetryFailed: () => void;
+  /** 手动触发：为还没有知识缓存的新论文补提取。 */
+  onExtractNew: () => void;
   /** 判断某篇论文当前能否打开阅读（用于原文跳转可用性）。 */
   canJump: (paperId: string) => boolean;
   onJump: (paperId: string, blockId: string) => void;
@@ -77,7 +79,7 @@ function WikiPageDetail({ page, index, canJump, onJump, onNavigate, onClose }: {
   </section>;
 }
 
-export function LibraryWikiView({ pages, progress, failures, onRetryFailed, canJump, onJump, onBack }: Props) {
+export function LibraryWikiView({ pages, progress, failures, onRetryFailed, onExtractNew, canJump, onJump, onBack }: Props) {
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<"star" | "list">("star");
   const [showAllLabels, setShowAllLabels] = useState(false);
@@ -114,6 +116,10 @@ export function LibraryWikiView({ pages, progress, failures, onRetryFailed, canJ
         {failures && !progress ? <button className="text-button" type="button" onClick={onRetryFailed}>
           <RefreshCw size={12} />{Object.keys(failures).length} 篇提取失败 · 重试
         </button> : null}
+        <button className="text-button" type="button" disabled={progress !== null}
+          title="为还没有知识缓存的新论文补提取" onClick={onExtractNew}>
+          <RefreshCw size={12} className={progress !== null ? "spin" : undefined} />{progress ? "提取中…" : "提取新论文"}
+        </button>
       </div>
       <button type="button" className={`text-button ${mode === "list" ? "is-active" : ""}`} aria-pressed={mode === "list"}
         onClick={() => setMode((current) => (current === "star" ? "list" : "star"))}>

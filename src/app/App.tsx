@@ -313,13 +313,16 @@ export default function App() {
     if (!saveLibraryWiki(libraryWiki.pages)) setStorageError(true);
   }, [libraryWiki]);
 
-  // 打开知识库时按论文列表逐篇提取知识（缓存命中零调用），每个会话一次。
-  const wikiEnsuredRef = useRef(false);
+  // 打开知识库时按论文列表逐篇补提取（缓存命中零调用）；新论文解析完成后
+  // 在知识库视图内自动跟上，也可通过头部按钮手动触发。
+  const readyWikiPaperIds = papers
+    .filter((paper) => (paper.blockData ?? []).length)
+    .map((paper) => paper.id)
+    .join(",");
   useEffect(() => {
-    if (view !== "wiki" || wikiEnsuredRef.current) return;
-    wikiEnsuredRef.current = true;
+    if (view !== "wiki") return;
     void ensureLibraryWikiKnowledge();
-  }, [view]);
+  }, [view, readyWikiPaperIds]);
 
   useEffect(() => {
     const bridge = getDesktopBridge();
@@ -1684,6 +1687,7 @@ export default function App() {
         progress={wikiKnowledgeProgress}
         failures={Object.keys(wikiKnowledgeFailures).length ? wikiKnowledgeFailures : null}
         onRetryFailed={() => void ensureLibraryWikiKnowledge(true)}
+        onExtractNew={() => void ensureLibraryWikiKnowledge(false)}
         canJump={(paperId) => {
           const target = papers.find((item) => item.id === paperId);
           return Boolean(target && canOpenPaper(target, pipelineStates[paperId]));

@@ -32,6 +32,7 @@ function props(overrides: Partial<ComponentProps<typeof LibraryWikiView>> = {}) 
     progress: null,
     failures: null,
     onRetryFailed: vi.fn(),
+    onExtractNew: vi.fn(),
     canJump: (paperId: string) => paperId === "p1",
     onJump: vi.fn(),
     onBack: vi.fn(),
@@ -158,11 +159,22 @@ describe("library wiki view", () => {
     const onRetryFailed = vi.fn();
     await render(<LibraryWikiView {...props({ progress: { done: 2, total: 5 } })} />);
     expect(container.querySelector(".library-wiki-progress")!.textContent).toContain("正在提取 2/5");
+    expect(container.querySelector<HTMLButtonElement>('[title*="补提取"]')!.disabled).toBe(true); // 提取中禁用
     await render(<LibraryWikiView {...props({ failures: { p2: "服务超时" }, onRetryFailed })} />);
-    const retry = container.querySelector<HTMLButtonElement>(".library-wiki-header-meta .text-button")!;
+    const retry = Array.from(container.querySelectorAll<HTMLButtonElement>(".library-wiki-header-meta .text-button"))
+      .find((button) => button.textContent!.includes("提取失败"))!;
     expect(retry.textContent).toContain("1 篇提取失败");
     await act(async () => retry.click());
     expect(onRetryFailed).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers a manual extract button for newly added papers", async () => {
+    const onExtractNew = vi.fn();
+    await render(<LibraryWikiView {...props({ onExtractNew })} />);
+    const extract = container.querySelector<HTMLButtonElement>('[title*="补提取"]')!;
+    expect(extract.textContent).toContain("提取新论文");
+    await act(async () => extract.click());
+    expect(onExtractNew).toHaveBeenCalledTimes(1);
   });
 
   it("shows an onboarding hint for an empty wiki", async () => {
