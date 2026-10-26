@@ -1626,6 +1626,7 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
 .deck-figure-loading { color: #999; font-size: 12px; }
 .deck-slide-head { display: flex; justify-content: space-between; padding: 6px 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; background: var(--surface-raised); }
 .deck-empty { margin: 40px auto; color: var(--muted); }
+.deck-marquee { position: absolute; z-index: 3; border: 1.5px dashed var(--teal); background: rgba(20, 184, 166, 0.12); pointer-events: none; }
 .pdf-block-hover-label { position: absolute; top: -22px; left: -1px; display: none; padding: 3px 6px; border-radius: 3px 3px 0 0; color: white; background: #246fee; font-size: 10px; line-height: 16px; white-space: nowrap; pointer-events: none; }
 .pdf-block-hit-area:hover .pdf-block-hover-label, .pdf-block-hit-area.is-hovered .pdf-block-hover-label, .pdf-block-hit-area.is-active .pdf-block-hover-label { display: block; }
 .pdf-block-actions { position: absolute; left: 0; bottom: calc(100% + 7px); z-index: 4; display: none; align-items: center; gap: 6px; pointer-events: auto; }

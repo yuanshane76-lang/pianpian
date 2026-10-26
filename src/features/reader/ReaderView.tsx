@@ -398,6 +398,11 @@ export function ReaderView(props: ReaderViewProps) {
             }}
             onPosition={(pageNumber) => { setPage(pageNumber); props.onPosition({ mode: "pdf", page: pageNumber }); }}
             loadImage={(block) => loadChartImage(paper.originalId, block)}
+            onSelectText={(block, text) => {
+              select(block);
+              props.onSelectText(block, text);
+              setRightOpen(true);
+            }}
           /> : <PdfPreview paperId={paper.id} originalId={paper.originalId} page={page} onPage={original} navigationTarget={navigationTarget}
             onAnalyzeParagraph={(block, pageNumber = block.pageNumber, regionId) => {
               setPage(pageNumber);
