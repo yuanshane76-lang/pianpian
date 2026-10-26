@@ -296,6 +296,7 @@ export async function prepareImportFile(
 ): Promise<{ paper: PaperRecord; data: ArrayBuffer; duplicate: boolean }> {
   if (file.size > 100 * 1024 * 1024) throw new Error("文件不能超过 100 MB");
   const isDeck = /\.(?:pptx|ppt)$/i.test(file.name);
+  const deckFormat = /\.ppt$/i.test(file.name) ? "ppt" as const : "pptx" as const;
   const data = await file.arrayBuffer();
   if (isDeck) {
     // 演示文稿：不做本地 PDF 解析，原件交给 MinerU 转换；标题取文件名。
@@ -309,7 +310,7 @@ export async function prepareImportFile(
         authors: [], year: null, importedAt: new Date().toISOString(), groupId: DEFAULT_GROUP_ID,
         favorite: false, blocks: 0, blockData: [],
         parseStatus: "pending", parseVersion: 2, readingPosition: { mode: "pdf", page: 1 },
-        sourceFormat: "deck",
+        sourceFormat: deckFormat,
       },
     };
   }
@@ -334,7 +335,7 @@ export async function prepareImportFile(
         authors: [], year: null, importedAt: new Date().toISOString(), groupId: DEFAULT_GROUP_ID,
         favorite: false, blocks: 0, blockData: [], pageCount: document.numPages,
         parseStatus: "pending", parseVersion: 2, readingPosition: { mode: "pdf", page: 1 },
-        sourceFormat: looksLikeSlideDeck(sizes) ? "deck" : "pdf",
+        sourceFormat: "pdf",
       },
     };
   } finally { await document.destroy(); }

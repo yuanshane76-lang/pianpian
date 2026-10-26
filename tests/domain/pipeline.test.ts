@@ -17,7 +17,7 @@ const context = {
 
 describe("mandatory reading readiness", () => {
   it("opens a deck paper without coordinates once parsing is ready", () => {
-    const deck = { ...paper, sourceFormat: "deck" as const, blockData: [{ id: "s", kind: "paragraph" as const, text: "Slide", pageNumber: 1, order: 0 }] };
+    const deck = { ...paper, sourceFormat: "pptx" as const, blockData: [{ id: "s", kind: "paragraph" as const, text: "Slide", pageNumber: 1, order: 0 }] };
     expect(canOpenPaper(deck, pipeline)).toBe(true);
     expect(canOpenPaper({ ...deck, blockData: [] }, pipeline)).toBe(false);
     expect(canOpenPaper({ ...deck, parseStatus: "pending" }, pipeline)).toBe(false);

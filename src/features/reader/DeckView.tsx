@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DocumentBlock } from "../../domain/documentBlocks";
+import type { CSSProperties } from "react";
 import type { PaperRecord } from "../../domain/library";
 
 interface Props {
@@ -26,37 +27,36 @@ function groupSlides(blocks: DocumentBlock[]): Slide[] {
   return slides;
 }
 
-function SlideBlock({ block, images, selected, onSelect, onAnalyzeParagraph }: {
-  block: DocumentBlock;
-  images: Record<string, string>;
-  selected: boolean;
-  onSelect: (block: DocumentBlock) => void;
-  onAnalyzeParagraph: (block: DocumentBlock) => void;
-}) {
-  if (block.kind === "image") {
-    const src = images[block.id];
-    return <figure className={`deck-block deck-figure ${selected ? "is-selected" : ""}`} onClick={() => onSelect(block)}>
-      {src ? <img src={src} alt={block.caption || "幻灯片图片"} /> : <div className="deck-figure-loading">图片加载中…</div>}
-      {block.caption ? <figcaption>{block.caption}</figcaption> : null}
-    </figure>;
-  }
-  if (block.kind === "equation") {
-    return <pre className={`deck-block deck-equation ${selected ? "is-selected" : ""}`}
-      onClick={() => onSelect(block)} onDoubleClick={() => onAnalyzeParagraph(block)}>{block.text}</pre>;
-  }
-  if (block.kind === "table") {
-    return <div className={`deck-block deck-table ${selected ? "is-selected" : ""}`}
-      onClick={() => onSelect(block)} onDoubleClick={() => onAnalyzeParagraph(block)}>{block.text}</div>;
-  }
-  if (block.kind === "heading") {
-    return <h3 className={`deck-block deck-heading ${selected ? "is-selected" : ""}`}
-      onClick={() => onSelect(block)} onDoubleClick={() => onAnalyzeParagraph(block)}>{block.text}</h3>;
-  }
-  return <p className={`deck-block deck-paragraph ${selected ? "is-selected" : ""}`}
-    onClick={() => onSelect(block)} onDoubleClick={() => onAnalyzeParagraph(block)}>{block.text}</p>;
+function boxStyle(block: DocumentBlock): CSSProperties | null {
+  const bbox = block.bbox;
+  if (!bbox || bbox.length < 4) return null;
+  const [x0, y0, x1, y1] = bbox;
+  return {
+    left: `${Math.max(0, x0 * 100)}%`,
+    top: `${Math.max(0, y0 * 100)}%`,
+    width: `${Math.max(1, (x1 - x0) * 100)}%`,
+    minHeight: `${Math.max(0, (y1 - y0) * 100)}%`,
+  };
 }
 
-/** 演示文稿阅读：MinerU 转换后的块按幻灯片分组为卡片流；单击选中、双击发起段落理解。 */
+function SlideContent({ block, images }: { block: DocumentBlock; images: Record<string, string> }) {
+  if (block.kind === "image") {
+    const src = images[block.id];
+    return <figure className="deck-figure">
+      {src ? <img src={src} alt={block.caption || "幻灯片图片"} /> : <div className="deck-figure-loading">…</div>}
+    </figure>;
+  }
+  if (block.kind === "heading") return <h3 className="deck-heading">{block.text}</h3>;
+  if (block.kind === "equation") return <pre className="deck-equation">{block.text}</pre>;
+  if (block.kind === "table") return <div className="deck-table">{block.text}</div>;
+  return <p className="deck-paragraph">{block.text}</p>;
+}
+
+/**
+ * 演示文稿阅读（pptx/ppt）：MinerU 块按幻灯片页分组，复用块坐标把内容绝对定位到
+ * 16:9 画布上还原原始版面（文字与图片在幻灯片上的真实位置），不重排不改写；
+ * 无坐标的块以流式附录补在画布下方。单击选中，双击发起段落理解。
+ */
 export function DeckView({ paper, selectedBlockId, navigationTarget, readingPage, onSelect, onAnalyzeParagraph, onPosition, loadImage }: Props) {
   const slides = useMemo(() => groupSlides(paper.blockData ?? []), [paper.blockData]);
   const [images, setImages] = useState<Record<string, string>>({});
@@ -91,20 +91,48 @@ export function DeckView({ paper, selectedBlockId, navigationTarget, readingPage
   }, [navigationTarget?.requestId]);
 
   return <div className="deck-view" role="list" aria-label="演示文稿幻灯片">
-    {slides.map((slide) => <section
-      key={slide.page}
-      role="listitem"
-      aria-label={`第 ${slide.page} 页`}
-      className="deck-slide"
-      ref={(element) => { cardRefs.current[slide.page] = element; }}
-      onClick={() => onPosition(slide.page)}
-    >
-      <header className="deck-slide-head"><span>第 {slide.page} 页</span><span>/ {slides.length}</span></header>
-      <div className="deck-slide-body">
-        {slide.blocks.map((block) => <SlideBlock key={block.id} block={block} images={images}
-          selected={block.id === selectedBlockId} onSelect={onSelect} onAnalyzeParagraph={onAnalyzeParagraph} />)}
-      </div>
-    </section>)}
+    {slides.map((slide) => {
+      const positioned = slide.blocks.filter((block) => boxStyle(block));
+      const loose = slide.blocks.filter((block) => !boxStyle(block));
+      return <section
+        key={slide.page}
+        role="listitem"
+        aria-label={`第 ${slide.page} 页`}
+        className="deck-slide"
+        ref={(element) => { cardRefs.current[slide.page] = element; }}
+        onClick={() => onPosition(slide.page)}
+      >
+        <div className="deck-canvas">
+          {positioned.map((block) => <div
+            key={block.id}
+            className={`deck-abs deck-block deck-${block.kind} ${block.id === selectedBlockId ? "is-selected" : ""}`}
+            style={boxStyle(block) ?? undefined}
+            title={block.caption}
+            onClick={() => onSelect(block)}
+            onDoubleClick={(event) => {
+              event.preventDefault();
+              onAnalyzeParagraph(block);
+            }}
+          >
+            <SlideContent block={block} images={images} />
+          </div>)}
+          {loose.length ? <div className="deck-loose">
+            {loose.map((block) => <div
+              key={block.id}
+              className={`deck-block deck-${block.kind} ${block.id === selectedBlockId ? "is-selected" : ""}`}
+              onClick={() => onSelect(block)}
+              onDoubleClick={(event) => {
+                event.preventDefault();
+                onAnalyzeParagraph(block);
+              }}
+            >
+              <SlideContent block={block} images={images} />
+            </div>)}
+          </div> : null}
+        </div>
+        <header className="deck-slide-head"><span>第 {slide.page} 页</span><span>/ {slides.length}</span></header>
+      </section>;
+    })}
     {!slides.length ? <p className="deck-empty">这篇演示文稿还没有可显示的内容。</p> : null}
   </div>;
 }

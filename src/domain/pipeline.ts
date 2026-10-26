@@ -67,11 +67,12 @@ export function getPaperPipelineState(
 export function canOpenPaper(paper: PaperRecord, state?: PaperPipelineState): boolean {
   // Only a published main-process result can establish the ready pipeline.
   // Cached renderer records (including legacy records) cannot prove completion.
-  // 演示文稿（pptx/ppt）由块直接渲染，不做 PDF 坐标叠加，因此不要求坐标完整。
-  const deck = paper.sourceFormat === "deck";
+  // pptx/ppt 由坐标画布渲染（无本地 PDF 叠加面），不要求坐标完整；
+  // PPT 另存为的 PDF 仍是原生 PDF 阅读面，坐标要求不变。
+  const office = Boolean(paper.sourceFormat && paper.sourceFormat !== "pdf");
   return Boolean(paper.originalId && paper.parseStatus === "ready"
     && state?.paperId === paper.id && state.source === "mineru" && state.stage === "ready"
-    && (deck ? Boolean(paper.blockData?.length) : hasCompletePageBounds(paper.blockData)));
+    && (office ? Boolean(paper.blockData?.length) : hasCompletePageBounds(paper.blockData)));
 }
 
 export function getLibraryPreparation(paper: PaperRecord, state: PaperPipelineState | undefined, configured: boolean) {

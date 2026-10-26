@@ -33,8 +33,9 @@ export interface PaperRecord {
   parseVersion?: number;
   mineruBatchId?: string;
   readingPosition?: { mode: "pdf" | "reading"; page: number; blockId?: string; regionId?: string };
-  /** 原始文件类型：deck 表示演示文稿（pptx/ppt），MinerU 转换后按幻灯片阅读，不要求坐标完整。 */
-  sourceFormat?: "pdf" | "deck";
+  /** 原始文件真实格式。非 PDF 的演示文稿按幻灯片画布阅读，不要求坐标完整；
+   * PPT 另存为的 PDF 保持 sourceFormat "pdf"，走原生 PDF 阅读面。 */
+  sourceFormat?: "pdf" | "pptx" | "ppt";
 }
 
 export interface PaperMetadataPatch {
