@@ -1,7 +1,7 @@
 {
   "name": "zhiyan-workbench",
   "productName": "篇篇",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "description": "篇篇：你的 AI 论文阅读伙伴。每篇论文，都有个伴。",
   "main": "electron/main.cjs",
