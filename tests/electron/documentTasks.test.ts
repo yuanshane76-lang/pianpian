@@ -107,6 +107,27 @@ describe("document task orchestration", () => {
     expect(calls.downloadResultZip).toHaveBeenCalledOnce();
   });
 
+  it("uploads presentations with the real extension sniffed from file bytes", async () => {
+    const rootDirectory = await mkdtemp(path.join(os.tmpdir(), "paperquay-tasks-"));
+    roots.push(rootDirectory);
+    const documents = loadedModules.store.createDocumentStore({ rootDirectory });
+    const pptx = Uint8Array.from(Buffer.from("PKpptx-payload", "latin1"));
+    const { id } = await documents.save({ name: "deck.pptx", data: pptx });
+    const calls = {
+      requestUpload: vi.fn(async () => ({ batchId: "batch-deck", uploadUrl: "https://mineru.oss-cn-shanghai.aliyuncs.com/upload" })),
+      uploadPdf: vi.fn(async () => {}),
+      getBatch: vi.fn(async () => ({ state: "waiting-file", progress: 0 })),
+      downloadResultZip: vi.fn(async () => Uint8Array.from([1])),
+    };
+    const tasks = loadedModules.tasks.createDocumentTasks({
+      documents,
+      readSettings: () => ({ mineru: { apiKey } }),
+      mineru: calls,
+    });
+    await tasks.start(id);
+    expect(calls.requestUpload).toHaveBeenCalledWith(expect.objectContaining({ name: expect.stringMatching(/\.pptx$/) }));
+  });
+
   it("does not let an older status response overwrite a newly accepted upload or its timestamp", async () => {
     let releaseBatch!: (value: { state: string; progress: number }) => void;
     const { id, tasks, documents, calls } = await fixture({

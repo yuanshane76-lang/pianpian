@@ -175,7 +175,7 @@ export function LibraryView({
                     <FolderOpen size={17} />
                     导入 PDF
                     <input
-                      accept="application/pdf,.pdf"
+                      accept="application/pdf,.pdf,.pptx,.ppt"
                       hidden
                       disabled={importing}
                       onChange={(event) => {
@@ -211,7 +211,7 @@ export function LibraryView({
                   <FolderOpen size={17} />
                   导入第一篇 PDF
                   <input
-                    accept="application/pdf,.pdf"
+                    accept="application/pdf,.pdf,.pptx,.ppt"
                     hidden
                     onChange={(event) => {
                       const file = event.target.files?.[0];

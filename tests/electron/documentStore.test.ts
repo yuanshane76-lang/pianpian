@@ -74,13 +74,15 @@ describe("durable desktop document store", () => {
 
   it("rejects non-PDF and oversized inputs before creating a document directory", async () => {
     const { rootDirectory, store } = await fixture();
-    await expect(store.save({ name: "fake.pdf", data: Buffer.from("not a PDF") })).rejects.toThrow(/PDF/);
-    await expect(store.save({ name: "empty.pdf", data: Buffer.alloc(0) })).rejects.toThrow(/PDF/);
+    await expect(store.save({ name: "fake.pdf", data: Buffer.from("not a PDF") })).rejects.toThrow(/不支持的文件内容/);
+    await expect(store.save({ name: "empty.pdf", data: Buffer.alloc(0) })).rejects.toThrow(/不支持的文件内容/);
     const large = Buffer.alloc(100 * 1024 * 1024 + 1);
     pdf.copy(large);
     await expect(store.save({ name: "large.pdf", data: large })).rejects.toThrow(/100/);
     await expect(store.save({ name: "string.pdf", data: "bad" as unknown as Bytes })).rejects.toThrow(/bytes/i);
     expect(await readdir(rootDirectory)).toEqual([]);
+    // pptx 容器与 PDF 一样被接受（MinerU 转换路径），保存会创建文档目录。
+    await expect(store.save({ name: "deck.pptx", data: Buffer.from([0x50, 0x4b, 0x03, 0x04, ...Buffer.from("deck")]) })).resolves.toBeTruthy();
   });
 
   it("normalizes empty, reserved, and long filenames to safe PDF names", async () => {

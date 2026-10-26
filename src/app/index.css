@@ -1605,6 +1605,23 @@ body.is-reader-resizing .reader-resizer::after { width: 2px; background: var(--t
   .pdf-block-hit-area.is-focus-flash { animation: none; }
 }
 .pdf-block-hit-area:focus-visible { outline: 2px solid #246fee; outline-offset: 2px; }
+/* 演示文稿（pptx/ppt）阅读：幻灯片卡片流 */
+.reader-document.is-deck { overflow-y: auto; background: var(--canvas); }
+.deck-view { display: flex; flex-direction: column; gap: 18px; max-width: 960px; margin: 0 auto; padding: 18px 16px 40px; }
+.deck-slide { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05); overflow: hidden; }
+.deck-slide-head { display: flex; justify-content: space-between; padding: 6px 14px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; background: var(--surface-raised); }
+.deck-slide-body { padding: 18px 22px; display: flex; flex-direction: column; gap: 10px; }
+.deck-block { cursor: default; border-radius: 4px; }
+.deck-block.is-selected { box-shadow: inset 0 0 0 2px var(--teal); background: var(--teal-soft); }
+.deck-block.deck-paragraph { margin: 0; color: var(--ink); font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; padding: 4px 6px; }
+.deck-block.deck-heading { margin: 6px 0 0; color: var(--ink); font-size: 16px; padding: 4px 6px; }
+.deck-block.deck-table { white-space: pre-wrap; font-size: 12px; line-height: 1.6; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; overflow-x: auto; overflow-wrap: anywhere; }
+.deck-block.deck-equation { white-space: pre-wrap; font-size: 13px; padding: 10px 12px; background: var(--surface-raised); border-radius: 6px; overflow-x: auto; }
+.deck-figure { margin: 0; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.deck-figure img { max-width: 100%; max-height: 420px; border-radius: 4px; }
+.deck-figure figcaption { color: var(--muted); font-size: 11.5px; }
+.deck-figure-loading { padding: 18px; color: var(--muted); font-size: 12px; }
+.deck-empty { margin: 40px auto; color: var(--muted); }
 .pdf-block-hover-label { position: absolute; top: -22px; left: -1px; display: none; padding: 3px 6px; border-radius: 3px 3px 0 0; color: white; background: #246fee; font-size: 10px; line-height: 16px; white-space: nowrap; pointer-events: none; }
 .pdf-block-hit-area:hover .pdf-block-hover-label, .pdf-block-hit-area.is-hovered .pdf-block-hover-label, .pdf-block-hit-area.is-active .pdf-block-hover-label { display: block; }
 .pdf-block-actions { position: absolute; left: 0; bottom: calc(100% + 7px); z-index: 4; display: none; align-items: center; gap: 6px; pointer-events: auto; }

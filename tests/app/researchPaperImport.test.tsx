@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../../src/app/App";
 import { DEFAULT_SERVICE_SETTINGS, toPublicServiceSettings } from "../../src/domain/serviceSettings";
 import type { ResearchAgentImportReceipt, ResearchAgentPaperSummary } from "../../src/services/researchAgentProtocol";
-import { preparePdfFile } from "../../src/services/library";
+import { prepareImportFile } from "../../src/services/library";
 import { addLiteraturePaper, upgradeLiteraturePaperWithPdf } from "../../src/domain/literature";
 
 type ImportPaper = (paper: ResearchAgentPaperSummary, signal: AbortSignal) => Promise<ResearchAgentImportReceipt>;
@@ -18,7 +18,7 @@ vi.mock("../../src/features/reader/ResearchAssistant", () => ({
 }));
 vi.mock("../../src/services/library", async (importActual) => ({
   ...await importActual<typeof import("../../src/services/library")>(),
-  preparePdfFile: vi.fn(),
+  prepareImportFile: vi.fn(),
 }));
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -69,7 +69,7 @@ describe("research paper import cancellation", () => {
     window.localStorage.setItem("zhiyan-workbench.groups.v1", JSON.stringify([
       { id: "custom-group", name: "阅读中", createdAt: "2026-10-17" },
     ]));
-    vi.mocked(preparePdfFile).mockResolvedValueOnce({ paper: prepared, data: new ArrayBuffer(8), duplicate: true });
+    vi.mocked(prepareImportFile).mockResolvedValueOnce({ paper: prepared, data: new ArrayBuffer(8), duplicate: true });
     await mount(async () => undefined, false);
     const input = document.querySelector<HTMLInputElement>(".import-button input")!;
     Object.defineProperty(input, "files", { configurable: true, value: [new File(["synthetic"], "paper.pdf")] });

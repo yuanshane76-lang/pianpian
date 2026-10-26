@@ -275,27 +275,49 @@ export async function importPdfFile(file: File): Promise<PaperRecord> {
   };
 }
 
-export async function preparePdfFile(
+function importedTitle(file: File, pdfTitle?: string): string {
+  if (pdfTitle && pdfTitle.length > 4 && !/^(untitled|microsoft|latex)/i.test(pdfTitle)) return pdfTitle;
+  return file.name.replace(/\.(?:pdf|pptx?|ppt)$/i, "").replaceAll("_", " ");
+}
+
+export async function prepareImportFile(
   file: File,
   savedOriginal?: { id: string; duplicate: boolean },
 ): Promise<{ paper: PaperRecord; data: ArrayBuffer; duplicate: boolean }> {
-  if (file.size > 100 * 1024 * 1024) throw new Error("PDF 文件不能超过 100 MB");
+  if (file.size > 100 * 1024 * 1024) throw new Error("文件不能超过 100 MB");
+  const isDeck = /\.(?:pptx|ppt)$/i.test(file.name);
   const data = await file.arrayBuffer();
-  const document = await openPdf(data);
-  try {
-    const metadata = await document.getMetadata();
-    const info = metadata.info as { Title?: string };
-    const title = info.Title?.trim();
+  if (isDeck) {
+    // 演示文稿：不做本地 PDF 解析，原件交给 MinerU 转换；标题取文件名。
     const saved = savedOriginal ?? await saveOriginalPdf(file.name, data);
     return {
       data,
       duplicate: saved.duplicate,
       paper: {
         id: saved.id, originalId: saved.id, sourcePath: `local://${saved.id}`,
-        title: title && title.length > 4 && !/^(untitled|microsoft|latex)/i.test(title) ? title : file.name.replace(/\.pdf$/i, "").replaceAll("_", " "),
+        title: importedTitle(file),
+        authors: [], year: null, importedAt: new Date().toISOString(), groupId: DEFAULT_GROUP_ID,
+        favorite: false, blocks: 0, blockData: [],
+        parseStatus: "pending", parseVersion: 2, readingPosition: { mode: "pdf", page: 1 },
+        sourceFormat: "deck",
+      },
+    };
+  }
+  const document = await openPdf(data);
+  try {
+    const metadata = await document.getMetadata();
+    const info = metadata.info as { Title?: string };
+    const saved = savedOriginal ?? await saveOriginalPdf(file.name, data);
+    return {
+      data,
+      duplicate: saved.duplicate,
+      paper: {
+        id: saved.id, originalId: saved.id, sourcePath: `local://${saved.id}`,
+        title: importedTitle(file, info.Title?.trim()),
         authors: [], year: null, importedAt: new Date().toISOString(), groupId: DEFAULT_GROUP_ID,
         favorite: false, blocks: 0, blockData: [], pageCount: document.numPages,
         parseStatus: "pending", parseVersion: 2, readingPosition: { mode: "pdf", page: 1 },
+        sourceFormat: "pdf",
       },
     };
   } finally { await document.destroy(); }

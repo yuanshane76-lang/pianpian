@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../../src/app/App";
 import type { AiRequest } from "../../src/services/ai";
 import { extractPdfBlocks } from "../../src/services/document";
-import { preparePdfFile } from "../../src/services/library";
+import { prepareImportFile } from "../../src/services/library";
 import { DEFAULT_SERVICE_SETTINGS, toPublicServiceSettings } from "../../src/domain/serviceSettings";
 
 vi.mock("../../src/services/originalPdf", () => ({
@@ -29,7 +29,7 @@ vi.mock("../../src/services/pdfTextLayer", () => ({
 }));
 vi.mock("../../src/services/library", async (importActual) => ({
   ...await importActual<typeof import("../../src/services/library")>(),
-  preparePdfFile: vi.fn(),
+  prepareImportFile: vi.fn(),
 }));
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -215,7 +215,7 @@ describe("paragraph quick analysis", () => {
 
   it("imports and parses a new PDF without generating any model request", async () => {
     const source = { ...paper, id: "new-paper", originalId: "new-document", sourcePath: "local://new" };
-    vi.mocked(preparePdfFile).mockResolvedValueOnce({
+    vi.mocked(prepareImportFile).mockResolvedValueOnce({
       paper: { ...source, parseStatus: "pending", blockData: [], blocks: 0 } as never,
       data: new ArrayBuffer(8), duplicate: false,
     });
@@ -225,7 +225,7 @@ describe("paragraph quick analysis", () => {
     const input = container.querySelector<HTMLInputElement>(".import-button input")!;
     Object.defineProperty(input, "files", { configurable: true, value: [new File(["synthetic"], "new.pdf", { type: "application/pdf" })] });
     await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
-    expect(preparePdfFile).toHaveBeenCalledOnce();
+    expect(prepareImportFile).toHaveBeenCalledOnce();
     expect(extractPdfBlocks).not.toHaveBeenCalled();
     expect(container.querySelector(".reader-shell")).toBeNull();
     expect(container.querySelector(".paper-list")).not.toBeNull();

@@ -53,7 +53,7 @@ import {
 } from "../domain/library";
 import type { AiRequest } from "../services/ai";
 import { loadAnalysisCache, saveAnalysisCache } from "../services/analysisCache";
-import { loadGroups, loadPapers, preparePdfFile, saveGroups, saveLibraryGroupsAndPapers, savePapers } from "../services/library";
+import { loadGroups, loadPapers, prepareImportFile, saveGroups, saveLibraryGroupsAndPapers, savePapers } from "../services/library";
 import { deleteOriginalPdf } from "../services/originalPdf";
 import { getAnalysisAvailability, getTranslationTarget, isVisualBlock } from "../domain/readingFlow";
 import { canOpenPaper, hasCompletePageBounds, type PaperPipelineState } from "../domain/pipeline";
@@ -250,7 +250,7 @@ export default function App() {
           if (!state || (taskGenerations.current.get(paper.id) ?? 0) !== snapshotGenerations.get(paper.id)
             || activeUploads.current.has(paper.id) || activeParsing.current.has(paper.id)) return paper;
           if (state.task?.state === "done" && state.result?.blocks?.length && !state.layoutRecoveryNeeded) {
-            const positioned = hasCompletePageBounds(state.result.blocks);
+            const positioned = paper.sourceFormat === "deck" || hasCompletePageBounds(state.result.blocks);
             return {
               ...paper,
               blockData: state.result.blocks,
@@ -286,7 +286,7 @@ export default function App() {
             updatePipeline(paper.id, { stage: "mineru-downloading", source: "mineru", mineruMessage: "正在恢复已有 MinerU 任务的段落坐标…" });
             void pollMineru(paper);
           } else if (item.task?.state === "done" && item.result?.blocks?.length) {
-            const positioned = hasCompletePageBounds(item.result.blocks);
+            const positioned = paper.sourceFormat === "deck" || hasCompletePageBounds(item.result.blocks);
             updatePipeline(paper.id, { stage: positioned ? "ready" : "failed", source: "mineru", error: positioned ? undefined : "MinerU 坐标不完整，请重新解析" });
           } else if (item.task?.batchId && ["waiting-file", "pending", "running", "converting", "downloading"].includes(item.task.state || "")) {
             updatePipeline(paper.id, {
@@ -598,7 +598,7 @@ export default function App() {
     setIsBusy(true);
     setErrorMessage(null);
     try {
-      const { paper } = await preparePdfFile(file);
+      const { paper } = await prepareImportFile(file);
       const existing = papersRef.current.find((item) => item.id === paper.id
         || paper.originalId && item.originalId === paper.originalId);
       const imported = existing ?? paper;
@@ -878,7 +878,7 @@ export default function App() {
         const pdfData = new ArrayBuffer(bytes.byteLength);
         new Uint8Array(pdfData).set(bytes);
         const file = new File([pdfData], downloaded.name, { type: "application/pdf" });
-        prepared = (await preparePdfFile(file, { id: downloaded.id, duplicate: downloaded.duplicate })).paper;
+        prepared = (await prepareImportFile(file, { id: downloaded.id, duplicate: downloaded.duplicate })).paper;
       }
       ensureActive();
       const imported = {

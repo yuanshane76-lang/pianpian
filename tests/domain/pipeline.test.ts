@@ -16,6 +16,13 @@ const context = {
 };
 
 describe("mandatory reading readiness", () => {
+  it("opens a deck paper without coordinates once parsing is ready", () => {
+    const deck = { ...paper, sourceFormat: "deck" as const, blockData: [{ id: "s", kind: "paragraph" as const, text: "Slide", pageNumber: 1, order: 0 }] };
+    expect(canOpenPaper(deck, pipeline)).toBe(true);
+    expect(canOpenPaper({ ...deck, blockData: [] }, pipeline)).toBe(false);
+    expect(canOpenPaper({ ...deck, parseStatus: "pending" }, pipeline)).toBe(false);
+  });
+
   it("only opens a completed MinerU result with an original and complete valid coordinates", () => {
     expect(canOpenPaper(paper, pipeline)).toBe(true);
     expect(canOpenPaper(paper)).toBe(false);

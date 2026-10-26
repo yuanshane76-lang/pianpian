@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type Keyboard
 import { getDocumentOutline, type DocumentBlock } from "../../domain/documentBlocks";
 import type { PaperRecord } from "../../domain/library";
 import { PdfPreview } from "./PdfPreview";
+import { DeckView } from "./DeckView";
+import { loadChartImage } from "../../services/chartImage";
 import { PaperRadar } from "./PaperRadar";
 import { ReaderAssistant } from "./ReaderAssistant";
 import { ReaderTabs, type ReaderTabItem } from "./ReaderTabs";
@@ -138,7 +140,7 @@ export function ReaderView(props: ReaderViewProps) {
   const assistantToggleRef = useRef<HTMLButtonElement>(null);
   const focusSequence = useRef(0);
   const [focusTarget, setFocusTarget] = useState<{ id: string; requestId: number; pageNumber?: number; regionId?: string; flash?: boolean }>();
-  const [navigationTarget, setNavigationTarget] = useState<{ page: number; requestId: number }>();
+  const [navigationTarget, setNavigationTarget] = useState<{ page: number; blockId?: string; requestId: number }>();
   const [chartAnalysisRequestId, setChartAnalysisRequestId] = useState<number>();
   const [equationAnalysisRequestId, setEquationAnalysisRequestId] = useState<number>();
   const [draftAppend, setDraftAppend] = useState<{ id: number; text: string }>();
@@ -379,8 +381,24 @@ export function ReaderView(props: ReaderViewProps) {
           </nav> : <p className="outline-empty">尚未识别出论文标题</p>}
         </aside> : null}
         {leftOpen ? <div className="reader-resizer reader-resizer-left" role="separator" aria-label="调整目录宽度" title="拖动调整目录宽度" aria-orientation="vertical" aria-valuemin={panelLimits.outline.min} aria-valuemax={clampWidth("outline", panelLimits.outline.max)} aria-valuenow={outlineWidth} tabIndex={0} onKeyDown={(event) => handleResizeKeyDown("outline", event)} onPointerDown={(event) => startResize("outline", event)} /> : null}
-        <main className="reader-document is-pdf">
-          <PdfPreview paperId={paper.id} originalId={paper.originalId} page={page} onPage={original} navigationTarget={navigationTarget}
+        <main className={`reader-document ${paper.sourceFormat === "deck" ? "is-deck" : "is-pdf"}`}>
+          {paper.sourceFormat === "deck" ? <DeckView
+            paper={paper}
+            selectedBlockId={selectedBlock?.id ?? null}
+            navigationTarget={navigationTarget}
+            readingPage={page}
+            onSelect={(block) => { select(block); props.onSelectBlock(block); }}
+            onAnalyzeParagraph={(block) => {
+              setPage(block.pageNumber);
+              exitOutlineMode();
+              setRightOpen(true);
+              props.onPosition({ mode: "pdf", page: block.pageNumber, blockId: block.id });
+              if (props.aiAvailable) props.onAnalyzeParagraph(block);
+              else onOpenSettings();
+            }}
+            onPosition={(pageNumber) => { setPage(pageNumber); props.onPosition({ mode: "pdf", page: pageNumber }); }}
+            loadImage={(block) => loadChartImage(paper.originalId, block)}
+          /> : <PdfPreview paperId={paper.id} originalId={paper.originalId} page={page} onPage={original} navigationTarget={navigationTarget}
             onAnalyzeParagraph={(block, pageNumber = block.pageNumber, regionId) => {
               setPage(pageNumber);
               exitOutlineMode();
@@ -413,7 +431,7 @@ export function ReaderView(props: ReaderViewProps) {
               addToConversation(block, selectedBlock?.id === block.id ? props.selectionText || block.text : block.text);
             } : undefined}
             onVisiblePage={(visiblePage) => { setPage(visiblePage); props.onPosition({ mode: "pdf", page: visiblePage }); }}
-            onReimport={props.onReimport} blocks={visibleBlocks} activeBlockId={selectedBlock?.id ?? null} onSelect={select} onSelectText={(block, text, pageNumber, regionId) => { select(block, pageNumber, regionId); props.onSelectText(block, text); }} focusTarget={focusTarget} onVisibleBlock={(block, pageNumber = block.pageNumber, regionId) => props.onPosition({ mode: "pdf", page: pageNumber, blockId: block.id, ...(regionId ? { regionId } : {}) })} />
+            onReimport={props.onReimport} blocks={visibleBlocks} activeBlockId={selectedBlock?.id ?? null} onSelect={select} onSelectText={(block, text, pageNumber, regionId) => { select(block, pageNumber, regionId); props.onSelectText(block, text); }} focusTarget={focusTarget} onVisibleBlock={(block, pageNumber = block.pageNumber, regionId) => props.onPosition({ mode: "pdf", page: pageNumber, blockId: block.id, ...(regionId ? { regionId } : {}) })} />}
         </main>
         {rightOpen ? <div className="reader-resizer reader-resizer-right" role="separator" aria-label={outlineActive ? "调整架构面板宽度" : "调整篇篇侧栏宽度"} title={outlineActive ? "拖动调整架构面板宽度" : "拖动调整篇篇侧栏宽度"} aria-orientation="vertical" aria-valuemin={rightLimits.min} aria-valuemax={clampWidth(rightSide, rightLimits.max)} aria-valuenow={rightWidth} tabIndex={0} onKeyDown={(event) => handleResizeKeyDown(rightSide, event)} onPointerDown={(event) => startResize(rightSide, event)} /> : null}
         {rightOpen && !outlineActive ? <ReaderAssistant chartAnalysisRequestId={chartAnalysisRequestId} equationAnalysisRequestId={equationAnalysisRequestId}

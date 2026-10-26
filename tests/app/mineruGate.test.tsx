@@ -6,7 +6,7 @@ import { LibraryView } from "../../src/features/library/LibraryView";
 import type { PaperRecord } from "../../src/domain/library";
 import type { PaperPipelineState } from "../../src/domain/pipeline";
 import { DEFAULT_SERVICE_SETTINGS, toPublicServiceSettings } from "../../src/domain/serviceSettings";
-import { preparePdfFile } from "../../src/services/library";
+import { prepareImportFile } from "../../src/services/library";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -35,7 +35,7 @@ const settings = toPublicServiceSettings({
 
 vi.mock("../../src/services/library", async (importActual) => ({
   ...await importActual<typeof import("../../src/services/library")>(),
-  preparePdfFile: vi.fn(async () => ({ paper: importedPaper, data: new ArrayBuffer(8), duplicate: false })),
+  prepareImportFile: vi.fn(async () => ({ paper: importedPaper, data: new ArrayBuffer(8), duplicate: false })),
 }));
 
 vi.mock("../../src/services/originalPdf", () => ({
@@ -124,8 +124,8 @@ function baseLibraryProps(overrides: Partial<React.ComponentProps<typeof Library
 
 describe("mandatory MinerU reading gate", () => {
   it("uses current configuration if MinerU is cleared while a file is being prepared", async () => {
-    const preparation = deferred<Awaited<ReturnType<typeof preparePdfFile>>>();
-    vi.mocked(preparePdfFile).mockImplementationOnce(() => preparation.promise);
+    const preparation = deferred<Awaited<ReturnType<typeof prepareImportFile>>>();
+    vi.mocked(prepareImportFile).mockImplementationOnce(() => preparation.promise);
     const { container } = await mountApp(async (channel) => {
       if (channel === "zhiyan:settings:get") return settings;
       if (channel === "zhiyan:documents:states") return [];
@@ -144,8 +144,8 @@ describe("mandatory MinerU reading gate", () => {
 
   it("starts an import exactly once when settings finish loading while file preparation is pending", async () => {
     const configuration = deferred<typeof settings>();
-    const preparation = deferred<Awaited<ReturnType<typeof preparePdfFile>>>();
-    vi.mocked(preparePdfFile).mockImplementationOnce(() => preparation.promise);
+    const preparation = deferred<Awaited<ReturnType<typeof prepareImportFile>>>();
+    vi.mocked(prepareImportFile).mockImplementationOnce(() => preparation.promise);
     const { container } = await mountApp(async (channel) => {
       if (channel === "zhiyan:settings:get") return configuration.promise;
       if (channel === "zhiyan:documents:states") return [];
@@ -336,7 +336,7 @@ describe("mandatory MinerU reading gate", () => {
     });
     await importPaper(container);
     await importPaper(container);
-    expect(preparePdfFile).toHaveBeenCalledTimes(2);
+    expect(prepareImportFile).toHaveBeenCalledTimes(2);
     expect(vi.mocked(window.zhiyan!.invoke).mock.calls.filter(([channel]) => channel === "zhiyan:mineru:start")).toHaveLength(1);
   });
 });

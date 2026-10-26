@@ -48,10 +48,15 @@ function bytesView(data) {
 
 function validatePdf(data) {
   const bytes = bytesView(data);
-  if (bytes.length > MAX_PDF_BYTES) throw new Error("PDF exceeds the 100 MB limit.");
-  if (bytes.length < 8 || !/^%PDF-[0-9]\.[0-9]/.test(bytes.subarray(0, 8).toString("ascii"))) {
-    throw new Error("Invalid PDF header.");
-  }
+  if (bytes.length > MAX_PDF_BYTES) throw new Error("文件超过 100 MB 限制。");
+  if (bytes.length < 8) throw new Error("不支持的文件内容：文件过小。");
+  // 接受 PDF、pptx（ZIP 容器）与 ppt（OLE 容器）：与 MinerU v4 支持的类型一致。
+  const ascii = bytes.subarray(0, 8).toString("ascii");
+  const head = bytes.subarray(0, 4);
+  const isPdf = /^%PDF-[0-9]\.[0-9]/.test(ascii);
+  const isZip = head[0] === 0x50 && head[1] === 0x4b && [3, 5, 7].includes(head[2]);
+  const isOle = head[0] === 0xd0 && head[1] === 0xcf && head[2] === 0x11 && head[3] === 0xe0;
+  if (!isPdf && !isZip && !isOle) throw new Error("不支持的文件内容：仅接受 PDF、PPTX 或 PPT。");
   return bytes;
 }
 

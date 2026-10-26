@@ -33,6 +33,8 @@ export interface PaperRecord {
   parseVersion?: number;
   mineruBatchId?: string;
   readingPosition?: { mode: "pdf" | "reading"; page: number; blockId?: string; regionId?: string };
+  /** 原始文件类型：deck 表示演示文稿（pptx/ppt），MinerU 转换后按幻灯片阅读，不要求坐标完整。 */
+  sourceFormat?: "pdf" | "deck";
 }
 
 export interface PaperMetadataPatch {

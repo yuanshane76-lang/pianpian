@@ -124,9 +124,13 @@ function createDocumentTasks({ documents, readSettings, mineru = defaultMineru }
       const key = await apiKey();
       const data = await documents.read(id);
       try {
+        // 上传名按真实字节内容选择扩展名：MinerU v4 依扩展名识别 pdf/pptx/ppt。
+        const head = Buffer.from(data.slice(0, 4));
+        const extension = head[0] === 0x25 && head[1] === 0x50 ? ".pdf"
+          : head[0] === 0xd0 && head[1] === 0xcf ? ".ppt" : ".pptx";
         const upload = await mineru.requestUpload({
           apiKey: key,
-          name: `${id.slice(0, 12)}.pdf`,
+          name: `${id.slice(0, 12)}${extension}`,
         });
         await documents.saveTask(id, {
           batchId: upload.batchId,
