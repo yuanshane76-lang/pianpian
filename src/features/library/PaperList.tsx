@@ -47,7 +47,7 @@ export function PaperList({
           <span className="result-count">{papers.length} 篇</span>
           <label className="import-button">
             <FilePlus2 size={16} />
-            <span>{importing ? "正在保存 PDF…" : "导入论文"}</span>
+            <span>{importing ? "正在保存文件…" : "导入文件"}</span>
             <input
               accept="application/pdf,.pdf"
               hidden

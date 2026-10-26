@@ -280,6 +280,16 @@ function importedTitle(file: File, pdfTitle?: string): string {
   return file.name.replace(/\.(?:pdf|pptx?|ppt)$/i, "").replaceAll("_", " ");
 }
 
+/**
+ * 幻灯片启发式：绝大多数页面为横版宽幅（宽高比 ≥ 1.2，如 16:9 / 4:3）即视为演示文稿。
+ * 论文几乎总是纵版，个别横置图版页由占比阈值（≥ 75%）排除。
+ */
+export function looksLikeSlideDeck(sizes: Array<{ width: number; height: number }>): boolean {
+  if (!sizes.length) return false;
+  const landscape = sizes.filter(({ width, height }) => height > 0 && width / height >= 1.2);
+  return landscape.length / sizes.length >= 0.75;
+}
+
 export async function prepareImportFile(
   file: File,
   savedOriginal?: { id: string; duplicate: boolean },
@@ -308,6 +318,13 @@ export async function prepareImportFile(
     const metadata = await document.getMetadata();
     const info = metadata.info as { Title?: string };
     const saved = savedOriginal ?? await saveOriginalPdf(file.name, data);
+    // PPT 另存为 PDF 是常见导入来源：按页面横版占比识别为幻灯片，走 deck 阅读模式。
+    const sample = Math.min(document.numPages, 10);
+    const sizes: Array<{ width: number; height: number }> = [];
+    for (let index = 1; index <= sample; index += 1) {
+      const viewport = await (await document.getPage(index)).getViewport({ scale: 1 });
+      sizes.push({ width: viewport.width, height: viewport.height });
+    }
     return {
       data,
       duplicate: saved.duplicate,
@@ -317,7 +334,7 @@ export async function prepareImportFile(
         authors: [], year: null, importedAt: new Date().toISOString(), groupId: DEFAULT_GROUP_ID,
         favorite: false, blocks: 0, blockData: [], pageCount: document.numPages,
         parseStatus: "pending", parseVersion: 2, readingPosition: { mode: "pdf", page: 1 },
-        sourceFormat: "pdf",
+        sourceFormat: looksLikeSlideDeck(sizes) ? "deck" : "pdf",
       },
     };
   } finally { await document.destroy(); }
