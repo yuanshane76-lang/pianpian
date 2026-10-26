@@ -27,6 +27,10 @@ export function ReaderTabs({ tabs, activeId, onSelect, onClose, onAdd }: Props) 
         aria-current={active ? "true" : undefined}
         title={tab.title}
         onClick={() => onSelect(tab.id)}
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          onClose(tab.id);
+        }}
         onAuxClick={(event) => {
           if (event.button === 1) {
             event.preventDefault();

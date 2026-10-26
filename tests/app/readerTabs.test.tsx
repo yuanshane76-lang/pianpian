@@ -75,7 +75,7 @@ describe("reader tabs", () => {
     expect(onSelect).toHaveBeenCalledWith("b");
   });
 
-  it("closes from the close button or middle click without selecting", async () => {
+  it("closes from the close button, middle click or double click without selecting", async () => {
     const onSelect = vi.fn();
     const onClose = vi.fn();
     await render(<ReaderTabs {...props({ onSelect, onClose })} />);
@@ -85,7 +85,9 @@ describe("reader tabs", () => {
     const items = Array.from(container.querySelectorAll(".reader-tab"));
     await auxClick(items[2], 1);
     expect(onClose).toHaveBeenCalledWith("c");
+    await act(async () => items[0].dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+    expect(onClose).toHaveBeenCalledWith("a"); // 双击标题关闭（浏览器习惯）
     await auxClick(items[0], 0); // 左键 auxclick 不关闭
-    expect(onClose).toHaveBeenCalledTimes(2);
+    expect(onClose).toHaveBeenCalledTimes(3);
   });
 });
