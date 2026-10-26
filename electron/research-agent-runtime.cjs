@@ -4,7 +4,7 @@ const { createPiSession, safeError } = require("./pi-agent.cjs");
 const { listBundledResearchSkills } = require("./research-skills.cjs");
 const { resolveMessageCitations } = require("./research-citations.cjs");
 
-function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSessionFactory = createPiSession, readLibraryPaper } = {}) {
+function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSessionFactory = createPiSession, readLibraryPaper, semanticScholarClient } = {}) {
   if (typeof emit !== "function") throw new Error("Agent 事件发送器无效");
   let context;
   let sessionId = null;
@@ -104,6 +104,7 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
       readLibraryPaper,
       service: activeService,
       candidateStore,
+      semanticScholarClient,
     }).find((candidate) => candidate.name === name);
     if (!definition) throw new Error(`未注册工具：${name}`);
     if (signal?.aborted || aborted) throw new Error("请求已停止");
@@ -170,7 +171,7 @@ function createResearchAgentRuntime({ emit, fetchImpl = globalThis.fetch, piSess
     const startController = new AbortController();
     startingController = startController;
     serviceKey = service.apiKey;
-    const tools = createToolDefinitions({ getContext: () => context, emitApproval: approvalRequest, fetchImpl, readLibraryPaper, service: activeService });
+    const tools = createToolDefinitions({ getContext: () => context, emitApproval: approvalRequest, fetchImpl, readLibraryPaper, service: activeService, semanticScholarClient });
     let nextSession;
     try {
       nextSession = await piSessionFactory({

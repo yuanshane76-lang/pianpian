@@ -120,10 +120,14 @@ app.whenReady().then(() => {
   const readSettings = () => normalize(store.read());
   const disposeAiStreams = registerAiStreamHandlers({ ipcMain, isDev, readSettings, streamModel, canWrite: () => !updatePreparing });
   const documents = createDocumentStore({ rootDirectory: path.join(app.getPath("userData"), "documents") });
+  const radar = semanticScholar.createClient({
+    readApiKey: () => readSettings().semanticScholar.apiKey,
+  });
   const disposeResearchAgent = registerResearchAgentHandlers({ ipcMain, isDev, readSettings,
     canWrite: () => !updatePreparing,
     conversationStore: createConversationStore({ rootDirectory: path.join(app.getPath("userData"), "research-history") }),
     readLibraryPaper: createLibraryPaperReader({ documents }),
+    semanticScholarClient: radar,
   });
   let exitReady = false, exiting = false;
   app.on("before-quit", (event) => {
@@ -157,9 +161,6 @@ app.whenReady().then(() => {
   });
   secureHandle("zhiyan:mineru:start", (id) => documentTasks.start(id));
   secureHandle("zhiyan:mineru:status", (id) => documentTasks.status(id));
-  const radar = semanticScholar.createClient({
-    readApiKey: () => readSettings().semanticScholar.apiKey,
-  });
   secureHandle("zhiyan:radar:related", (input) => {
     if (!input || typeof input !== "object") throw new Error("相似文献检索参数无效");
     const title = typeof input.title === "string" ? input.title : "";

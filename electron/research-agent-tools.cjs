@@ -3,6 +3,7 @@ const { searchLiterature } = require("./literature-search.cjs");
 const { normalizeArxivId } = require("./arxiv.cjs");
 const { readBundledResearchSkill } = require("./research-skills.cjs");
 const { fetchDeepSeekWeb, searchDeepSeekWeb } = require("./deepseek-web.cjs");
+const semanticScholar = require("./semantic-scholar.cjs");
 
 const LIMITS = { blocks: 800, blockText: 6000, library: 5000, query: 300 };
 
@@ -73,6 +74,7 @@ function toolResult(textContent, structuredContent) {
 
 function createToolDefinitions({
   getContext, emitApproval, fetchImpl, readLibraryPaper, service, candidateStore = new Map(),
+  semanticScholarClient,
 }) {
   const tool = (name, label, description, execute) => ({ name, label, description, parameters: { type: "object", properties: {}, additionalProperties: false }, execute });
   const tools = [
@@ -145,7 +147,7 @@ function createToolDefinitions({
       while (candidateStore.size > 50) candidateStore.delete(candidateStore.keys().next().value);
       return toolResult(`公开文献检索找到 ${result.papers.length} 篇论文。`, result);
     }),
-    tool("add_paper_to_library", "请求加入文献库", "必须传入 search_literature 返回的 candidateId。请求用户确认后，arXiv 候选会下载并加入原始 PDF，其他来源只加入元数据。", async (toolCallId, params) => {
+    tool("add_paper_to_library", "请求加入文献库", "必须传入 search_literature 或 find_similar_papers 返回的 candidateId。请求用户确认后，arXiv 候选会下载并加入原始 PDF，其他来源只加入元数据。", async (toolCallId, params) => {
       const candidateId = text(params?.candidateId, 200);
       const verified = candidateStore.get(candidateId);
       if (!candidateId || !verified) throw new Error("请先检索论文，并使用检索结果中的 candidateId");
@@ -192,6 +194,41 @@ function createToolDefinitions({
       return toolResult(`已生成《${document.title}》草稿，尚未保存到磁盘，请用户点击保存草稿。`, { document, saved: false });
     }),
   ];
+  // 相似论文兜底：arXiv/Crossref 检索不到或需要“相关工作”时，用 Semantic Scholar
+  // 按当前论文（单篇会话）或用户给定的标题/DOI 推荐相似论文；候选进 candidateStore，
+  // 可经 add_paper_to_library 以元数据方式入库。
+  if (semanticScholarClient) {
+    tools.push(tool("find_similar_papers", "相似论文兜底检索", "按当前论文（单篇会话）或给定标题/DOI，用 Semantic Scholar 推荐相似论文。作为 search_literature 的兜底：检索不到结果、需要补充相关工作，或用户想从当前论文扩展阅读时使用；每条结果都有 candidateId，可经 add_paper_to_library 以元数据加入文献库。", async (_id, params, signal) => {
+      const context = getContext();
+      const seedTitle = text(params?.title, 300) || (context.scope === "paper" ? context.paper?.title ?? "" : "");
+      const seedDoi = text(params?.doi, 120) || undefined;
+      if (!seedTitle && !seedDoi) throw new Error("全库会话请提供论文标题或 DOI 作为检索种子");
+      const limit = Number.isInteger(params?.limit) ? params.limit : undefined;
+      const result = await semanticScholarClient.findRelatedPapers({ seed: { title: seedTitle, doi: seedDoi }, limit, signal });
+      const papers = [];
+      for (const paper of result.candidates ?? []) {
+        if (!paper?.title) continue;
+        const candidateId = randomUUID();
+        const candidate = {
+          title: paper.title,
+          authors: paper.authors ?? [],
+          year: Number.isInteger(paper.year) ? paper.year : null,
+          doi: paper.doi || undefined,
+          landingUrl: paper.url || undefined,
+          abstract: paper.abstract || undefined,
+          citationCount: paper.citationCount,
+          source: paper.source,
+          candidateId,
+        };
+        candidateStore.set(candidateId, candidate);
+        papers.push(candidate);
+      }
+      const summary = result.cached ? "（本次结果来自缓存）" : "";
+      return toolResult(`Semantic Scholar 依据《${seedTitle || seedDoi}》推荐了 ${papers.length} 篇相似论文${summary}；这些是公开元数据候选，加入文献库需用户经 add_paper_to_library 确认。`, {
+        seed: result.seed, papers, source: result.source, cached: Boolean(result.cached),
+      });
+    }));
+  }
   if (service?.provider !== "deepseek") return tools;
   return [
     ...tools,

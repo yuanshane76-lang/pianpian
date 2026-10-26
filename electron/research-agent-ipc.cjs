@@ -4,7 +4,7 @@ const { listBundledResearchSkills } = require("./research-skills.cjs");
 
 const EVENT_CHANNEL = "zhiyan:agent:event";
 
-function registerResearchAgentHandlers({ ipcMain, isDev, readSettings, createRuntime = createResearchAgentRuntime, runtimeStore = new Map(), conversationStore, readLibraryPaper, canWrite = () => true }) {
+function registerResearchAgentHandlers({ ipcMain, isDev, readSettings, createRuntime = createResearchAgentRuntime, runtimeStore = new Map(), conversationStore, readLibraryPaper, canWrite = () => true, semanticScholarClient } = {}) {
   const secure = (event) => {
     assertAppSender(event, isDev);
     if (!canWrite()) throw new Error("正在准备更新，请稍候。");
@@ -87,6 +87,7 @@ function registerResearchAgentHandlers({ ipcMain, isDev, readSettings, createRun
     }
     const runtime = createRuntime({
       readLibraryPaper,
+      semanticScholarClient,
       emit: (payload) => {
         if (binding.id) {
           if (payload.type === "message_delta") {
