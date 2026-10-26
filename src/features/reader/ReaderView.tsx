@@ -5,6 +5,7 @@ import type { PaperRecord } from "../../domain/library";
 import { PdfPreview } from "./PdfPreview";
 import { PaperRadar } from "./PaperRadar";
 import { ReaderAssistant } from "./ReaderAssistant";
+import { ReaderTabs, type ReaderTabItem } from "./ReaderTabs";
 import { ThemeToggle } from "../settings/ThemeToggle";
 import { hasPageBounds } from "../../domain/pdfLayout";
 import type { ParagraphOperation } from "../../domain/analysis";
@@ -65,6 +66,10 @@ interface ReaderViewProps {
   /** 文章架构模式：右列整体替换为架构面板，段落助手卸载。 */
   outlineActive?: boolean;
   onOutlineClose?: () => void;
+  /** 阅读器多标签：打开的论文列表与切换/关闭回调。 */
+  readerTabs?: ReaderTabItem[];
+  onSelectTab?: (paperId: string) => void;
+  onCloseTab?: (paperId: string) => void;
 }
 
 function getDefaultReaderPanelWidths() {
@@ -352,6 +357,12 @@ export function ReaderView(props: ReaderViewProps) {
           <button className="icon-button" aria-label="搜索正文" aria-pressed={searchOpen} onClick={() => setSearchOpen(!searchOpen)}><Search size={17} /></button>
         </div>
       </header>
+      {props.readerTabs && props.readerTabs.length >= 2 ? <ReaderTabs
+        tabs={props.readerTabs}
+        activeId={paper.id}
+        onSelect={(id) => props.onSelectTab?.(id)}
+        onClose={(id) => props.onCloseTab?.(id)}
+      /> : null}
       {toastPaperId === paper.id ? <div className="reader-ready-toast" role="status">
         <span className="reader-ready-toast-icon"><Check size={17} aria-hidden="true" /></span>
         <div><strong>段落定位已就绪</strong><span>点击原文或划选句子开始理解</span></div>

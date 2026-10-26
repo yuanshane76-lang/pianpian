@@ -1,0 +1,87 @@
+import { act, type ComponentProps, type ReactElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ReaderTabs } from "../../src/features/reader/ReaderTabs";
+
+Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+let root: Root | undefined;
+let container: HTMLDivElement;
+
+const tabs: ComponentProps<typeof ReaderTabs>["tabs"] = [
+  { id: "a", title: "Attention Is All You Need", status: "ready" },
+  { id: "b", title: "DEER: 长论文样本", status: "pending" },
+  { id: "c", title: "解析失败的论文", status: "failed" },
+];
+
+async function render(element: ReactElement) {
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => root!.render(element));
+}
+
+function props(overrides: Partial<ComponentProps<typeof ReaderTabs>> = {}) {
+  return {
+    tabs,
+    activeId: "a",
+    onSelect: vi.fn(),
+    onClose: vi.fn(),
+    ...overrides,
+  };
+}
+
+function click(node: Element, options: MouseEventInit = {}) {
+  return act(async () => node.dispatchEvent(new MouseEvent("click", { bubbles: true, ...options })));
+}
+
+function auxClick(node: Element, button: number) {
+  return act(async () => node.dispatchEvent(new MouseEvent("auxclick", { bubbles: true, button })));
+}
+
+afterEach(async () => {
+  if (root) await act(async () => root!.unmount());
+  root = undefined;
+  container?.remove();
+  vi.clearAllMocks();
+});
+
+describe("reader tabs", () => {
+  it("hides the strip with fewer than two tabs", async () => {
+    await render(<ReaderTabs {...props({ tabs: tabs.slice(0, 1) })} />);
+    expect(container.querySelector(".reader-tabs")).toBeNull();
+  });
+
+  it("shows status dots and marks the active tab", async () => {
+    await render(<ReaderTabs {...props()} />);
+    const items = Array.from(container.querySelectorAll(".reader-tab"));
+    expect(items).toHaveLength(3);
+    expect(items[0].classList.contains("is-active")).toBe(true);
+    expect(items[1].querySelector(".reader-tab-status.is-pending")).toBeTruthy();
+    expect(items[2].querySelector(".reader-tab-status.is-failed")).toBeTruthy();
+    expect(items[0].getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("selects a tab by click or keyboard", async () => {
+    const onSelect = vi.fn();
+    await render(<ReaderTabs {...props({ onSelect })} />);
+    const items = Array.from(container.querySelectorAll(".reader-tab"));
+    await click(items[1]);
+    expect(onSelect).toHaveBeenCalledWith("b");
+    await act(async () => items[2].dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(onSelect).toHaveBeenCalledWith("c");
+  });
+
+  it("closes from the close button or middle click without selecting", async () => {
+    const onSelect = vi.fn();
+    const onClose = vi.fn();
+    await render(<ReaderTabs {...props({ onSelect, onClose })} />);
+    await click(container.querySelector<HTMLButtonElement>('[aria-label="关闭 DEER: 长论文样本"]')!);
+    expect(onClose).toHaveBeenCalledWith("b");
+    expect(onSelect).not.toHaveBeenCalled(); // 关闭不会触发切换
+    const items = Array.from(container.querySelectorAll(".reader-tab"));
+    await auxClick(items[2], 1);
+    expect(onClose).toHaveBeenCalledWith("c");
+    await auxClick(items[0], 0); // 左键 auxclick 不关闭
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+});

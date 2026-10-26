@@ -1466,6 +1466,22 @@ textarea:focus-visible {
   margin-top: 24px;
 }
 
+/* 阅读器多标签条 */
+.reader-tabs { display: flex; align-items: stretch; gap: 4px; flex-shrink: 0; padding: 6px 10px 0; background: var(--surface); border-bottom: 1px solid var(--line); overflow-x: auto; }
+.reader-tab { display: inline-flex; align-items: center; gap: 7px; max-width: 220px; padding: 7px 10px 7px 12px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; cursor: pointer; user-select: none; }
+.reader-tab:hover { background: var(--teal-soft); }
+.reader-tab.is-active { background: var(--canvas); border-color: var(--line); position: relative; }
+.reader-tab.is-active::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px; background: var(--teal); }
+.reader-tab-status { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; }
+.reader-tab-status.is-ready { background: var(--teal); }
+.reader-tab-status.is-pending { background: #f0b429; animation: reader-tab-pulse 1.4s ease-in-out infinite; }
+.reader-tab-status.is-failed { background: var(--danger-ink, #b45309); }
+@keyframes reader-tab-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.reader-tab-title { flex: 1; min-width: 0; color: var(--ink); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reader-tab.is-active .reader-tab-title { font-weight: 600; }
+.reader-tab-close { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+.reader-tab-close:hover { background: var(--line); color: var(--ink); }
+
 .reader-shell {
   height: 100vh;
   overflow: hidden;

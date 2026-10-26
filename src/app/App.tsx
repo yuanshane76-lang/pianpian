@@ -109,6 +109,9 @@ export default function App() {
   const [groups, setGroups] = useState<LibraryGroup[]>(() => loadGroups());
   const [view, setView] = useState<AppView>("library");
   const [selectedPaperId, setSelectedPaperId] = useState<string | null>(papers[0]?.id ?? null);
+  // 阅读器多标签：打开顺序即标签顺序，选中项即 selectedPaperId。
+  const [readerTabs, setReaderTabs] = useState<string[]>([]);
+  const MAX_READER_TABS = 8;
   const [selectedBlock, setSelectedBlock] = useState<DocumentBlock | null>(null);
   const selectedBlockRef = useRef<DocumentBlock | null>(null);
   const [selectionText, setSelectionText] = useState("");
@@ -164,7 +167,13 @@ export default function App() {
   const [wikiThreadStats, setWikiThreadStats] = useState<WikiEntryParseStats | null>(null);
   const [wikiProgress, setWikiProgress] = useState<{ done: number; total: number } | null>(null);
   const [outlineFitSignal, setOutlineFitSignal] = useState(0);
-  const [outlineOpen, setOutlineOpen] = useState(false);
+  // 架构面板开合按论文记忆（多标签互不影响）。
+  const [outlineOpenByPaper, setOutlineOpenByPaper] = useState<Record<string, boolean>>({});
+  const outlineOpen = selectedPaperId ? outlineOpenByPaper[selectedPaperId] ?? false : false;
+  function setOutlineOpen(open: boolean) {
+    if (!selectedPaperId) return;
+    setOutlineOpenByPaper((current) => ({ ...current, [selectedPaperId]: open }));
+  }
   const [outlineError, setOutlineError] = useState<string | null>(null);
   const [outlineSelectedId, setOutlineSelectedId] = useState<string | null>(null);
   // 论文库级知识库：论文 wiki 的概念/方法支撑点自动汇聚（阶段一纯本地），持久化在本地存储。
@@ -364,7 +373,7 @@ export default function App() {
     setWikiPartStates({});
     setWikiThreadStats(null);
     setWikiProgress(null);
-    setOutlineOpen(false);
+    // 架构面板开合按论文记忆，不随切换重置；错误与选中项仍按论文重置。
     setOutlineError(null);
     setOutlineSelectedId(null);
   }, [selectedPaperId]);
@@ -494,7 +503,7 @@ export default function App() {
     setPapers((current) => current.map((paper) => paper.id === target.paper.id
       ? { ...paper, readingPosition: { mode: "pdf", page: target.block.pageNumber, blockId: target.block.id } } : paper));
     setSourceNavigation({ paperId: target.paper.id, blockId: target.block.id, requestId: ++sourceNavigationSequence.current });
-    setView("reader");
+    openReaderPaper(target.paper.id);
     setWordbookOpen(false);
   }
 
@@ -782,12 +791,45 @@ export default function App() {
     void handleEnhance(paper);
   }
 
+  /** 打开（或聚焦）一篇论文的阅读器标签：已开则聚焦，未开则新建，超过上限提示。 */
+  function openReaderPaper(paperId: string, blockId?: string) {
+    if (!papersRef.current.some((item) => item.id === paperId)) return;
+    if (!readerTabs.includes(paperId)) {
+      if (readerTabs.length >= MAX_READER_TABS) {
+        setActionError("最多同时打开 8 个论文标签，请先关闭一些再继续。");
+        return;
+      }
+      setReaderTabs((current) => [...current, paperId]);
+    }
+    if (blockId) {
+      setSourceNavigation({ paperId, blockId, requestId: ++sourceNavigationSequence.current });
+    }
+    invalidateAnalysisRequests();
+    setSelectedPaperId(paperId);
+    setView("reader");
+  }
+
+  function closeReaderTab(paperId: string) {
+    const index = readerTabs.indexOf(paperId);
+    if (index < 0) return;
+    const next = readerTabs.filter((id) => id !== paperId);
+    setReaderTabs(next);
+    if (selectedPaperId !== paperId) return;
+    const fallback = next[Math.min(index, next.length - 1)] ?? null;
+    invalidateAnalysisRequests();
+    if (fallback) setSelectedPaperId(fallback);
+    else {
+      setSelectedPaperId(null);
+      setView("library");
+    }
+  }
+
   function handleOpenReader() {
     if (!selectedPaper || !canOpenPaper(selectedPaper, pipelineStates[selectedPaper.id])) {
       setActionError("请等待 MinerU 完成正文解析和坐标定位后再阅读。");
       return;
     }
-    setView("reader");
+    openReaderPaper(selectedPaper.id);
   }
 
   function handleToggleFavorite(paperId: string) {
@@ -897,6 +939,11 @@ export default function App() {
     invalidateAnalysisRequests();
     if (paper.originalId) await deleteOriginalPdf(paper.originalId);
     setPapers((current) => removePaper(current, paperId));
+    setReaderTabs((current) => {
+      const next = current.filter((id) => id !== paperId);
+      // 删除的是后台标签时，若它恰好是当前激活项的邻居焦点，无需特殊处理；激活项由下方逻辑处理。
+      return next;
+    });
     setAnalysisCache((current) => {
       const next = new Map(current);
       for (const [key, entry] of next) if (entry.paperId === paperId) next.delete(key);
@@ -1326,7 +1373,7 @@ export default function App() {
     if (!force && paperWiki) {
       // 打开架构模式 = 右列从段落助手切到架构面板；取消进行中的段落分析（不动正在生成的架构任务）。
       if (!wikiGeneratingRef.current) invalidateAnalysisRequests();
-      setOutlineOpen((open) => !open);
+      setOutlineOpen(!outlineOpen);
       return;
     }
     if (!availability.available) { setSettingsOpen(true); return; }
@@ -1676,7 +1723,7 @@ export default function App() {
     const parsedCount = papers.filter((item) => canOpenPaper(item, pipelineStates[item.id])).length;
     return <>{storageWarning}{settingsDialog}{wordbookDialog}{updateCenter}<main className="research-workspace">
       <header className="research-workspace-header"><button type="button" className="back-button" onClick={() => setView("library")}><ArrowLeft size={17} />返回文献库</button><div><Pianpian /><strong>和篇篇聊聊</strong></div><button type="button" className="icon-button" aria-label="服务配置" onClick={() => setSettingsOpen(true)}><Settings2 size={17} /></button></header>
-      <div className="research-workspace-body"><aside className="research-workspace-context"><Pianpian variant="reading" /><span className="eyebrow">你的论文阅读伙伴</span><h1>每篇论文，<br />都有个伴。</h1><p>把问题告诉篇篇，一起翻翻文献库、对照原文，再把收获整理成笔记。不受首页选中论文影响。</p><div className="research-context-stat"><strong>{papers.length}</strong><span>本地文献</span><strong>{parsedCount}</strong><span>已就绪论文</span></div><div className="research-workspace-tip"><strong>证据范围</strong><p>已解析论文可读取正文与定位引用。<br />未解析条目仅提供元数据，不作为全文证据。<br />全库与单篇对话分别保存。</p></div></aside><div className="research-workspace-chat"><ResearchAssistant scope="library" paper={WORKSPACE_CONTEXT} library={papers} onAddPaper={handleAddLiterature} available={availability.available} configurationRevision={serviceSettings.revision} onOpenSettings={() => setSettingsOpen(true)} onJump={() => {}} onJumpPaper={(paperId, blockId) => { const target = papers.find((item) => item.id === paperId); if (!target || !canOpenPaper(target, pipelineStates[paperId])) return; setSelectedPaperId(paperId); setSourceNavigation({ paperId, blockId, requestId: ++sourceNavigationSequence.current }); setView("reader"); }} /></div></div>
+      <div className="research-workspace-body"><aside className="research-workspace-context"><Pianpian variant="reading" /><span className="eyebrow">你的论文阅读伙伴</span><h1>每篇论文，<br />都有个伴。</h1><p>把问题告诉篇篇，一起翻翻文献库、对照原文，再把收获整理成笔记。不受首页选中论文影响。</p><div className="research-context-stat"><strong>{papers.length}</strong><span>本地文献</span><strong>{parsedCount}</strong><span>已就绪论文</span></div><div className="research-workspace-tip"><strong>证据范围</strong><p>已解析论文可读取正文与定位引用。<br />未解析条目仅提供元数据，不作为全文证据。<br />全库与单篇对话分别保存。</p></div></aside><div className="research-workspace-chat"><ResearchAssistant scope="library" paper={WORKSPACE_CONTEXT} library={papers} onAddPaper={handleAddLiterature} available={availability.available} configurationRevision={serviceSettings.revision} onOpenSettings={() => setSettingsOpen(true)} onJump={() => {}} onJumpPaper={(paperId, blockId) => { const target = papers.find((item) => item.id === paperId); if (!target || !canOpenPaper(target, pipelineStates[paperId])) return; openReaderPaper(paperId, blockId); }} /></div></div>
     </main></>;
   }
 
@@ -1695,9 +1742,7 @@ export default function App() {
         onJump={(paperId, blockId) => {
           const target = papers.find((item) => item.id === paperId);
           if (!target || !canOpenPaper(target, pipelineStates[paperId])) return;
-          setSelectedPaperId(paperId);
-          setSourceNavigation({ paperId, blockId, requestId: ++sourceNavigationSequence.current });
-          setView("reader");
+          openReaderPaper(paperId, blockId);
         }}
         onBack={() => setView("library")}
       />
@@ -1715,6 +1760,15 @@ export default function App() {
         {wordbookDialog}
         {updateCenter}
         <ReaderView
+          key={selectedPaper.id}
+          readerTabs={readerTabs.map((id) => {
+            const tabPaper = papers.find((item) => item.id === id);
+            if (!tabPaper) return { id, title: id, status: "pending" as const };
+            const status = canOpenPaper(tabPaper, pipelineStates[id]) ? "ready" as const : tabPaper.parseError ? "failed" as const : "pending" as const;
+            return { id, title: tabPaper.title, status };
+          })}
+          onSelectTab={(id) => openReaderPaper(id)}
+          onCloseTab={closeReaderTab}
           researchPanel={getDesktopBridge()?.on ? <ResearchAssistant paper={selectedPaper} library={papers} onAddPaper={handleAddLiterature}
             onJump={(blockId) => setSourceNavigation({ paperId: selectedPaper.id, blockId, requestId: ++sourceNavigationSequence.current })}
             available={availability.available} configurationRevision={serviceSettings.revision} onOpenSettings={() => setSettingsOpen(true)} /> : undefined}
