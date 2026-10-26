@@ -432,12 +432,12 @@ export default function App() {
   const vocabularySignature = vocabularyBlock ? getDocumentContentSignature(vocabularyBlock) : "";
   const guideKey = vocabularyBlock ? buildParagraphCacheIdentity(selectedPaperId ?? "", vocabularyBlock, "vocabulary", serviceIdentity, documentSignature, paragraphReadingMode).key : "";
   const insightKey = translationTarget ? buildParagraphCacheIdentity(selectedPaperId ?? "", translationTarget, "insight", serviceIdentity, documentSignature, paragraphReadingMode).key : "";
-  const chartKey = buildAnalysisCacheKey(selectedPaperId ?? "", selectedBlock?.id ?? "", "chart", `${serviceIdentity}:${selectedPaper?.originalId}:${documentSignature}:${visualSignature}`);
+  const chartKey = buildAnalysisCacheKey(selectedPaperId ?? "", selectedBlock?.id ?? "", "chart", `${serviceIdentity}:${selectedPaper?.originalId}:${documentSignature}:${visualSignature}:${paragraphReadingMode}`);
   const chartReading = useMemo(() => {
     const entry = analysisCache.get(chartKey);
     try { return entry ? parseChartReading(entry.value) : null; } catch { return null; }
   }, [analysisCache, chartKey]);
-  const equationKey = buildAnalysisCacheKey(selectedPaperId ?? "", selectedBlock?.id ?? "", "equation", `${serviceIdentity}:${selectedPaper?.originalId}:${documentSignature}:${visualSignature}`);
+  const equationKey = buildAnalysisCacheKey(selectedPaperId ?? "", selectedBlock?.id ?? "", "equation", `${serviceIdentity}:${selectedPaper?.originalId}:${documentSignature}:${visualSignature}:${paragraphReadingMode}`);
   const equationReading = useMemo(() => {
     const entry = analysisCache.get(equationKey);
     try { return entry ? parseEquationReading(entry.value) : null; } catch { return null; }
@@ -1251,7 +1251,7 @@ export default function App() {
     const identity = serviceIdentity;
     const sourceSignature = getDocumentSourceSignature(paper.blockData ?? []);
     const visual = getDocumentVisualSignature(block);
-    const key = buildAnalysisCacheKey(paper.id, block.id, "chart", `${identity}:${paper.originalId}:${sourceSignature}:${visual}`);
+    const key = buildAnalysisCacheKey(paper.id, block.id, "chart", `${identity}:${paper.originalId}:${sourceSignature}:${visual}:${paragraphReadingMode}`);
     if (activeChartAnalysisRef.current === key) return;
     invalidateAnalysisRequests();
     selectedBlockRef.current = block;
@@ -1278,7 +1278,7 @@ export default function App() {
     try {
       const imageDataUrl = await loadChartImage(paper.originalId, block);
       if (!stillCurrent()) return;
-      const value = await requestAnalysis({ operation: "chart", paper, block, imageDataUrl }, (delta) => {
+      const value = await requestAnalysis({ operation: "chart", paper, block, imageDataUrl, readingMode: paragraphReadingMode }, (delta) => {
         if (!stillCurrent()) return;
         setStreamingOutput((current) => current?.operation === "chart" && current.paperId === paper.id
           ? { ...current, text: current.text + delta } : current);
@@ -1288,7 +1288,7 @@ export default function App() {
       setAnalysisCache((current) => {
         const next = new Map(current);
         setCachedAnalysis(next, { key, paperId: paper.id, scopeId: block.id, operation: "chart",
-          sourceSignature: `${identity}:${paper.originalId}:${sourceSignature}:${visual}`, value, createdAt: new Date().toISOString() });
+          sourceSignature: `${identity}:${paper.originalId}:${sourceSignature}:${visual}:${paragraphReadingMode}`, value, createdAt: new Date().toISOString() });
         return next;
       });
     } catch (error) {
@@ -1313,7 +1313,7 @@ export default function App() {
     const identity = serviceIdentity;
     const sourceSignature = getDocumentSourceSignature(paper.blockData ?? []);
     const visual = getDocumentVisualSignature(block);
-    const key = buildAnalysisCacheKey(paper.id, block.id, "equation", `${identity}:${paper.originalId}:${sourceSignature}:${visual}`);
+    const key = buildAnalysisCacheKey(paper.id, block.id, "equation", `${identity}:${paper.originalId}:${sourceSignature}:${visual}:${paragraphReadingMode}`);
     if (activeEquationAnalysisRef.current === key) return;
     invalidateAnalysisRequests();
     selectedBlockRef.current = block;
@@ -1338,7 +1338,7 @@ export default function App() {
     setPendingAction("equation");
     setStreamingOutput({ operation: "equation", paperId: paper.id, text: "" });
     try {
-      const value = await requestAnalysis({ operation: "equation", paper, block }, (delta) => {
+      const value = await requestAnalysis({ operation: "equation", paper, block, readingMode: paragraphReadingMode }, (delta) => {
         if (!stillCurrent()) return;
         setStreamingOutput((current) => current?.operation === "equation" && current.paperId === paper.id
           ? { ...current, text: current.text + delta } : current);
@@ -1348,7 +1348,7 @@ export default function App() {
       setAnalysisCache((current) => {
         const next = new Map(current);
         setCachedAnalysis(next, { key, paperId: paper.id, scopeId: block.id, operation: "equation",
-          sourceSignature: `${identity}:${paper.originalId}:${sourceSignature}:${visual}`, value, createdAt: new Date().toISOString() });
+          sourceSignature: `${identity}:${paper.originalId}:${sourceSignature}:${visual}:${paragraphReadingMode}`, value, createdAt: new Date().toISOString() });
         return next;
       });
     } catch (error) {
@@ -1769,6 +1769,7 @@ export default function App() {
           })}
           onSelectTab={(id) => openReaderPaper(id)}
           onCloseTab={closeReaderTab}
+          onAddTab={() => setView("library")}
           researchPanel={getDesktopBridge()?.on ? <ResearchAssistant paper={selectedPaper} library={papers} onAddPaper={handleAddLiterature}
             onJump={(blockId) => setSourceNavigation({ paperId: selectedPaper.id, blockId, requestId: ++sourceNavigationSequence.current })}
             available={availability.available} configurationRevision={serviceSettings.revision} onOpenSettings={() => setSettingsOpen(true)} /> : undefined}

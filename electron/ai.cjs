@@ -110,7 +110,7 @@ function prepareModelRequest(settings, request) {
           : request.operation === "explain"
             ? "用中文解释选中段落在论文中的意思、作用与重要术语，依据给定上下文，内容不足时说明。用简洁 Markdown 组织内容，使用小标题、列表和必要的加粗，不使用 HTML。"
             : "用中文回答问题，注明相关论文页码，区分论文结论与推断。没有依据时说明。";
-  const grandmaMode = request.readingMode === "grandma" && ["translate", "explain", "insight", "vocabulary"].includes(request.operation)
+  const grandmaMode = request.readingMode === "grandma" && ["translate", "explain", "insight", "vocabulary", "chart", "equation"].includes(request.operation)
     ? `当前开启“祖母模式”。
 
 请用极通俗、极易懂的中文，把内容讲给完全没有相关专业背景、第一次接触这个主题的人听。不要假设读者熟悉专业术语。

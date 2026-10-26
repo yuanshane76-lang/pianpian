@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 
 export interface ReaderTabItem {
   id: string;
@@ -12,32 +12,25 @@ interface Props {
   activeId: string;
   onSelect: (paperId: string) => void;
   onClose: (paperId: string) => void;
+  /** 加号新建：模仿浏览器，去文献库挑选一篇打开。 */
+  onAdd: () => void;
 }
 
-/** 阅读器多标签条：两篇及以上才显示，中键或 × 关闭。 */
-export function ReaderTabs({ tabs, activeId, onSelect, onClose }: Props) {
-  if (tabs.length < 2) return null;
-  return <div className="reader-tabs" role="tablist" aria-label="打开的论文标签">
+/** 阅读器标签条：常显；中键或 × 关闭，加号前往文献库开新论文。 */
+export function ReaderTabs({ tabs, activeId, onSelect, onClose, onAdd }: Props) {
+  return <nav className="reader-tabs" aria-label="打开的论文标签">
     {tabs.map((tab) => {
       const active = tab.id === activeId;
       return <div
         key={tab.id}
-        role="tab"
-        aria-selected={active}
-        tabIndex={0}
         className={`reader-tab ${active ? "is-active" : ""}`}
+        aria-current={active ? "true" : undefined}
         title={tab.title}
         onClick={() => onSelect(tab.id)}
         onAuxClick={(event) => {
           if (event.button === 1) {
             event.preventDefault();
             onClose(tab.id);
-          }
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            onSelect(tab.id);
           }
         }}
       >
@@ -56,5 +49,8 @@ export function ReaderTabs({ tabs, activeId, onSelect, onClose }: Props) {
         </button>
       </div>;
     })}
-  </div>;
+    <button type="button" className="reader-tab-add" aria-label="打开新论文" title="打开新论文（前往文献库）" onClick={onAdd}>
+      <Plus size={14} />
+    </button>
+  </nav>;
 }

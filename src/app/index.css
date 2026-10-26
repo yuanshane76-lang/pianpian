@@ -1481,6 +1481,13 @@ textarea:focus-visible {
 .reader-tab.is-active .reader-tab-title { font-weight: 600; }
 .reader-tab-close { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
 .reader-tab-close:hover { background: var(--line); color: var(--ink); }
+.reader-tab-add { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; align-self: center; width: 26px; height: 26px; margin-left: 2px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted-strong); cursor: pointer; }
+.reader-tab-add:hover { background: var(--teal-soft); color: var(--teal-dark); }
+.assistant-heading-tools { display: flex; align-items: center; gap: 8px; }
+.assistant-grandma { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted-strong); font-size: 11px; cursor: pointer; white-space: nowrap; }
+.assistant-grandma:hover { border-color: var(--teal); color: var(--teal-dark); }
+.assistant-grandma:has(input:checked) { border-color: var(--teal); background: var(--teal-soft); color: var(--teal-dark); }
+.assistant-grandma input { margin: 0; cursor: pointer; }
 
 .reader-shell {
   height: 100vh;

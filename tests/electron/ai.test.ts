@@ -74,6 +74,22 @@ describe("real translation transport", () => {
     expect(body.messages[0].content).toContain("通俗不等于删减");
   });
 
+  it("applies grandma mode to chart and equation readings while keeping their JSON contracts", async () => {
+    const settings = { ...DEFAULT, aiProvider: "deepseek", deepseek: { ...DEFAULT.deepseek, apiKey: "unit-test-secret" } };
+    const imageDataUrl = "data:image/png;base64,aGVsbG8=";
+    for (const request of [
+      { operation: "chart", imageDataUrl, paper: { blockData: [{ id: "t", kind: "table", text: "RAG 44.5" }] }, block: { id: "t", kind: "table", text: "RAG 44.5", pageNumber: 6 } },
+      { operation: "equation", paper: { blockData: [{ id: "f", kind: "equation", text: "L=0" }] }, block: { id: "f", kind: "equation", text: "L=0", pageNumber: 4 } },
+    ] as const) {
+      const fetchImpl = vi.fn().mockResolvedValue(sseResponse('{"choices":[{"delta":{"content":"{}"}}]}'));
+      await callModel(settings, { ...request, readingMode: "grandma" }, fetchImpl);
+      const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+      expect(body.messages[0].content).toContain("祖母模式");
+      expect(body.messages[0].content).toContain("只输出译文、JSON"); // 结构化契约保持
+      expect(body.thinking).toEqual({ type: "disabled" });
+    }
+  });
+
   it("rejects the removed whole-paper overview operation before a model call", async () => {
     const settings = { ...DEFAULT, aiProvider: "deepseek", deepseek: { ...DEFAULT.deepseek, apiKey: "unit-test-secret" } };
     const fetchImpl = vi.fn();

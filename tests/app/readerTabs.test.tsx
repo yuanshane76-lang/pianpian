@@ -26,6 +26,7 @@ function props(overrides: Partial<ComponentProps<typeof ReaderTabs>> = {}) {
     activeId: "a",
     onSelect: vi.fn(),
     onClose: vi.fn(),
+    onAdd: vi.fn(),
     ...overrides,
   };
 }
@@ -46,9 +47,14 @@ afterEach(async () => {
 });
 
 describe("reader tabs", () => {
-  it("hides the strip with fewer than two tabs", async () => {
-    await render(<ReaderTabs {...props({ tabs: tabs.slice(0, 1) })} />);
-    expect(container.querySelector(".reader-tabs")).toBeNull();
+  it("shows the strip even with a single tab and offers the add button", async () => {
+    const onAdd = vi.fn();
+    await render(<ReaderTabs {...props({ tabs: tabs.slice(0, 1), onAdd })} />);
+    expect(container.querySelectorAll(".reader-tab")).toHaveLength(1);
+    const add = container.querySelector<HTMLButtonElement>(".reader-tab-add")!;
+    expect(add.getAttribute("aria-label")).toBe("打开新论文");
+    await click(add);
+    expect(onAdd).toHaveBeenCalledTimes(1);
   });
 
   it("shows status dots and marks the active tab", async () => {
@@ -56,19 +62,17 @@ describe("reader tabs", () => {
     const items = Array.from(container.querySelectorAll(".reader-tab"));
     expect(items).toHaveLength(3);
     expect(items[0].classList.contains("is-active")).toBe(true);
+    expect(items[0].getAttribute("aria-current")).toBe("true");
     expect(items[1].querySelector(".reader-tab-status.is-pending")).toBeTruthy();
     expect(items[2].querySelector(".reader-tab-status.is-failed")).toBeTruthy();
-    expect(items[0].getAttribute("aria-selected")).toBe("true");
   });
 
-  it("selects a tab by click or keyboard", async () => {
+  it("selects a tab by click", async () => {
     const onSelect = vi.fn();
     await render(<ReaderTabs {...props({ onSelect })} />);
     const items = Array.from(container.querySelectorAll(".reader-tab"));
     await click(items[1]);
     expect(onSelect).toHaveBeenCalledWith("b");
-    await act(async () => items[2].dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
-    expect(onSelect).toHaveBeenCalledWith("c");
   });
 
   it("closes from the close button or middle click without selecting", async () => {

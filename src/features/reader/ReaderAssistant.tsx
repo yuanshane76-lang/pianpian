@@ -219,7 +219,13 @@ export function ReaderAssistant({
   return <aside className="reader-assistant" aria-label="篇篇阅读伙伴">
     <div className="assistant-heading">
       <div className="assistant-title"><div className="assistant-icon"><Pianpian /></div><div><strong>篇篇</strong><span>陪你把论文读明白</span></div></div>
-      <button className={`assistant-service ${!aiAvailable ? "is-unavailable" : ""}`} type="button" onClick={onOpenSettings} title={aiAvailable ? `${serviceLabel} · ${serviceModel} · 服务配置` : "配置 AI 服务"} aria-label="助手服务配置"><span className="status-dot" /><span>{serviceLabel}</span><Settings2 size={13} /></button>
+      <div className="assistant-heading-tools">
+        <label className="assistant-grandma" title="人话模式：翻译、解释、词汇、读图表、读公式都用通俗表达生成">
+          <span>人话模式</span>
+          <input type="checkbox" role="switch" aria-label="人话模式" checked={paragraphReadingMode === "grandma"} onChange={(event) => onParagraphReadingModeChange(event.target.checked ? "grandma" : "standard")} />
+        </label>
+        <button className={`assistant-service ${!aiAvailable ? "is-unavailable" : ""}`} type="button" onClick={onOpenSettings} title={aiAvailable ? `${serviceLabel} · ${serviceModel} · 服务配置` : "配置 AI 服务"} aria-label="助手服务配置"><span className="status-dot" /><span>{serviceLabel}</span><Settings2 size={13} /></button>
+      </div>
     </div>
     <div className="assistant-tabs" role="tablist" aria-label="篇篇阅读视图">
       <button ref={(element) => { tabsRef.current[tabIndex("assist")] = element; }} id={`${id}-assist-tab`} aria-controls={`${id}-assist-panel`} tabIndex={tab === "assist" ? 0 : -1} className={tab === "assist" ? "is-active" : ""} role="tab" aria-selected={tab === "assist"} onKeyDown={(event) => changeTab(event, tabIndex("assist"))} onClick={() => setTab("assist")} type="button"><BookOpen size={15} />{equation ? "解读公式" : visual ? "读图表" : "读懂这段"}</button>
@@ -235,10 +241,6 @@ export function ReaderAssistant({
           <div className="section-heading">
             <h2>{equation ? "公式理解" : visual ? selectedBlock?.kind === "table" ? "表格理解" : "图表理解" : selectionText ? "选中句子" : "段落理解"}</h2>
             <div className="paragraph-context-actions">
-              {!visual ? <label className="grandma-mode-toggle" title="只影响接下来生成的段落内容">
-                <span>人话模式</span>
-                <input type="checkbox" role="switch" aria-label="人话模式" checked={paragraphReadingMode === "grandma"} onChange={(event) => onParagraphReadingModeChange(event.target.checked ? "grandma" : "standard")} />
-              </label> : null}
               <span className="context-count">{selectedBlock ? `第 ${selectedBlock.pageNumber} 页` : "未选择"}</span>
             </div>
           </div>
