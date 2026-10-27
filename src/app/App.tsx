@@ -250,7 +250,7 @@ export default function App() {
           if (!state || (taskGenerations.current.get(paper.id) ?? 0) !== snapshotGenerations.get(paper.id)
             || activeUploads.current.has(paper.id) || activeParsing.current.has(paper.id)) return paper;
           if (state.task?.state === "done" && state.result?.blocks?.length && !state.layoutRecoveryNeeded) {
-            const positioned = Boolean(paper.sourceFormat && paper.sourceFormat !== "pdf") || hasCompletePageBounds(state.result.blocks);
+            const positioned = paper.readingMode === "deck" || hasCompletePageBounds(state.result.blocks);
             return {
               ...paper,
               blockData: state.result.blocks,
@@ -286,7 +286,7 @@ export default function App() {
             updatePipeline(paper.id, { stage: "mineru-downloading", source: "mineru", mineruMessage: "正在恢复已有 MinerU 任务的段落坐标…" });
             void pollMineru(paper);
           } else if (item.task?.state === "done" && item.result?.blocks?.length) {
-            const positioned = Boolean(paper.sourceFormat && paper.sourceFormat !== "pdf") || hasCompletePageBounds(item.result.blocks);
+            const positioned = paper.readingMode === "deck" || hasCompletePageBounds(item.result.blocks);
             updatePipeline(paper.id, { stage: positioned ? "ready" : "failed", source: "mineru", error: positioned ? undefined : "MinerU 坐标不完整，请重新解析" });
           } else if (item.task?.batchId && ["waiting-file", "pending", "running", "converting", "downloading"].includes(item.task.state || "")) {
             updatePipeline(paper.id, {
@@ -602,6 +602,12 @@ export default function App() {
       const existing = papersRef.current.find((item) => item.id === paper.id
         || paper.originalId && item.originalId === paper.originalId);
       const imported = existing ?? paper;
+      // 重新导入同步阅读模式/格式标记：旧记录（如 PPT 导出的 PDF）可升级为幻灯片模式。
+      if (existing && (existing.readingMode !== paper.readingMode || existing.sourceFormat !== paper.sourceFormat)) {
+        const formatPatch = { sourceFormat: paper.sourceFormat, readingMode: paper.readingMode, deckAspect: paper.deckAspect };
+        setPapers((current) => current.map((item) => item.id === existing.id ? { ...item, ...formatPatch } : item));
+        papersRef.current = papersRef.current.map((item) => item.id === existing.id ? { ...item, ...formatPatch } : item);
+      }
       invalidateAnalysisRequests();
       if (!existing) papersRef.current = [paper, ...papersRef.current];
       setPapers((current) => existing ? current : [paper, ...current]);

@@ -33,9 +33,13 @@ export interface PaperRecord {
   parseVersion?: number;
   mineruBatchId?: string;
   readingPosition?: { mode: "pdf" | "reading"; page: number; blockId?: string; regionId?: string };
-  /** 原始文件真实格式。非 PDF 的演示文稿按幻灯片画布阅读，不要求坐标完整；
-   * PPT 另存为的 PDF 保持 sourceFormat "pdf"，走原生 PDF 阅读面。 */
+  /** 原始文件真实格式。 */
   sourceFormat?: "pdf" | "pptx" | "ppt";
+  /** 阅读模式：deck 表示按幻灯片画布阅读（pptx/ppt，或识别为演示文稿的 PDF），
+   * 不要求坐标完整。 */
+  readingMode?: "pdf" | "deck";
+  /** 幻灯片画布宽高比（宽/高），deck 模式渲染用。 */
+  deckAspect?: number;
 }
 
 export interface PaperMetadataPatch {
