@@ -8,15 +8,6 @@ describe("slide deck detection from PDF page sizes", () => {
     expect(looksLikeSlideDeck([{ width: 1280, height: 720 }])).toBe(true); // 单页横版也算
   });
 
-  it("recognizes presentation-software metadata even for portrait exports", () => {
-    const portrait = Array.from({ length: 20 }, () => ({ width: 612, height: 792 }));
-    expect(looksLikeSlideDeck(portrait, { producer: "Microsoft® PowerPoint® 2019" })).toBe(true);
-    expect(looksLikeSlideDeck(portrait, { creator: "Impress" })).toBe(true);
-    expect(looksLikeSlideDeck(portrait, { producer: "WPS Presentation_111.1" })).toBe(true);
-    expect(looksLikeSlideDeck(portrait, { producer: "Microsoft® Word® 2019" })).toBe(false);
-    expect(looksLikeSlideDeck(portrait, { creator: "LaTeX with hyperref" })).toBe(false);
-  });
-
   it("keeps portrait papers and mixed landscape-figure papers as pdf", () => {
     const paper = Array.from({ length: 10 }, () => ({ width: 612, height: 792 }));
     expect(looksLikeSlideDeck(paper)).toBe(false);

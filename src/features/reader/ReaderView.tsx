@@ -381,8 +381,8 @@ export function ReaderView(props: ReaderViewProps) {
           </nav> : <p className="outline-empty">尚未识别出论文标题</p>}
         </aside> : null}
         {leftOpen ? <div className="reader-resizer reader-resizer-left" role="separator" aria-label="调整目录宽度" title="拖动调整目录宽度" aria-orientation="vertical" aria-valuemin={panelLimits.outline.min} aria-valuemax={clampWidth("outline", panelLimits.outline.max)} aria-valuenow={outlineWidth} tabIndex={0} onKeyDown={(event) => handleResizeKeyDown("outline", event)} onPointerDown={(event) => startResize("outline", event)} /> : null}
-        <main className={`reader-document ${paper.readingMode === "deck" ? "is-deck" : "is-pdf"}`}>
-          {paper.readingMode === "deck" ? <DeckView
+        <main className={`reader-document ${paper.sourceFormat && paper.sourceFormat !== "pdf" ? "is-deck" : "is-pdf"}`}>
+          {paper.sourceFormat && paper.sourceFormat !== "pdf" ? <DeckView
             paper={paper}
             selectedBlockId={selectedBlock?.id ?? null}
             navigationTarget={navigationTarget}

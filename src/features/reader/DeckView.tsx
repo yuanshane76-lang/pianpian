@@ -173,7 +173,7 @@ export function DeckView({ paper, selectedBlockId, navigationTarget, readingPage
         ref={(element) => { cardRefs.current[slide.page] = element; }}
         onClick={() => onPosition(slide.page)}
       >
-        <div className="deck-canvas" style={{ aspectRatio: paper.deckAspect ?? 16 / 9 }} onMouseDown={(event) => onCanvasMouseDown(event, slide)}>
+        <div className="deck-canvas" onMouseDown={(event) => onCanvasMouseDown(event, slide)}>
           {marquee ? <div
             className="deck-marquee"
             style={{

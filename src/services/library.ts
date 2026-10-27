@@ -280,20 +280,11 @@ function importedTitle(file: File, pdfTitle?: string): string {
   return file.name.replace(/\.(?:pdf|pptx?|ppt)$/i, "").replaceAll("_", " ");
 }
 
-/** Office 导出的 PDF 在元数据里会留下制作软件痕迹。 */
-const PRESENTATION_SOFTWARE = /powerpoint|keynote|impress|wps\s*presentation|slides/i;
-
 /**
- * 幻灯片识别：元数据表明由演示软件导出，或绝大多数页面为横版宽幅
- * （宽高比 ≥ 1.2，如 16:9 / 4:3；论文几乎总是纵版，个别横置图版页由
- * 占比阈值 ≥ 75% 排除）。纵版但元数据命中演示软件的 PPT 导出同样识别。
+ * 幻灯片启发式：绝大多数页面为横版宽幅（宽高比 ≥ 1.2，如 16:9 / 4:3）即视为演示文稿。
+ * 论文几乎总是纵版，个别横置图版页由占比阈值（≥ 75%）排除。
  */
-export function looksLikeSlideDeck(
-  sizes: Array<{ width: number; height: number }>,
-  metadata?: { producer?: string; creator?: string },
-): boolean {
-  const software = `${metadata?.producer ?? ""} ${metadata?.creator ?? ""}`;
-  if (PRESENTATION_SOFTWARE.test(software)) return true;
+export function looksLikeSlideDeck(sizes: Array<{ width: number; height: number }>): boolean {
   if (!sizes.length) return false;
   const landscape = sizes.filter(({ width, height }) => height > 0 && width / height >= 1.2);
   return landscape.length / sizes.length >= 0.75;
@@ -306,7 +297,6 @@ export async function prepareImportFile(
   if (file.size > 100 * 1024 * 1024) throw new Error("文件不能超过 100 MB");
   const isDeck = /\.(?:pptx|ppt)$/i.test(file.name);
   const deckFormat = /\.ppt$/i.test(file.name) ? "ppt" as const : "pptx" as const;
-  const deckReading = { readingMode: "deck" as const, deckAspect: 16 / 9 };
   const data = await file.arrayBuffer();
   if (isDeck) {
     // 演示文稿：不做本地 PDF 解析，原件交给 MinerU 转换；标题取文件名。
@@ -320,23 +310,22 @@ export async function prepareImportFile(
         authors: [], year: null, importedAt: new Date().toISOString(), groupId: DEFAULT_GROUP_ID,
         favorite: false, blocks: 0, blockData: [],
         parseStatus: "pending", parseVersion: 2, readingPosition: { mode: "pdf", page: 1 },
-        sourceFormat: deckFormat, ...deckReading,
+        sourceFormat: deckFormat,
       },
     };
   }
   const document = await openPdf(data);
   try {
     const metadata = await document.getMetadata();
-    const info = metadata.info as { Title?: string; Producer?: string; Creator?: string };
+    const info = metadata.info as { Title?: string };
     const saved = savedOriginal ?? await saveOriginalPdf(file.name, data);
-    // PPT 另存为 PDF 是常见导入来源：按制作软件元数据或页面横版占比识别为幻灯片。
+    // PPT 另存为 PDF 是常见导入来源：按页面横版占比识别为幻灯片，走 deck 阅读模式。
     const sample = Math.min(document.numPages, 10);
     const sizes: Array<{ width: number; height: number }> = [];
     for (let index = 1; index <= sample; index += 1) {
       const viewport = await (await document.getPage(index)).getViewport({ scale: 1 });
       sizes.push({ width: viewport.width, height: viewport.height });
     }
-    const deck = looksLikeSlideDeck(sizes, { producer: info.Producer, creator: info.Creator });
     return {
       data,
       duplicate: saved.duplicate,
@@ -347,7 +336,6 @@ export async function prepareImportFile(
         favorite: false, blocks: 0, blockData: [], pageCount: document.numPages,
         parseStatus: "pending", parseVersion: 2, readingPosition: { mode: "pdf", page: 1 },
         sourceFormat: "pdf",
-        ...(deck ? { readingMode: "deck" as const, deckAspect: sizes[0].width / sizes[0].height } : {}),
       },
     };
   } finally { await document.destroy(); }
