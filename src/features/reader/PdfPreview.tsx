@@ -13,6 +13,8 @@ interface Props {
   paperId: string;
   originalId?: string;
   page: number;
+  /** 演示文稿场景：左键拖拽框选多段（替代文本划选）。 */
+  deckMode?: boolean;
   onPage: (page: number) => void;
   onVisiblePage?: (page: number) => void;
   navigationTarget?: { page: number; requestId: number };
@@ -41,7 +43,56 @@ interface PdfSource {
 const EMPTY_PAGES: Array<PDFPageProxy | undefined> = [];
 
 export function PdfPreview(props: Props) {
-  const { originalId, page, onPage, onReimport, blocks, activeBlockId, onSelect, onSelectText, navigationTarget, focusTarget } = props;
+  const { originalId, page, onPage, onReimport, blocks, activeBlockId, onSelect, onSelectText, navigationTarget, focusTarget, deckMode } = props;
+
+  useEffect(() => {
+    if (!deckMode) return;
+    function intersects(a: DOMRect, b: { left: number; top: number; right: number; bottom: number }): boolean {
+      return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    }
+    function move(moveEvent: MouseEvent) {
+      const drag = marqueeDrag.current;
+      if (!drag) return;
+      setMarquee((current) => current ? { ...current, x1: moveEvent.clientX, y1: moveEvent.clientY } : current);
+      const rect = { left: Math.min(drag.startX, moveEvent.clientX), top: Math.min(drag.startY, moveEvent.clientY),
+        right: Math.max(drag.startX, moveEvent.clientX), bottom: Math.max(drag.startY, moveEvent.clientY) };
+      for (const element of scrollRef.current?.querySelectorAll<HTMLElement>("[data-block-id]") ?? []) {
+        element.classList.toggle("is-marquee-selected", intersects(element.getBoundingClientRect(), rect));
+      }
+    }
+    function up(upEvent: MouseEvent) {
+      const drag = marqueeDrag.current;
+      if (!drag) return;
+      marqueeDrag.current = null;
+      setMarquee(null);
+      const rect = { left: Math.min(drag.startX, upEvent.clientX), top: Math.min(drag.startY, upEvent.clientY),
+        right: Math.max(drag.startX, upEvent.clientX), bottom: Math.max(drag.startY, upEvent.clientY) };
+      if (rect.right - rect.left + rect.bottom - rect.top < 6) return; // 普通点击
+      suppressClickUntil.current = Date.now() + 250;
+      const picked: DocumentBlock[] = [];
+      for (const element of scrollRef.current?.querySelectorAll<HTMLElement>("[data-block-id].is-marquee-selected") ?? []) {
+        const block = blocks.find((item) => item.id === element.dataset.blockId);
+        if (block) picked.push(block);
+      }
+      for (const element of scrollRef.current?.querySelectorAll<HTMLElement>(".is-marquee-selected") ?? []) {
+        element.classList.remove("is-marquee-selected");
+      }
+      if (!picked.length || !onSelectText) return;
+      const ordered = [...picked].sort((left, right) => left.pageNumber - right.pageNumber || left.order - right.order);
+      const joined = ordered.map((item) => item.text.trim()).filter(Boolean).join("\n\n");
+      onSelectText(ordered[0], joined);
+    }
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    return () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+  }, [deckMode, blocks, onSelectText]);
+  // 演示文稿框选：拖出矩形命中段落块即多选，合并文本走划选链路。
+  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const marqueeDrag = useRef<{ startX: number; startY: number } | null>(null);
+  const suppressClickUntil = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollTimer = useRef<ReturnType<typeof setTimeout>>();
   const focusFlashTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -299,7 +350,19 @@ export function PdfPreview(props: Props) {
     </div>
     {busy ? <div className="pdf-feedback" role="status"><LoaderCircle size={16} className="spin" />正在准备 PDF 长画布…</div> : null}
     {error ? <div role="alert" className="parse-warning">{error}</div> : null}
-    <div className="pdf-canvas-scroll" ref={scrollRef} tabIndex={0} role="region" aria-label="PDF 页面滚动区" onScroll={(event) => {
+    <div className="pdf-canvas-scroll" ref={scrollRef} tabIndex={0} role="region" aria-label="PDF 页面滚动区"
+      onMouseDown={deckMode ? (event) => {
+        if (event.button !== 0) return;
+        marqueeDrag.current = { startX: event.clientX, startY: event.clientY };
+        setMarquee({ x0: event.clientX, y0: event.clientY, x1: event.clientX, y1: event.clientY });
+      } : undefined}
+      onDoubleClick={deckMode ? (event) => {
+        if (Date.now() < suppressClickUntil.current) { event.stopPropagation(); event.preventDefault(); }
+      } : undefined}
+      onClick={deckMode ? (event) => {
+        if (Date.now() < suppressClickUntil.current) { event.stopPropagation(); event.preventDefault(); }
+      } : undefined}
+      onScroll={(event) => {
       updateViewportRef.current(true);
       clearTimeout(scrollTimer.current);
       const container = event.currentTarget;
@@ -308,6 +371,10 @@ export function PdfPreview(props: Props) {
         syncVisibleBlock(currentPage);
       }, 250);
     }}>
+      {marquee ? <div className="pdf-marquee" style={{
+        left: Math.min(marquee.x0, marquee.x1), top: Math.min(marquee.y0, marquee.y1),
+        width: Math.abs(marquee.x1 - marquee.x0), height: Math.abs(marquee.y1 - marquee.y0),
+      }} /> : null}
       <div className="pdf-page-stack">
         {layout.map((item) => <div className="pdf-page-slot" key={`${originalId}:${item.pageNumber}`} data-page-number={item.pageNumber}
           style={{ width: item.width, height: item.height }}>

@@ -403,7 +403,7 @@ export function ReaderView(props: ReaderViewProps) {
               props.onSelectText(block, text);
               setRightOpen(true);
             }}
-          /> : <PdfPreview paperId={paper.id} originalId={paper.originalId} page={page} onPage={original} navigationTarget={navigationTarget}
+          /> : <PdfPreview deckMode={paper.readingMode === "deck"} paperId={paper.id} originalId={paper.originalId} page={page} onPage={original} navigationTarget={navigationTarget}
             onAnalyzeParagraph={(block, pageNumber = block.pageNumber, regionId) => {
               setPage(pageNumber);
               exitOutlineMode();
