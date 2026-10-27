@@ -439,7 +439,7 @@ export function ReaderView(props: ReaderViewProps) {
             onReimport={props.onReimport} blocks={visibleBlocks} activeBlockId={selectedBlock?.id ?? null} onSelect={select} onSelectText={(block, text, pageNumber, regionId) => { select(block, pageNumber, regionId); props.onSelectText(block, text); }} focusTarget={focusTarget} onVisibleBlock={(block, pageNumber = block.pageNumber, regionId) => props.onPosition({ mode: "pdf", page: pageNumber, blockId: block.id, ...(regionId ? { regionId } : {}) })} />}
         </main>
         {rightOpen ? <div className="reader-resizer reader-resizer-right" role="separator" aria-label={outlineActive ? "调整架构面板宽度" : "调整篇篇侧栏宽度"} title={outlineActive ? "拖动调整架构面板宽度" : "拖动调整篇篇侧栏宽度"} aria-orientation="vertical" aria-valuemin={rightLimits.min} aria-valuemax={clampWidth(rightSide, rightLimits.max)} aria-valuenow={rightWidth} tabIndex={0} onKeyDown={(event) => handleResizeKeyDown(rightSide, event)} onPointerDown={(event) => startResize(rightSide, event)} /> : null}
-        {rightOpen && !outlineActive ? <ReaderAssistant chartAnalysisRequestId={chartAnalysisRequestId} equationAnalysisRequestId={equationAnalysisRequestId}
+        {rightOpen && !outlineActive ? <ReaderAssistant deckMode={paper.readingMode === "deck" || Boolean(paper.sourceFormat && paper.sourceFormat !== "pdf")} chartAnalysisRequestId={chartAnalysisRequestId} equationAnalysisRequestId={equationAnalysisRequestId}
           researchPanel={props.researchPanel} radarPanel={<PaperRadar paper={paper} library={props.library} />} draftAppend={draftAppend}
           paragraphReadingMode={props.paragraphReadingMode ?? "standard"}
           onParagraphReadingModeChange={props.onParagraphReadingModeChange ?? (() => undefined)}

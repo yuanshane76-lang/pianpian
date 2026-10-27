@@ -36,6 +36,8 @@ interface ReaderAssistantProps {
   paragraphReadingMode?: "standard" | "grandma";
   onParagraphReadingModeChange?: (mode: "standard" | "grandma") => void;
   draftAppend?: { id: number; text: string };
+  /** 演示文稿场景：助手只保留解释与问答。 */
+  deckMode?: boolean;
 }
 
 const PARAGRAPH_TABS = [
@@ -57,7 +59,7 @@ export function ReaderAssistant({
   vocabularyBlock, onSaveTerm, isTermSaved,
   researchPanel,
   radarPanel,
-  paragraphReadingMode = "standard", onParagraphReadingModeChange = () => undefined, draftAppend,
+  paragraphReadingMode = "standard", onParagraphReadingModeChange = () => undefined, draftAppend, deckMode = false,
 }: ReaderAssistantProps) {
   const [question, setQuestion] = useState("");
   const [tab, setTab] = useState<"assist" | "vocabulary" | "radar" | "research">("assist");
@@ -68,7 +70,11 @@ export function ReaderAssistant({
   if (researchPanel) tabOrder.push("research");
   const tabIndex = (name: "assist" | "vocabulary" | "radar" | "research") => tabOrder.indexOf(name);
   const scrollTab = tab === "vocabulary" ? "vocabulary" : "assist";
-  const [paragraphTab, setParagraphTab] = useState<ParagraphTab>("translate");
+  // 演示文稿场景只保留解释：初始页签随之调整。
+  const [paragraphTab, setParagraphTab] = useState<ParagraphTab>(deckMode ? "explain" : "translate");
+  useEffect(() => {
+    if (deckMode && paragraphTab === "translate") setParagraphTab("explain");
+  }, [deckMode, paragraphTab]);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [questionSequence, setQuestionSequence] = useState(0);
   const id = useId();
@@ -218,7 +224,7 @@ export function ReaderAssistant({
 
   return <aside className="reader-assistant" aria-label="篇篇阅读伙伴">
     <div className="assistant-heading">
-      <div className="assistant-title"><div className="assistant-icon"><Pianpian /></div><div><strong>篇篇</strong><span>陪你把论文读明白</span></div></div>
+      <div className="assistant-title"><div className="assistant-icon"><Pianpian /></div><div><strong>篇篇</strong><span>{deckMode ? "陪你把 PPT 读明白" : "陪你把论文读明白"}</span></div></div>
       <div className="assistant-heading-tools">
         <label className="assistant-grandma" title="人话模式：翻译、解释、词汇、读图表、读公式都用通俗表达生成">
           <span>人话模式</span>
@@ -229,8 +235,8 @@ export function ReaderAssistant({
     </div>
     <div className="assistant-tabs" role="tablist" aria-label="篇篇阅读视图">
       <button ref={(element) => { tabsRef.current[tabIndex("assist")] = element; }} id={`${id}-assist-tab`} aria-controls={`${id}-assist-panel`} tabIndex={tab === "assist" ? 0 : -1} className={tab === "assist" ? "is-active" : ""} role="tab" aria-selected={tab === "assist"} onKeyDown={(event) => changeTab(event, tabIndex("assist"))} onClick={() => setTab("assist")} type="button"><BookOpen size={15} />{equation ? "解读公式" : visual ? "读图表" : "读懂这段"}</button>
-      <button ref={(element) => { tabsRef.current[tabIndex("vocabulary")] = element; }} id={`${id}-vocabulary-tab`} aria-controls={`${id}-vocabulary-panel`} tabIndex={tab === "vocabulary" ? 0 : -1} className={tab === "vocabulary" ? "is-active" : ""} role="tab" aria-selected={tab === "vocabulary"} onKeyDown={(event) => changeTab(event, tabIndex("vocabulary"))} onClick={() => setTab("vocabulary")} type="button">{vocabularyLoading ? <LoaderCircle className="spin" size={15} /> : <Languages size={15} />}学术词汇 <span>{vocabulary.length}</span></button>
-      {radarPanel ? <button ref={(element) => { tabsRef.current[tabIndex("radar")] = element; }} id={`${id}-radar-tab`} aria-controls={`${id}-radar-panel`} tabIndex={tab === "radar" ? 0 : -1} className={tab === "radar" ? "is-active" : ""} role="tab" aria-selected={tab === "radar"} onKeyDown={(event) => changeTab(event, tabIndex("radar"))} onClick={openRadar} type="button"><Radar size={15} />相似论文</button> : null}
+      {!deckMode ? <button ref={(element) => { tabsRef.current[tabIndex("vocabulary")] = element; }} id={`${id}-vocabulary-tab`} aria-controls={`${id}-vocabulary-panel`} tabIndex={tab === "vocabulary" ? 0 : -1} className={tab === "vocabulary" ? "is-active" : ""} role="tab" aria-selected={tab === "vocabulary"} onKeyDown={(event) => changeTab(event, tabIndex("vocabulary"))} onClick={() => setTab("vocabulary")} type="button">{vocabularyLoading ? <LoaderCircle className="spin" size={15} /> : <Languages size={15} />}学术词汇 <span>{vocabulary.length}</span></button> : null}
+      {!deckMode && radarPanel ? <button ref={(element) => { tabsRef.current[tabIndex("radar")] = element; }} id={`${id}-radar-tab`} aria-controls={`${id}-radar-panel`} tabIndex={tab === "radar" ? 0 : -1} className={tab === "radar" ? "is-active" : ""} role="tab" aria-selected={tab === "radar"} onKeyDown={(event) => changeTab(event, tabIndex("radar"))} onClick={openRadar} type="button"><Radar size={15} />相似论文</button> : null}
       {researchPanel ? <button ref={(element) => { tabsRef.current[tabIndex("research")] = element; }} id={`${id}-research-tab`} aria-controls={`${id}-research-panel`} tabIndex={tab === "research" ? 0 : -1} className={tab === "research" ? "is-active" : ""} role="tab" aria-selected={tab === "research"} onKeyDown={(event) => changeTab(event, tabIndex("research"))} onClick={openResearch} type="button"><MessageCircle size={15} />聊聊</button> : null}
     </div>
     <div ref={scrollRef} hidden={tab !== "assist" && tab !== "vocabulary"} className="assistant-scroll" id={`${id}-${scrollTab}-panel`} role="tabpanel" aria-labelledby={`${id}-${scrollTab}-tab`} tabIndex={0}>
@@ -249,7 +255,7 @@ export function ReaderAssistant({
             : <ChartContext originalId={originalId} block={selectedBlock} reading={chartReading} streamingText={chartStreamingText} busy={isBusy} loading={pendingAction === "chart"} aiAvailable={aiAvailable} onRead={onReadChart} onOpenSettings={onOpenSettings} />
             : selectedBlock ? <>
           <div className="paragraph-tabs" role="tablist" aria-label="段落分析">
-            {PARAGRAPH_TABS.map(({ operation, label, icon: Icon }, index) => <button key={operation} type="button"
+            {(deckMode ? PARAGRAPH_TABS.filter(({ operation }) => operation === "explain") : PARAGRAPH_TABS).map(({ operation, label, icon: Icon }, index) => <button key={operation} type="button"
               ref={(element) => { paragraphTabsRef.current[index] = element; }} data-operation={operation}
               id={`${id}-${operation}-tab`} aria-controls={`${id}-${operation}-panel`} role="tab"
               aria-selected={paragraphTab === operation} tabIndex={paragraphTab === operation ? 0 : -1}
@@ -267,7 +273,7 @@ export function ReaderAssistant({
             </div>
             {translationText ? <TranslationContent text={translationText} /> : <p className="muted-copy">正在生成中文译文…</p>}
             {copyState !== "idle" ? <span className={`assistant-copy-status ${copyState === "failed" ? "is-error" : ""}`} role="status">{copyState === "copied" ? "已复制" : "复制失败，请重试"}</span> : null}
-          </div> : <div className="paragraph-empty"><p className="muted-copy">尚无译文</p><button type="button" className="secondary-button compact" disabled={isBusy} onClick={() => runParagraphAction("translate")}><Languages size={14} />{aiAvailable ? selectionText ? "翻译选中句子" : "翻译整段" : "配置翻译服务"}</button></div> : null}
+          </div> : deckMode ? null : <div className="paragraph-empty"><p className="muted-copy">尚无译文</p><button type="button" className="secondary-button compact" disabled={isBusy} onClick={() => runParagraphAction("translate")}><Languages size={14} />{aiAvailable ? selectionText ? "翻译选中句子" : "翻译整段" : "配置翻译服务"}</button></div> : null}
           {paragraphTab === "insight" ? displayedInsight ? <div className="assistant-insight" aria-live="polite" aria-busy={insightLoading}>
             <div className="assistant-result-heading"><h3>这段讲什么</h3>{insightLoading ? <span className="assistant-result-state"><LoaderCircle className="spin" size={12} />生成中</span> : null}</div>
             {displayedInsight.summary ? <MarkdownContent text={displayedInsight.summary} /> : null}<h3>在上下文中的作用</h3>

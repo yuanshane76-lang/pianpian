@@ -602,6 +602,12 @@ export default function App() {
       const existing = papersRef.current.find((item) => item.id === paper.id
         || paper.originalId && item.originalId === paper.originalId);
       const imported = existing ?? paper;
+      // 重新导入同步识别结果：旧记录（如 PPT 导出的 PDF）可升级为 PPT 场景。
+      if (existing && (existing.readingMode !== paper.readingMode || existing.sourceFormat !== paper.sourceFormat)) {
+        const formatPatch = { sourceFormat: paper.sourceFormat, readingMode: paper.readingMode, deckAspect: paper.deckAspect };
+        setPapers((current) => current.map((item) => item.id === existing.id ? { ...item, ...formatPatch } : item));
+        papersRef.current = papersRef.current.map((item) => item.id === existing.id ? { ...item, ...formatPatch } : item);
+      }
       invalidateAnalysisRequests();
       if (!existing) papersRef.current = [paper, ...papersRef.current];
       setPapers((current) => existing ? current : [paper, ...current]);

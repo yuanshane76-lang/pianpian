@@ -36,6 +36,10 @@ export interface PaperRecord {
   /** 原始文件真实格式。非 PDF 的演示文稿按幻灯片画布阅读，不要求坐标完整；
    * PPT 另存为的 PDF 保持 sourceFormat "pdf"，走原生 PDF 阅读面。 */
   sourceFormat?: "pdf" | "pptx" | "ppt";
+  /** 识别为演示文稿时按 PPT 场景组织助手（解释 + 问答），左侧阅读面不变。 */
+  readingMode?: "pdf" | "deck";
+  /** 幻灯片画布宽高比（宽/高），deck 模式渲染用。 */
+  deckAspect?: number;
 }
 
 export interface PaperMetadataPatch {
