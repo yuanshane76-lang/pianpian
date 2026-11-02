@@ -18,7 +18,7 @@
 
 篇篇面向阅读英文论文的中文用户。它把**原始 PDF 作为唯一阅读面**，保留排版、图表和公式；在自然段旁提供理解辅助，并把原件、阅读进度、单词表和分析缓存留在本机。
 
-当前开发版本：`0.6.0` · 主要交付平台：`Windows x64` · 技术栈：`Electron / React / TypeScript`
+当前开发版本：`0.6.1` · 主要交付平台：`Windows x64` · 技术栈：`Electron / React / TypeScript`
 
 > 三种语言对应仓库介绍文档。应用界面和阅读辅助输出目前以中文为主。
 
@@ -163,8 +163,8 @@ npm run make:win
 命令先运行质量检查，再生成 Windows x64 安装版、ZIP 和签名更新元数据。当前版本输出：
 
 ```text
-out/installer/Pianpian-Setup-0.6.0-x64.exe
-out/installer/Pianpian-0.6.0-x64.zip
+out/installer/Pianpian-Setup-0.6.1-x64.exe
+out/installer/Pianpian-0.6.1-x64.zip
 ```
 
 安装版可在文献库底部或桌面菜单点击「检查更新」，下载后确认重启安装；更新前保存与备份关键数据。旧 ZIP 用户需手动安装一次，沿用原有数据目录。ZIP 解压**完整目录**后打开 `Pianpian.exe`，无需另装 Node.js。暂未使用商业代码签名证书，首次运行可能出现 Windows 安全提示。构建需要仓库外的发布签名私钥，详见 [自动更新与发布](docs/自动更新与发布.md)。
