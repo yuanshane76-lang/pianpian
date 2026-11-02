@@ -298,6 +298,13 @@ export function looksLikeSlideDeck(
   return landscape.length / sizes.length >= 0.75;
 }
 
+/** PDF 结尾必须带 %%EOF；缺失通常是下载中断留下的截断文件，
+ * 提前给出可操作的报错，而不是抛 PDF.js 的「Invalid PDF structure.」。 */
+export function pdfTailIntact(data: ArrayBuffer): boolean {
+  const tail = new TextDecoder("latin1").decode(new Uint8Array(data.slice(-2048)));
+  return tail.includes("%%EOF");
+}
+
 export async function prepareImportFile(
   file: File,
   savedOriginal?: { id: string; duplicate: boolean },
@@ -322,6 +329,9 @@ export async function prepareImportFile(
         sourceFormat: deckFormat, ...deckReading,
       },
     };
+  }
+  if (!pdfTailIntact(data)) {
+    throw new Error("文件不完整或已损坏（缺少 PDF 结尾），常见原因是下载中断，请重新下载后再导入");
   }
   const document = await openPdf(data);
   try {

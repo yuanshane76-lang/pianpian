@@ -22,6 +22,8 @@ interface LibraryViewProps {
   filter: string;
   groups: LibraryGroup[];
   errorMessage: string | null;
+  /** 关闭导入/操作失败提示；不传则提示条不可手动关闭。 */
+  onDismissError?: () => void;
   onFilterChange: (filter: string) => void;
   onQueryChange: (query: string) => void;
   onSelect: (paperId: string) => void;
@@ -47,6 +49,7 @@ export function LibraryView({
   filter,
   groups,
   errorMessage,
+  onDismissError,
   onFilterChange,
   onQueryChange,
   onSelect,
@@ -123,6 +126,7 @@ export function LibraryView({
           selectedId={selectedId}
           query={query}
           errorMessage={errorMessage}
+          onDismissError={onDismissError}
           onQueryChange={onQueryChange}
           onImport={onImport}
           onSelect={onSelect}

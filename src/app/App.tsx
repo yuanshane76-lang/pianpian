@@ -628,7 +628,7 @@ export default function App() {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "未知错误";
-      setErrorMessage(`导入失败：${message}`);
+      setErrorMessage(`导入失败 ${file.name}：${message}`);
     } finally {
       setIsBusy(false);
       importingRef.current = false;
@@ -1878,6 +1878,7 @@ export default function App() {
         filter={filter}
         groups={groups}
         errorMessage={errorMessage || actionError}
+        onDismissError={() => { setErrorMessage(null); setActionError(null); }}
         onFilterChange={setFilter}
         onQueryChange={setQuery}
         onSelect={handleSelectPaper}

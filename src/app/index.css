@@ -908,6 +908,9 @@ textarea:focus-visible {
 }
 
 .import-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   margin: 12px 0 0;
   padding: 9px 10px;
   color: var(--danger-ink);
@@ -916,6 +919,22 @@ textarea:focus-visible {
   border-radius: 6px;
   font-size: 12px;
   line-height: 1.45;
+}
+
+.import-error-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.import-error .icon-button {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--danger-ink);
 }
 
 .paper-list {

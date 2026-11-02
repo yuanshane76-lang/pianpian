@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { importPdfFile, loadGroups, loadPapers, saveGroups, saveLibraryGroupsAndPapers, savePapers } from "../../src/services/library";
+import { importPdfFile, loadGroups, loadPapers, looksLikeSlideDeck, pdfTailIntact, prepareImportFile, saveGroups, saveLibraryGroupsAndPapers, savePapers } from "../../src/services/library";
 import { DEFAULT_GROUP_ID, DEFAULT_GROUP_NAME, removePaper, updatePaperMetadata, type PaperRecord } from "../../src/domain/library";
 
 const basePaper: PaperRecord = {
@@ -172,5 +172,58 @@ describe("paper library management", () => {
   it("removes exactly one paper from the library", () => {
     const second = { ...basePaper, id: "second" };
     expect(removePaper([basePaper, second], basePaper.id)).toEqual([second]);
+  });
+});
+
+describe("pdfTailIntact", () => {
+  it("accepts a buffer whose tail carries %%EOF", () => {
+    const tail = new TextEncoder().encode("…stream 数据…startxref\n742\n%%EOF\n");
+    expect(pdfTailIntact(tail.buffer.slice(tail.byteOffset, tail.byteOffset + tail.byteLength))).toBe(true);
+  });
+
+  it("rejects buffers cut off mid-stream without a trailer", () => {
+    const truncated = new Uint8Array(64).fill(0x61);
+    truncated.set([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x35], 0); // "%PDF-1.5" 开头
+    expect(pdfTailIntact(truncated.buffer)).toBe(false);
+  });
+});
+
+describe("prepareImportFile 截断防护", () => {
+  it("rejects a truncated PDF with an actionable message before parsing", async () => {
+    const bytes = new Uint8Array(2048);
+    bytes.set(new TextEncoder().encode("%PDF-1.5\n"), 0);
+    // 结尾没有 startxref/%%EOF：模拟下载中断的截断文件。
+    const file = {
+      name: "2305.16291.pdf",
+      size: bytes.byteLength,
+      lastModified: 1,
+      arrayBuffer: async () => bytes.buffer,
+    } as unknown as File;
+
+    await expect(prepareImportFile(file)).rejects.toThrow("文件不完整或已损坏");
+  });
+});
+
+describe("looksLikeSlideDeck", () => {
+  it("treats uniformly landscape wide pages as a deck", () => {
+    const slides = Array.from({ length: 8 }, () => ({ width: 960, height: 540 }));
+    expect(looksLikeSlideDeck(slides)).toBe(true);
+    expect(looksLikeSlideDeck([{ width: 1280, height: 720 }])).toBe(true); // 单页横版也算
+  });
+
+  it("keeps portrait papers and mixed landscape-figure papers as pdf", () => {
+    const paper = Array.from({ length: 10 }, () => ({ width: 612, height: 792 }));
+    expect(looksLikeSlideDeck(paper)).toBe(false);
+    // 论文中偶尔一张横置图版页：占比不足
+    const mixed = [...Array.from({ length: 9 }, () => ({ width: 612, height: 792 })), { width: 792, height: 612 }];
+    expect(looksLikeSlideDeck(mixed)).toBe(false);
+    expect(looksLikeSlideDeck([])).toBe(false);
+  });
+
+  it("recognises presentation software metadata even on portrait exports", () => {
+    const portrait = Array.from({ length: 6 }, () => ({ width: 540, height: 960 }));
+    expect(looksLikeSlideDeck(portrait, { producer: "Microsoft: Print To PDF" })).toBe(false);
+    expect(looksLikeSlideDeck(portrait, { creator: "PowerPoint" })).toBe(true);
+    expect(looksLikeSlideDeck(portrait, { producer: "WPS Presentation" })).toBe(true);
   });
 });

@@ -1,4 +1,4 @@
-import { FilePlus2, FileText, Heart, Search } from "lucide-react";
+import { FilePlus2, FileText, Heart, Search, X } from "lucide-react";
 import type { PaperRecord } from "../../domain/library";
 import { canOpenPaper, type PaperPipelineState } from "../../domain/pipeline";
 import { PaperPreparation } from "./PaperPreparation";
@@ -8,6 +8,8 @@ interface PaperListProps {
   selectedId: string | null;
   query: string;
   errorMessage: string | null;
+  /** 关闭导入/操作失败提示；不传则提示条不可手动关闭。 */
+  onDismissError?: () => void;
   onQueryChange: (query: string) => void;
   onImport: (file: File) => Promise<void>;
   onSelect: (paperId: string) => void;
@@ -23,6 +25,7 @@ export function PaperList({
   selectedId,
   query,
   errorMessage,
+  onDismissError,
   onQueryChange,
   onImport,
   onSelect,
@@ -77,9 +80,12 @@ export function PaperList({
       <p className="library-import-hint">导入后自动上传到 MinerU 解析，完成后即可阅读。</p>
 
       {errorMessage ? (
-        <p className="import-error" role="alert">
-          {errorMessage}
-        </p>
+        <div className="import-error" role="alert">
+          <span className="import-error-text">{errorMessage}</span>
+          {onDismissError ? (
+            <button className="icon-button" type="button" aria-label="关闭导入失败提示" title="关闭" onClick={onDismissError}><X size={14} /></button>
+          ) : null}
+        </div>
       ) : null}
 
       <div className="paper-list" aria-label="论文列表">
